@@ -1,3 +1,6 @@
+mod error;
 mod span;
+mod src;
 
-pub use span::Span;
+pub use error::BiwacError;
+pub use span::{ModPath, Pos, Span};

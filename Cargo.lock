@@ -42,6 +42,7 @@ name = "biwac_parser"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
+ "biwac_lexer",
 ]
 
 [[package]]

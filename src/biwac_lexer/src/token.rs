@@ -2,69 +2,71 @@ use biwac_base::Span;
 
 #[derive(Clone, Debug)]
 pub struct Token {
-    pub kind: TokenKind,
+    pub kind: TkKind,
     pub span: Span,
+    pub val: Option<TkVal>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum TokenKind {
-    Identifier(String),    // identifier
-    IntLiteral(u32),       // int literal
-    CharLiteral(u8),       // char literal
-    StringLiteral(String), // string literal
-    BoolLiteralTrue,       // bool literal `TRUE`
-    BoolLiteralFalse,      // bool literal `FALSE`
-    Langlibfn,             // langlibfn
-    Import,                // import
-    Package,               // package
-    Fn,                    // fn
-    Let,                   // let
-    If,                    // if
-    Else,                  // else
-    While,                 // while
-    Return,                // return
-    SizeOf,                // sizeof
-    Uint,                  // Uint (reserved word of type)
-    Int,                   // Int (reserved word of type)
-    Bool,                  // Bool (reserved word of type)
-    Struct,                // struct (reserved word of type)
-    LPare,                 // (
-    RPare,                 // )
-    LBrace,                // {
-    RBrace,                // }
-    LBracket,              // [
-    RBracket,              // ]
-    Plus,                  // +
-    Minus,                 // -
-    Asterisk,              // *
-    Slash,                 // /
-    Percent,               // %
-    Ampersand,             // &
-    Lesser,                // <
-    Greater,               // >
-    LesEq,                 // <=
-    GrtEq,                 // >=
-    Equal,                 // ==
-    NotEq,                 // !=
-    Assign,                // =
-    Comma,                 // ,
-    Dot,                   // .
-    Arrow,                 // ->
-    Colon,                 // :
-    SemiColon,             // ;
-    DoubleColon,           // ::
+#[derive(Clone, Debug)]
+pub enum TkVal {
+    Integer(u64),
+    String(String),
 }
 
-impl TokenKind {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TkKind {
+    Ident,            // identifier
+    IntegerLiteral,   // integer literal
+    StringLiteral,    // string literal
+    BoolLiteralTrue,  // bool literal `TRUE`
+    BoolLiteralFalse, // bool literal `FALSE`
+    Import,           // import
+    Package,          // package
+    Fn,               // fn
+    Let,              // let
+    If,               // if
+    Else,             // else
+    While,            // while
+    Return,           // return
+    Uint,             // Uint (reserved word of type)
+    Int,              // Int (reserved word of type)
+    Bool,             // Bool (reserved word of type)
+    Struct,           // struct (reserved word of type)
+    LPare,            // (
+    RPare,            // )
+    LBrace,           // {
+    RBrace,           // }
+    LBracket,         // [
+    RBracket,         // ]
+    Plus,             // +
+    Minus,            // -
+    Asterisk,         // *
+    Slash,            // /
+    Percent,          // %
+    Ampersand,        // &
+    Lesser,           // <
+    Greater,          // >
+    LesEq,            // <=
+    GrtEq,            // >=
+    Equal,            // ==
+    NotEq,            // !=
+    Assign,           // =
+    Comma,            // ,
+    Dot,              // .
+    Arrow,            // ->
+    Colon,            // :
+    SemiColon,        // ;
+    DoubleColon,      // ::
+}
+
+impl TkKind {
     pub fn pattern(&self) -> String {
         match self {
-            Self::Identifier(_) => "".to_string(),
-            Self::IntLiteral(_) => "".to_string(),
-            Self::CharLiteral(_) => "".to_string(),
-            Self::StringLiteral(_) => "".to_string(),
+            Self::Ident => "".to_string(),
+            Self::IntegerLiteral => "".to_string(),
+            Self::StringLiteral => "".to_string(),
             Self::BoolLiteralTrue => "TRUE".to_string(),
             Self::BoolLiteralFalse => "FALSE".to_string(),
-            Self::Langlibfn => "langlibfn".to_string(),
             Self::Import => "import".to_string(),
             Self::Package => "package".to_string(),
             Self::Fn => "fn".to_string(),
@@ -73,7 +75,6 @@ impl TokenKind {
             Self::Else => "else".to_string(),
             Self::While => "while".to_string(),
             Self::Return => "return".to_string(),
-            Self::SizeOf => "sizeof".to_string(),
             Self::Uint => "Uint".to_string(),
             Self::Int => "Int".to_string(),
             Self::Bool => "Bool".to_string(),
