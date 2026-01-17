@@ -1,0 +1,10 @@
+[package]
+name = "biwac_driver"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_packager = { path = "../biwac_packager"}
+biwac_validator = { path = "../biwac_validator"}
+biwac_generator = { path = "../biwac_generator"}

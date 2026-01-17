@@ -1,6 +1,17 @@
-[package]
-name = "biwac"
+[workspace]
+members = [
+  "src/biwac_base",
+  "src/biwac_lexer",
+  "src/biwac_parser",
+  "src/biwac_packager",
+  "src/biwac_validator",
+  "src/biwac_generator",
+  "src/biwac_driver"
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]

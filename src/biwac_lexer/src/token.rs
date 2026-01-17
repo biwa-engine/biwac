@@ -1,13 +1,9 @@
-#[derive(Clone, Debug, PartialEq)]
-pub struct Range {
-    pub begin: usize,
-    pub end: usize,
-}
+use biwac_base::Span;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub kind: TokenKind,
-    pub range: Range,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq)]

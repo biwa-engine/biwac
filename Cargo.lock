@@ -3,5 +3,50 @@
 version = 4
 
 [[package]]
-name = "biwac"
+name = "biwac_base"
 version = "0.1.0"
+
+[[package]]
+name = "biwac_driver"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+ "biwac_generator",
+ "biwac_packager",
+ "biwac_validator",
+]
+
+[[package]]
+name = "biwac_generator"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]
+
+[[package]]
+name = "biwac_lexer"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]
+
+[[package]]
+name = "biwac_packager"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]
+
+[[package]]
+name = "biwac_parser"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]
+
+[[package]]
+name = "biwac_validator"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]

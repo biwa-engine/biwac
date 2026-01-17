@@ -1,0 +1,6 @@
+[package]
+name = "biwac_base"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

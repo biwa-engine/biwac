@@ -1,8 +1,6 @@
-pub mod token;
+mod token;
 
-use token::Token;
-
-use crate::lexer::token::{Range, TokenKind};
+use token::{Token, TokenKind};
 
 #[derive(Debug)]
 pub enum TokenizeError {
