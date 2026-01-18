@@ -6,10 +6,7 @@ pub mod primary;
 pub mod relational;
 pub mod unary;
 
-use crate::{
-    lexer::token::Token,
-    parser::{symbols::QualifiedId, ParseError},
-};
+use crate::{ParseError, parser::TokenStream, symbols::QualifiedId};
 
 #[derive(Debug, Clone)]
 pub enum Primary {
@@ -49,7 +46,7 @@ pub struct MemberAccess {
 
 #[derive(Debug, Clone)]
 pub enum Literal {
-    Uint(u32),
+    Integer(u64),
     // Float(f64),
     String(String),
     Bool(bool),
@@ -84,8 +81,8 @@ pub enum UnOperator {
          // Not, // !
 }
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Exprs, ParseError> {
-    equality::consume(tokens)
+impl<'t> TokenStream<'t> {
+    pub(crate) fn consume_expression(&mut self) -> Result<Exprs, ParseError> {
+        self.consume_equality_expression()
+    }
 }

@@ -1,43 +1,45 @@
-use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        symbols::expressions::{multiplication, BinOperator, Exprs},
-        ParseError,
-    },
-};
+use biwac_lexer::TkKind;
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Exprs, ParseError> {
-    let left = multiplication::consume(tokens)?;
+use crate::{BinOperator, Exprs, ParseError, parser::TokenStream};
 
-    if let Some(t) = tokens.peek() {
-        match t.kind {
-            TokenKind::Plus => {
-                tokens.next();
+impl<'t> TokenStream<'t> {
+    pub(super) fn consume_arithmetic_expression(&mut self) -> Result<Exprs, ParseError> {
+        let left = self.consume_multiplication_expression()?;
 
-                let right = consume(tokens)?;
+        if let Some(t) = self.peek() {
+            match t.kind {
+                TkKind::Plus => {
+                    self.next();
 
-                Ok(Exprs::Binary(
-                    BinOperator::Add,
-                    Box::new(left),
-                    Box::new(right),
-                ))
+                    // NOTE:
+                    // arithmetic expression は
+                    // (Number ::= Int | Uint | Float と仮に置いたとき、)
+                    // (Number, Number) -> Number
+                    // つまり、戻り値と引数の型が一致しているため、
+                    // 再帰的に適用され得る
+                    let right = self.consume_arithmetic_expression()?;
+
+                    Ok(Exprs::Binary(
+                        BinOperator::Add,
+                        Box::new(left),
+                        Box::new(right),
+                    ))
+                }
+                TkKind::Minus => {
+                    self.next();
+
+                    let right = self.consume_arithmetic_expression()?;
+
+                    Ok(Exprs::Binary(
+                        BinOperator::Sub,
+                        Box::new(left),
+                        Box::new(right),
+                    ))
+                }
+                _ => Ok(left),
             }
-            TokenKind::Minus => {
-                tokens.next();
-
-                let right = consume(tokens)?;
-
-                Ok(Exprs::Binary(
-                    BinOperator::Sub,
-                    Box::new(left),
-                    Box::new(right),
-                ))
-            }
-            _ => Ok(left),
+        } else {
+            Ok(left)
         }
-    } else {
-        Ok(left)
     }
 }

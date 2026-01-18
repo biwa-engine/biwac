@@ -1,46 +1,41 @@
-use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        matches,
-        symbols::{
-            consume_type_annotation,
-            expressions::{self, Exprs},
-        },
-        types::Type,
-        ParseError,
-    },
-};
+use biwac_lexer::{TkKind, TkVal};
+
+use crate::{Exprs, ParseError, parser::TokenStream, types::TypDecl};
 
 #[derive(Debug, Clone)]
 pub struct VarDec {
-    pub typ: Type,
+    pub typ: TypDecl,
     pub name: String,
     pub init: Exprs,
 }
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<VarDec, ParseError> {
-    matches(tokens.next(), vec![TokenKind::Let])?;
+impl<'t> TokenStream<'t> {
+    pub(crate) fn consume_variable_declaration_statment(&mut self) -> Result<VarDec, ParseError> {
+        let _ = self.must_consume_next(vec![TkKind::Let])?;
+        let t = self.must_consume_next(vec![TkKind::Ident])?.clone();
 
-    if let TokenKind::Identifier(id) =
-        matches(tokens.next(), vec![TokenKind::Identifier("".to_string())])?
-    {
-        let typ =
-            consume_type_annotation(tokens)?.expect("type anotation omission not implemented yet");
+        if let TkKind::Ident = t.kind
+            && let Some(TkVal::String(id)) = t.val
+        {
+            let typ = if let Some(t) = self.opt_consume_type_annotation()? {
+                TypDecl::Typ(t)
+            } else {
+                TypDecl::Any
+            };
 
-        // NOTE: 変数宣言時、初期化は必須
-        // 代入漏れバリデーション能力が向上したら初期化しないパターンもサポートするかも
-        matches(tokens.next(), vec![TokenKind::Assign])?;
+            // NOTE: 変数宣言時、初期化は必須
+            // 代入漏れバリデーション能力が向上したら初期化しないパターンもサポートするかも
+            let _ = self.must_consume_next(vec![TkKind::Assign])?;
 
-        let init = expressions::consume(tokens)?;
+            let init = self.consume_expression()?;
 
-        Ok(VarDec {
-            typ,
-            name: id.clone(),
-            init,
-        })
-    } else {
-        Err(ParseError::InvalidEOF(vec![TokenKind::Let]))
+            Ok(VarDec {
+                typ,
+                name: id.clone(),
+                init,
+            })
+        } else {
+            Err(ParseError::InvalidToken(vec![TkKind::Let], t.clone()))
+        }
     }
 }

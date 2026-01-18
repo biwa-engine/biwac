@@ -1,62 +1,54 @@
+use biwac_lexer::TkKind;
+
 use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        symbols::{
-            consume_identifier,
-            expressions::{primary, Exprs, MemberAccess, Primary},
-        },
-        ParseError,
-    },
+    ParseError,
+    parser::TokenStream,
+    symbols::expressions::{Exprs, MemberAccess, Primary},
 };
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Exprs, ParseError> {
-    let expr = primary::consume(tokens)?;
+impl<'t> TokenStream<'t> {
+    pub(super) fn consume_postfix_expression(&mut self) -> Result<Exprs, ParseError> {
+        let expr = self.consume_primary_expression()?;
 
-    consume_postfix_after_expr(expr, tokens)
-}
+        self.consume_postfix_after_expression(expr)
+    }
 
-fn consume_postfix_after_expr(
-    expr: Exprs,
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Exprs, ParseError> {
-    if let Some(t) = tokens.peek() {
-        match t.kind {
-            TokenKind::Dot => {
-                tokens.next();
+    fn consume_postfix_after_expression(&mut self, expr: Exprs) -> Result<Exprs, ParseError> {
+        if let Some(t) = self.peek() {
+            match t.kind {
+                TkKind::Dot => {
+                    self.next();
 
-                let mem_or_method = consume_identifier(tokens)?;
+                    let mem_or_method = self.consume_identifier()?;
 
-                if let Some(t) = tokens.peek() {
-                    if let TokenKind::LPare = t.kind {
-                        todo!()
-                        // ISSUE: 何らかのデリミタを用意しないと、
-                        // expr.method() と
-                        // expr.member (anotherexpr)
-                        // が区別できない
+                    if let Some(t) = self.peek() {
+                        if let TkKind::LPare = t.kind {
+                            todo!()
+                            // ISSUE: 何らかのデリミタを用意しないと、
+                            // expr.method() と
+                            // expr.member (anotherexpr)
+                            // が区別できない
+                        } else {
+                            Ok(self.consume_postfix_after_expression(Exprs::Primary(
+                                Primary::MemberAccess(MemberAccess {
+                                    left: Box::new(expr),
+                                    member: mem_or_method.clone(),
+                                }),
+                            ))?)
+                        }
                     } else {
-                        Ok(consume_postfix_after_expr(
-                            Exprs::Primary(Primary::MemberAccess(MemberAccess {
+                        Ok(self.consume_postfix_after_expression(Exprs::Primary(
+                            Primary::MemberAccess(MemberAccess {
                                 left: Box::new(expr),
                                 member: mem_or_method.clone(),
-                            })),
-                            tokens,
-                        )?)
+                            }),
+                        ))?)
                     }
-                } else {
-                    Ok(consume_postfix_after_expr(
-                        Exprs::Primary(Primary::MemberAccess(MemberAccess {
-                            left: Box::new(expr),
-                            member: mem_or_method.clone(),
-                        })),
-                        tokens,
-                    )?)
                 }
+                _ => Ok(expr),
             }
-            _ => Ok(expr),
+        } else {
+            Ok(expr)
         }
-    } else {
-        Ok(expr)
     }
 }

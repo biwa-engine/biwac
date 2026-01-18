@@ -3,21 +3,11 @@ pub mod if_stmt;
 pub mod vardec;
 pub mod while_stmt;
 
+use biwac_lexer::token::TkKind;
 use if_stmt::IfStmt;
 use while_stmt::WhileStmt;
 
-use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        symbols::{
-            expressions::{self, Primary},
-            statements::vardec::VarDec,
-        },
-        ParseError,
-    },
-};
-
-use super::expressions::Exprs;
+use crate::{Exprs, ParseError, VarDec, parser::TokenStream, symbols::expressions::Primary};
 
 #[derive(Debug)]
 pub enum Stmt {
@@ -30,55 +20,50 @@ pub enum Stmt {
     Assign(Primary, Exprs), // dst, src
 }
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Stmt, ParseError> {
-    if let Some(t) = tokens.peek() {
-        match t.kind {
-            TokenKind::If => Ok(Stmt::If(Box::new(if_stmt::consume(tokens)?))),
-            TokenKind::While => Ok(Stmt::While(Box::new(while_stmt::consume(tokens)?))),
-            TokenKind::Return => {
-                tokens.next();
-                Ok(Stmt::Return(expressions::consume(tokens)?))
-            }
-            TokenKind::LBrace => Ok(Stmt::Block(block::consume(tokens)?)),
-            TokenKind::Let => Ok(Stmt::VarDec(vardec::consume(tokens)?)),
-            _ => {
-                let expr = expressions::consume(tokens)?;
+impl<'t> TokenStream<'t> {
+    pub(crate) fn consume_statement(&mut self) -> Result<Stmt, ParseError> {
+        if let Some(t) = self.peek() {
+            match t.kind {
+                TkKind::If => Ok(Stmt::If(Box::new(self.consume_if_statement()?))),
+                TkKind::While => Ok(Stmt::While(Box::new(self.consume_while_statement()?))),
+                TkKind::Return => {
+                    self.next();
+                    Ok(Stmt::Return(self.consume_expression()?))
+                }
+                TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement()?)),
+                TkKind::Let => Ok(Stmt::VarDec(self.consume_variable_declaration_statment()?)),
+                _ => {
+                    let expr = self.consume_expression()?;
 
-                if let Some(t) = tokens.peek().copied() {
-                    if let TokenKind::Assign = t.kind {
-                        tokens.next();
+                    if let Some(t) = self.peek().copied() {
+                        if let TkKind::Assign = t.kind {
+                            self.next();
 
-                        if let Exprs::Primary(dst) = expr {
-                            let src = expressions::consume(tokens)?;
+                            if let Exprs::Primary(dst) = expr {
+                                let src = self.consume_expression()?;
 
-                            Ok(Stmt::Assign(dst, src))
+                                Ok(Stmt::Assign(dst, src))
+                            } else {
+                                Err(ParseError::InvalidToken(
+                                    vec![TkKind::Let, TkKind::If, TkKind::While, TkKind::Return],
+                                    t.to_owned(),
+                                ))
+                            }
                         } else {
-                            Err(ParseError::InvalidToken(
-                                vec![
-                                    TokenKind::Let,
-                                    TokenKind::If,
-                                    TokenKind::While,
-                                    TokenKind::Return,
-                                ],
-                                t.to_owned(),
-                            ))
+                            Ok(Stmt::Expr(expr))
                         }
                     } else {
                         Ok(Stmt::Expr(expr))
                     }
-                } else {
-                    Ok(Stmt::Expr(expr))
                 }
             }
+        } else {
+            Err(ParseError::InvalidEOF(vec![
+                TkKind::Let,
+                TkKind::If,
+                TkKind::While,
+                TkKind::Return,
+            ]))
         }
-    } else {
-        Err(ParseError::InvalidEOF(vec![
-            TokenKind::Let,
-            TokenKind::If,
-            TokenKind::While,
-            TokenKind::Return,
-        ]))
     }
 }

@@ -1,29 +1,26 @@
+use biwac_lexer::TkKind;
+
 use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        symbols::expressions::{postfix, Exprs, UnOperator},
-        ParseError,
-    },
+    ParseError,
+    parser::TokenStream,
+    symbols::expressions::{Exprs, UnOperator},
 };
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Exprs, ParseError> {
-    if let Some(t) = tokens.peek() {
-        match t.kind {
-            TokenKind::Minus => {
-                tokens.next();
+impl<'t> TokenStream<'t> {
+    pub(super) fn consume_unary_expression(&mut self) -> Result<Exprs, ParseError> {
+        if let Some(t) = self.peek() {
+            match t.kind {
+                TkKind::Minus => {
+                    self.next();
 
-                let expr = consume(tokens)?;
+                    let expr = self.consume_unary_expression()?;
 
-                Ok(Exprs::Unary(UnOperator::Neg, Box::new(expr)))
+                    Ok(Exprs::Unary(UnOperator::Neg, Box::new(expr)))
+                }
+                _ => self.consume_postfix_expression(),
             }
-            _ => postfix::consume(tokens),
+        } else {
+            Err(ParseError::InvalidEOF(vec![TkKind::Ident, TkKind::Minus]))
         }
-    } else {
-        Err(ParseError::InvalidEOF(vec![
-            TokenKind::Identifier("".to_string()),
-            TokenKind::Minus,
-        ]))
     }
 }

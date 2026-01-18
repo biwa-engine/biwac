@@ -1,13 +1,10 @@
 mod lexer;
 pub mod token;
 
+use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
 use biwac_base::ModPath;
-use token::Token;
 
-use crate::{
-    lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int},
-    token::{TkKind, TkVal},
-};
+pub use token::{TkKind, TkVal, Token};
 
 #[derive(Debug)]
 pub enum TokenizeError {

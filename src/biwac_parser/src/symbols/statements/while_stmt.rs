@@ -1,16 +1,6 @@
-use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        matches,
-        symbols::{
-            expressions::{self, Exprs},
-            statements::block,
-        },
-        ParseError,
-    },
-};
+use biwac_lexer::TkKind;
 
-use super::Stmt;
+use crate::{Exprs, ParseError, Stmt, parser::TokenStream};
 
 #[derive(Debug)]
 pub struct WhileStmt {
@@ -18,14 +8,12 @@ pub struct WhileStmt {
     pub stmts: Vec<Stmt>,
 }
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<WhileStmt, ParseError> {
-    matches(tokens.next(), vec![TokenKind::While])?;
+impl<'t> TokenStream<'t> {
+    pub fn consume_while_statement(&mut self) -> Result<WhileStmt, ParseError> {
+        let _ = self.must_consume_next(vec![TkKind::While])?;
+        let cond = self.consume_expression()?;
+        let stmts = self.consume_block_statement()?;
 
-    let cond = expressions::consume(tokens)?;
-
-    let stmts = block::consume(tokens)?;
-
-    Ok(WhileStmt { cond, stmts })
+        Ok(WhileStmt { cond, stmts })
+    }
 }

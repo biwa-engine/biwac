@@ -13,6 +13,24 @@ pub enum TkVal {
     String(String),
 }
 
+impl Token {
+    pub fn unwrap_integer_value(&self) -> u64 {
+        if let Some(TkVal::Integer(i)) = &self.val {
+            *i
+        } else {
+            panic!("compiler bug: no integer value token unwrapped as integer")
+        }
+    }
+
+    pub fn unwrap_string_value(&self) -> String {
+        if let Some(TkVal::String(s)) = &self.val {
+            s.clone()
+        } else {
+            panic!("compiler bug: no string value token unwrapped as string")
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TkKind {
     Ident,            // identifier

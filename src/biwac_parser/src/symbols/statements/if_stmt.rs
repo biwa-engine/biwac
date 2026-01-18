@@ -1,17 +1,6 @@
-use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        matches,
-        symbols::{
-            expressions::{self, Exprs},
-            statements::{
-                block::{self},
-                Stmt,
-            },
-        },
-        ParseError,
-    },
-};
+use biwac_lexer::TkKind;
+
+use crate::{Exprs, ParseError, Stmt, parser::TokenStream};
 
 #[derive(Debug)]
 pub struct IfStmt {
@@ -20,25 +9,32 @@ pub struct IfStmt {
     pub els: Option<Vec<Stmt>>,
 }
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<IfStmt, ParseError> {
-    matches(tokens.next(), vec![TokenKind::If])?;
-    let cond = expressions::consume(tokens)?;
+impl<'t> TokenStream<'t> {
+    pub(super) fn consume_if_statement(&mut self) -> Result<IfStmt, ParseError> {
+        self.must_consume_next(vec![TkKind::If])?;
 
-    let then = block::consume(tokens)?;
+        let cond = self.consume_expression()?;
 
-    if let Some(t) = tokens.peek() {
-        if let TokenKind::Else = t.kind {
-            tokens.next();
+        let then = self.consume_block_statement()?;
 
-            let els = block::consume(tokens)?;
+        if let Some(t) = self.peek() {
+            if let TkKind::Else = t.kind {
+                self.next();
 
-            Ok(IfStmt {
-                cond,
-                then,
-                els: Some(els),
-            })
+                let els = self.consume_block_statement()?;
+
+                Ok(IfStmt {
+                    cond,
+                    then,
+                    els: Some(els),
+                })
+            } else {
+                Ok(IfStmt {
+                    cond,
+                    then,
+                    els: None,
+                })
+            }
         } else {
             Ok(IfStmt {
                 cond,
@@ -46,11 +42,5 @@ pub fn consume(
                 els: None,
             })
         }
-    } else {
-        Ok(IfStmt {
-            cond,
-            then,
-            els: None,
-        })
     }
 }

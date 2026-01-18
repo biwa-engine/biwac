@@ -1,105 +1,125 @@
+use biwac_lexer::TkKind;
+
 use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        matches,
-        symbols::{
-            consume_identifier, consume_qualified_identifier,
-            expressions::{self, Exprs, FnCall, LanglibfnCall, Literal, Primary},
-        },
-        ParseError,
-    },
+    ParseError,
+    parser::TokenStream,
+    symbols::expressions::{Exprs, FnCall, Literal, Primary},
 };
 
-// Primary = Literal | Identifier ( "(" ")" )? | "(" ArithmExpr ")"
+// Primary = Literal | Identifier ( "(" ")" )? | "(" Exprs ")"
+impl<'t> TokenStream<'t> {
+    pub(super) fn consume_primary_expression(&mut self) -> Result<super::Exprs, ParseError> {
+        // Primary = Literal | "(" Expr ")"
+        let t = *self
+            .peek()
+            .ok_or(ParseError::InvalidEOF(vec![
+                TkKind::Ident,
+                TkKind::IntegerLiteral,
+            ]))?;
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<super::Exprs, ParseError> {
-    // Primary = Literal | "(" Expr ")"
-    if let Some(t) = tokens.peek() {
         match &t.kind {
-            TokenKind::IntLiteral(i) => {
-                tokens.next();
-                Ok(Exprs::Primary(Primary::Literal(Literal::Uint(*i))))
+            TkKind::IntegerLiteral => {
+                self.next();
+                Ok(Exprs::Primary(Primary::Literal(Literal::Integer(
+                    t.unwrap_integer_value(),
+                ))))
             }
-            TokenKind::StringLiteral(s) => {
-                tokens.next();
-                Ok(Exprs::Primary(Primary::Literal(Literal::String(s.clone()))))
+            TkKind::StringLiteral => {
+                self.next();
+                Ok(Exprs::Primary(Primary::Literal(Literal::String(
+                    t.unwrap_string_value(),
+                ))))
             }
-            TokenKind::BoolLiteralTrue => {
-                tokens.next();
+            TkKind::BoolLiteralTrue => {
+                self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Bool(true))))
             }
-            TokenKind::BoolLiteralFalse => {
-                tokens.next();
+            TkKind::BoolLiteralFalse => {
+                self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Bool(false))))
             }
-            TokenKind::Identifier(_) => {
-                let qualed_id = consume_qualified_identifier(tokens)?;
+            TkKind::Ident => {
+                let qualed_id = self.consume_qualified_identifier()?;
 
-                if let Some(t) = tokens.peek() {
-                    if let TokenKind::LPare = t.kind {
-                        tokens.next();
+                if let Some(t) = self.peek() {
+                    if let TkKind::LPare = t.kind {
+                        self.next();
 
                         let mut args: Vec<Exprs> = vec![];
 
-                        while let Some(t) = tokens.peek() {
-                            if let TokenKind::RPare = t.kind {
-                                tokens.next();
+                        while let Some(t) = self.peek() {
+                            if let TkKind::RPare = t.kind {
+                                self.next();
                                 return Ok(Exprs::Primary(Primary::FnCall(FnCall {
                                     qualed_id,
                                     args,
                                 })));
                             } else {
-                                let expr = expressions::consume(tokens)?;
+                                let expr = self.consume_expression()?;
                                 args.push(expr);
 
-                                let kind = matches(
-                                    tokens.peek().copied(),
-                                    vec![TokenKind::RPare, TokenKind::Comma],
-                                )?;
-                                if let TokenKind::Comma = kind {
-                                    tokens.next();
-                                    continue;
-                                } else if let TokenKind::RPare = kind {
-                                    continue;
+                                if let Some(t) = self.peek() {
+                                    if let TkKind::Comma = t.kind {
+                                        self.next();
+                                        continue;
+                                    } else if let TkKind::RPare = t.kind {
+                                        continue;
+                                    } else {
+                                        return Err(ParseError::InvalidToken(
+                                            vec![TkKind::RPare, TkKind::Comma],
+                                            t.clone().clone(),
+                                        ));
+                                    }
+                                } else {
+                                    return Err(ParseError::InvalidEOF(vec![
+                                        TkKind::RPare,
+                                        TkKind::Comma,
+                                    ]));
                                 }
                             }
                         }
 
-                        Err(ParseError::InvalidEOF(vec![TokenKind::RPare]))
-                    } else if let TokenKind::LBrace = t.kind {
-                        tokens.next();
+                        Err(ParseError::InvalidEOF(vec![TkKind::RPare]))
+                    } else if let TkKind::LBrace = t.kind {
+                        self.next();
 
                         let mut members: Vec<(String, Box<Exprs>)> = vec![];
 
-                        while let Some(t) = tokens.peek() {
-                            if let TokenKind::RBrace = t.kind {
-                                tokens.next();
+                        while let Some(t) = self.peek() {
+                            if let TkKind::RBrace = t.kind {
+                                self.next();
                                 return Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
                                     qualed_id, members,
                                 ))));
                             } else {
-                                let member = consume_identifier(tokens)?;
-                                matches(tokens.next(), vec![TokenKind::Assign])?;
-                                let expr = expressions::consume(tokens)?;
+                                let member = self.consume_identifier()?;
+                                let _ = self.must_consume_next(vec![TkKind::Assign])?;
+                                let expr = self.consume_expression()?;
 
                                 members.push((member, Box::new(expr)));
 
-                                let kind = matches(
-                                    tokens.peek().copied(),
-                                    vec![TokenKind::RBrace, TokenKind::Comma],
-                                )?;
-                                if let TokenKind::Comma = kind {
-                                    tokens.next();
-                                    continue;
-                                } else if let TokenKind::RBrace = kind {
-                                    continue;
+                                if let Some(t) = self.peek() {
+                                    if let TkKind::Comma = t.kind {
+                                        self.next();
+                                        continue;
+                                    } else if let TkKind::RBrace = t.kind {
+                                        continue;
+                                    } else {
+                                        return Err(ParseError::InvalidToken(
+                                            vec![TkKind::RBrace, TkKind::Comma],
+                                            t.clone().clone(),
+                                        ));
+                                    }
+                                } else {
+                                    return Err(ParseError::InvalidEOF(vec![
+                                        TkKind::RBrace,
+                                        TkKind::Comma,
+                                    ]));
                                 }
                             }
                         }
 
-                        Err(ParseError::InvalidEOF(vec![TokenKind::RBrace]))
+                        Err(ParseError::InvalidEOF(vec![TkKind::RBrace]))
                     } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
                         panic!("variable cannot qualified");
                     } else {
@@ -111,67 +131,18 @@ pub fn consume(
                     Ok(Exprs::Primary(Primary::Variable(qualed_id.id)))
                 }
             }
-            TokenKind::LPare => {
-                tokens.next();
-                let expr = expressions::consume(tokens)?;
+            TkKind::LPare => {
+                self.next();
+                let expr = self.consume_expression()?;
 
-                if let TokenKind::RPare = matches(tokens.next(), vec![TokenKind::RPare])? {
-                    Ok(expr)
-                } else {
-                    Err(ParseError::InvalidToken(
-                        vec![
-                            TokenKind::Identifier("".to_string()),
-                            TokenKind::IntLiteral(0),
-                        ],
-                        tokens.peek().unwrap().to_owned().clone(),
-                    ))
-                }
-            }
-            // langlibfn::id(a0, 1, a2)
-            TokenKind::Langlibfn => {
-                tokens.next();
+                let _ = self.must_consume_next(vec![TkKind::RPare])?;
 
-                matches(tokens.next(), vec![TokenKind::DoubleColon])?;
-                let id = consume_identifier(tokens)?;
-                matches(tokens.next(), vec![TokenKind::LPare])?;
-
-                let mut args: Vec<Exprs> = vec![];
-
-                while let Some(t) = tokens.peek() {
-                    if let TokenKind::RPare = t.kind {
-                        tokens.next();
-                        return Ok(Exprs::Primary(Primary::LanglibfnCall(LanglibfnCall {
-                            id,
-                            args,
-                        })));
-                    } else {
-                        let expr = expressions::consume(tokens)?;
-                        args.push(expr);
-
-                        let kind = matches(
-                            tokens.peek().copied(),
-                            vec![TokenKind::RPare, TokenKind::Comma],
-                        )?;
-                        if let TokenKind::Comma = kind {
-                            tokens.next();
-                            continue;
-                        } else if let TokenKind::RPare = kind {
-                            continue;
-                        }
-                    }
-                }
-
-                Err(ParseError::InvalidEOF(vec![TokenKind::RPare]))
+                Ok(expr)
             }
             _ => Err(ParseError::InvalidEOF(vec![
-                TokenKind::Identifier("".to_string()),
-                TokenKind::IntLiteral(0),
+                TkKind::Ident,
+                TkKind::IntegerLiteral,
             ])),
         }
-    } else {
-        Err(ParseError::InvalidEOF(vec![
-            TokenKind::Identifier("".to_string()),
-            TokenKind::IntLiteral(0),
-        ]))
     }
 }

@@ -1,31 +1,26 @@
-use crate::{
-    lexer::token::{Token, TokenKind},
-    parser::{
-        matches,
-        symbols::statements::{self, Stmt},
-        ParseError,
-    },
-};
+use biwac_lexer::TkKind;
 
-pub fn consume(
-    tokens: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Vec<Stmt>, ParseError> {
-    matches(tokens.next(), vec![TokenKind::LBrace])?;
+use crate::{ParseError, Stmt, parser::TokenStream};
 
-    let mut stmts: Vec<Stmt> = vec![];
+impl<'t> TokenStream<'t> {
+    pub(crate) fn consume_block_statement(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        self.must_consume_next(vec![TkKind::LBrace])?;
 
-    loop {
-        if let Some(t) = tokens.peek() {
-            if let TokenKind::RBrace = t.kind {
-                tokens.next();
-                return Ok(stmts);
+        let mut stmts: Vec<Stmt> = vec![];
+
+        loop {
+            if let Some(t) = self.peek() {
+                if let TkKind::RBrace = t.kind {
+                    self.next();
+                    return Ok(stmts);
+                }
+            } else {
+                return Err(ParseError::InvalidEOF(vec![TkKind::RBrace]));
             }
-        } else {
-            return Err(ParseError::InvalidEOF(vec![TokenKind::RBrace]));
+
+            let stmt = self.consume_statement()?;
+
+            stmts.push(stmt);
         }
-
-        let stmt = statements::consume(tokens)?;
-
-        stmts.push(stmt);
     }
 }
