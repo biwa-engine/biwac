@@ -1,32 +1,24 @@
 use std::collections::HashMap;
 
-use crate::{
-    packager::resolver::{
-        symbols::{expressions::Exprs, statements::Stmt},
-        ResolveError, TryResolve, TryResolveWithId,
-    },
-    parser::{self, symbols::statements::vardec::VarDec},
-    validator::{types::AbsoluteType, AbsoluteId},
-};
+use biwac_base::ModPath;
+use biwac_parser::{VarDec, types::TypDecl};
 
-// #[derive(Debug)]
-// pub struct LanglibfnDec {
-//     pub id: String,
-//     // pub args: Vec<Type>,
-//     pub rtype: Option<Type>, // None means void
-// }
+use crate::{
+    AbsId, Exprs, Stmt, Typ,
+    resolver::{ResolveError, TryResolve, TryResolveWithId},
+};
 
 #[derive(Debug, Clone)]
 pub struct GlobalVarDec {
-    pub typ: AbsoluteType,
+    pub typ: Option<Typ>,
     pub init: Exprs,
 }
 
 #[derive(Debug)]
 pub struct FnDefContent {
-    pub args: Vec<(AbsoluteType, String)>,
+    pub args: Vec<(Typ, String)>,
     pub stmts: Vec<Stmt>,
-    pub rtype: Option<AbsoluteType>, // None means void
+    pub rtype: Option<Typ>, // None means void
 }
 
 #[derive(Debug, Clone)]
@@ -38,28 +30,28 @@ pub enum TypeDefContent {
 
 #[derive(Debug, Clone)]
 pub struct StructDefContent {
-    pub members: HashMap<String, (AbsoluteType, usize)>,
+    pub members: HashMap<String, (Typ, usize)>,
 }
 
-impl TryResolveWithId<parser::symbols::globals::FnDef> for FnDefContent {
+impl TryResolveWithId<biwac_parser::FnDef> for FnDefContent {
     fn try_resolve(
-        value: parser::symbols::globals::FnDef,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
-    ) -> Result<(AbsoluteId, Self), crate::packager::resolver::ResolveError> {
+        value: biwac_parser::FnDef,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
+    ) -> Result<(AbsId, Self), ResolveError> {
         Ok((
-            AbsoluteId::new(modpath.0.clone(), value.name),
+            AbsId::new(modpath.clone().into(), value.name),
             Self {
                 args: value
                     .args
                     .into_iter()
                     .map(
-                        |(atyp, aid)| match AbsoluteType::try_resolve(atyp, imports, modpath) {
+                        |(atyp, aid)| match Typ::try_resolve(atyp, imports, modpath) {
                             Ok(typ) => Ok((typ, aid)),
                             Err(e) => Err(e),
                         },
                     )
-                    .collect::<Result<Vec<(AbsoluteType, String)>, ResolveError>>()?,
+                    .collect::<Result<Vec<(Typ, String)>, ResolveError>>()?,
                 stmts: value
                     .stmts
                     .into_iter()
@@ -67,21 +59,21 @@ impl TryResolveWithId<parser::symbols::globals::FnDef> for FnDefContent {
                     .collect::<Result<Vec<Stmt>, ResolveError>>()?,
                 rtype: value
                     .rtype
-                    .map(|typ| AbsoluteType::try_resolve(typ, imports, modpath))
+                    .map(|typ| Typ::try_resolve(typ, imports, modpath))
                     .transpose()?,
             },
         ))
     }
 }
 
-impl TryResolveWithId<parser::symbols::globals::TypeDef> for TypeDefContent {
+impl TryResolveWithId<biwac_parser::TypeDef> for TypeDefContent {
     fn try_resolve(
-        value: parser::symbols::globals::TypeDef,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
-    ) -> Result<(AbsoluteId, Self), ResolveError> {
+        value: biwac_parser::TypeDef,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
+    ) -> Result<(AbsId, Self), ResolveError> {
         match value {
-            parser::symbols::globals::TypeDef::Struct(s) => {
+            biwac_parser::TypeDef::Struct(s) => {
                 Ok(StructDefContent::try_resolve(s, imports, modpath)
                     .map(|(id, s)| (id, Self::Struct(s)))?)
             }
@@ -89,23 +81,22 @@ impl TryResolveWithId<parser::symbols::globals::TypeDef> for TypeDefContent {
     }
 }
 
-impl TryResolveWithId<parser::symbols::globals::StructDef> for StructDefContent {
+impl TryResolveWithId<biwac_parser::StructDef> for StructDefContent {
     fn try_resolve(
-        value: parser::symbols::globals::StructDef,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
-    ) -> Result<(AbsoluteId, Self), ResolveError> {
+        value: biwac_parser::StructDef,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
+    ) -> Result<(AbsId, Self), ResolveError> {
         Ok((
-            AbsoluteId::new(modpath.0.clone(), value.id),
+            AbsId::new(modpath.clone().into(), value.id),
             Self {
                 members: value
                     .members
                     .into_iter()
                     .map(|(id, (typ, index))| {
-                        AbsoluteType::try_resolve(typ, imports, modpath)
-                            .map(|typ| (id, (typ, index)))
+                        Typ::try_resolve(typ, imports, modpath).map(|typ| (id, (typ, index)))
                     })
-                    .collect::<Result<HashMap<String, (AbsoluteType, usize)>, ResolveError>>()?,
+                    .collect::<Result<HashMap<String, (Typ, usize)>, ResolveError>>()?,
             },
         ))
     }
@@ -114,13 +105,18 @@ impl TryResolveWithId<parser::symbols::globals::StructDef> for StructDefContent 
 impl TryResolveWithId<VarDec> for GlobalVarDec {
     fn try_resolve(
         value: VarDec,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
-    ) -> Result<(AbsoluteId, Self), ResolveError> {
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
+    ) -> Result<(AbsId, Self), ResolveError> {
+        let typ = match value.typ {
+            TypDecl::Any => None,
+            TypDecl::Typ(t) => Some(Typ::try_resolve(t, imports, modpath)?),
+        };
+
         Ok((
-            AbsoluteId::new(modpath.0.clone(), value.name),
+            AbsId::new(modpath.clone().into(), value.name),
             Self {
-                typ: AbsoluteType::try_resolve(value.typ, imports, modpath)?,
+                typ,
                 init: Exprs::try_resolve(value.init, imports, modpath)?,
             },
         ))

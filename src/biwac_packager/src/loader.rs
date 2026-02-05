@@ -5,30 +5,30 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    lexer,
-    packager::{
-        resolver::{symbols::ModuleSymbols, try_resolve_imports},
-        ModulePath,
-    },
-    parser,
-    validator::AbsoluteId,
-};
+use biwac_base::ModPath;
+use biwac_parser::ModAst;
+
+use crate::resolver::{AbsId, symbols::ModSym, try_resolve_imports};
 
 const SOURCECODE_ROOT_MODULE: &str = "main";
 const SOURCECODE_EXTENSION: &str = "code";
 
-#[derive(Debug)]
-pub(crate) struct PackageSymbolMap {
-    syms: HashMap<AbsoluteId, ModuleSymbols>,
+#[derive(Debug, Clone)]
+pub enum PkgLoadError {
+    RootModuleNotFound,
 }
 
-impl PackageSymbolMap {
-    pub(crate) fn syms(&self) -> &HashMap<AbsoluteId, ModuleSymbols> {
+#[derive(Debug)]
+pub(crate) struct PkgSymMap {
+    syms: HashMap<AbsId, ModSym>,
+}
+
+impl PkgSymMap {
+    pub(crate) fn syms(&self) -> &HashMap<AbsId, ModSym> {
         &self.syms
     }
 
-    pub(super) fn load(rootpath: &str) -> Self {
+    pub(super) fn load(rootpath: &str) -> Result<Self, PkgLoadError> {
         let root = Path::new(rootpath);
 
         if !root.is_dir() {
@@ -37,21 +37,19 @@ impl PackageSymbolMap {
 
         let srcpath = root.join(Path::new("src"));
 
-        let toplevel_modules = Self::load_from_dir(&srcpath, ModulePath(vec![])).syms;
+        let toplevel_modules = Self::load_from_dir(&srcpath, ModPath::Main)?.syms;
 
-        if !toplevel_modules
-            .contains_key(&AbsoluteId::new(vec![], SOURCECODE_ROOT_MODULE.to_string()))
-        {
+        if !toplevel_modules.contains_key(&AbsId::new(vec![], SOURCECODE_ROOT_MODULE.to_string())) {
             panic!("Root Module `{SOURCECODE_ROOT_MODULE}` Not Found");
         }
 
-        Self {
+        Ok(Self {
             syms: toplevel_modules,
-        }
+        })
     }
 
     // NOTE: `dir` must be directory path
-    fn load_from_dir(dir: &Path, modpath: ModulePath) -> Self {
+    fn load_from_dir(dir: &Path, modpath: ModPath) -> Result<Self, PkgLoadError> {
         let mut dirs: HashMap<String, Box<PathBuf>> = HashMap::new();
         let mut files: HashMap<String, Box<PathBuf>> = HashMap::new();
 
@@ -82,38 +80,40 @@ impl PackageSymbolMap {
             }
         }
 
-        let mut syms: HashMap<AbsoluteId, ModuleSymbols> = HashMap::new();
+        if !files.contains_key(SOURCECODE_ROOT_MODULE) {
+            return Err(PkgLoadError::RootModuleNotFound);
+        }
+
+        let mut syms: HashMap<AbsId, ModSym> = HashMap::new();
         for (id, path) in files {
             let mut f = File::open(path.as_path()).unwrap();
             let mut contents = String::new();
             f.read_to_string(&mut contents).unwrap();
+            let modpath = if &id == "main" {
+                modpath.clone()
+            } else {
+                modpath.clone().push(id.clone())
+            };
 
-            let tokens = lexer::tokenize(&contents).expect("Tokenize Error");
+            let tokens = biwac_lexer::lex(modpath.clone(), &contents).expect("Tokenize Error");
 
-            match parser::parse(tokens) {
-                Ok(prog) => {
-                    let modpath = if &id == "main" {
-                        &modpath
-                    } else {
-                        &modpath.clone().extend(id.clone())
-                    };
-
-                    match try_resolve_imports(prog, modpath) {
-                        Ok(module) => {
-                            syms.extend(module);
-                        }
-                        Err(e) => {
-                            panic!("Resolve Error: {e:?}");
-                        }
+            match ModAst::try_parse(tokens) {
+                Ok(prog) => match try_resolve_imports(prog, &modpath) {
+                    Ok(module) => {
+                        syms.extend(module);
                     }
-                }
+                    Err(e) => {
+                        panic!("Resolve Error: {e:?}");
+                    }
+                },
                 Err(e) => {
-                    e.panic_with_error_message(&contents);
+                    panic!("Resolve Error: {e:?}");
+                    // e.panic_with_error_message(&contents);
                 }
             }
 
             let children = if let Some(dir) = dirs.get(&id) {
-                Self::load_from_dir(dir, modpath.clone().extend(id.to_owned())).syms
+                Self::load_from_dir(dir, modpath.clone().push(id.to_owned()))?.syms
             } else {
                 HashMap::new()
             };
@@ -121,6 +121,6 @@ impl PackageSymbolMap {
             syms.extend(children);
         }
 
-        Self { syms }
+        Ok(Self { syms })
     }
 }

@@ -1,17 +1,7 @@
-use crate::{
-    packager::{
-        resolver::{ResolveError, TryResolve},
-        ModulePath,
-    },
-    parser::{
-        self,
-        symbols::{
-            expressions::{BinOperator, UnOperator},
-            QualifiedId,
-        },
-    },
-    validator::AbsoluteId,
-};
+use biwac_base::ModPath;
+use biwac_parser::{BinOperator, QualifiedId, UnOperator};
+
+use crate::resolver::{AbsId, ResolveError, TryResolve};
 
 #[derive(Debug, Clone)]
 pub enum Exprs {
@@ -27,21 +17,20 @@ pub enum Primary {
     FnCall(FnCall),
     MemberAccess(MemberAccess),
     // MethodCall(MethodCall),
-    // LanglibfnCall(LanglibfnCall),
 }
 
 #[derive(Debug, Clone)]
 pub enum Literal {
-    Uint(u32),
+    Integer(u64),
     // Float(f64),
     String(String),
     Bool(bool),
-    Struct(AbsoluteId, Vec<(String, Box<Exprs>)>),
+    Struct(AbsId, Vec<(String, Box<Exprs>)>),
 }
 
 #[derive(Debug, Clone)]
 pub struct FnCall {
-    pub absid: AbsoluteId,
+    pub absid: AbsId,
     pub args: Vec<Exprs>,
 }
 
@@ -58,27 +47,21 @@ pub struct MemberAccess {
 //     pub args: Vec<Exprs>,
 // }
 
-// #[derive(Debug, Clone)]
-// pub struct LanglibfnCall {
-//     pub id: String,
-//     pub args: Vec<Exprs>,
-// }
-
-impl TryResolve<parser::symbols::expressions::Primary> for Primary {
+impl TryResolve<biwac_parser::Primary> for Primary {
     fn try_resolve(
-        value: parser::symbols::expressions::Primary,
+        value: biwac_parser::Primary,
         imports: &[QualifiedId],
-        modpath: &ModulePath,
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         match value {
-            parser::symbols::expressions::Primary::Literal(l) => {
+            biwac_parser::Primary::Literal(l) => {
                 Ok(Self::Literal(Literal::try_resolve(l, imports, modpath)?))
             }
-            parser::symbols::expressions::Primary::Variable(v) => Ok(Self::Variable(v)),
-            parser::symbols::expressions::Primary::FnCall(f) => {
+            biwac_parser::Primary::Variable(v) => Ok(Self::Variable(v)),
+            biwac_parser::Primary::FnCall(f) => {
                 Ok(Self::FnCall(FnCall::try_resolve(f, imports, modpath)?))
             }
-            parser::symbols::expressions::Primary::MemberAccess(m) => Ok(Self::MemberAccess(
+            biwac_parser::Primary::MemberAccess(m) => Ok(Self::MemberAccess(
                 MemberAccess::try_resolve(m, imports, modpath)?,
             )),
             _ => todo!(),
@@ -86,14 +69,14 @@ impl TryResolve<parser::symbols::expressions::Primary> for Primary {
     }
 }
 
-impl TryResolve<parser::symbols::expressions::FnCall> for FnCall {
+impl TryResolve<biwac_parser::FnCall> for FnCall {
     fn try_resolve(
-        value: parser::symbols::expressions::FnCall,
+        value: biwac_parser::FnCall,
         imports: &[QualifiedId],
-        modpath: &ModulePath,
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
-            absid: AbsoluteId::try_resolve(value.qualed_id, imports, modpath)?,
+            absid: AbsId::try_resolve(value.qualed_id, imports, modpath)?,
             args: value
                 .args
                 .into_iter()
@@ -103,11 +86,11 @@ impl TryResolve<parser::symbols::expressions::FnCall> for FnCall {
     }
 }
 
-impl TryResolve<parser::symbols::expressions::MemberAccess> for MemberAccess {
+impl TryResolve<biwac_parser::MemberAccess> for MemberAccess {
     fn try_resolve(
-        value: parser::symbols::expressions::MemberAccess,
+        value: biwac_parser::MemberAccess,
         imports: &[QualifiedId],
-        modpath: &ModulePath,
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
             left: Box::new(Exprs::try_resolve(*value.left, imports, modpath)?),
@@ -116,18 +99,18 @@ impl TryResolve<parser::symbols::expressions::MemberAccess> for MemberAccess {
     }
 }
 
-impl TryResolve<parser::symbols::expressions::Literal> for Literal {
+impl TryResolve<biwac_parser::Literal> for Literal {
     fn try_resolve(
-        value: parser::symbols::expressions::Literal,
+        value: biwac_parser::Literal,
         imports: &[QualifiedId],
-        modpath: &ModulePath,
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         match value {
-            parser::symbols::expressions::Literal::Uint(u) => Ok(Self::Uint(u)),
-            parser::symbols::expressions::Literal::String(s) => Ok(Self::String(s)),
-            parser::symbols::expressions::Literal::Bool(b) => Ok(Self::Bool(b)),
-            parser::symbols::expressions::Literal::Struct(qualid, mems) => Ok(Self::Struct(
-                AbsoluteId::try_resolve(qualid, imports, modpath)?,
+            biwac_parser::Literal::Integer(u) => Ok(Self::Integer(u)),
+            biwac_parser::Literal::String(s) => Ok(Self::String(s)),
+            biwac_parser::Literal::Bool(b) => Ok(Self::Bool(b)),
+            biwac_parser::Literal::Struct(qualid, mems) => Ok(Self::Struct(
+                AbsId::try_resolve(qualid, imports, modpath)?,
                 mems.into_iter()
                     .map(
                         |(id, expr)| match Exprs::try_resolve(*expr, imports, modpath) {
@@ -144,21 +127,21 @@ impl TryResolve<parser::symbols::expressions::Literal> for Literal {
     }
 }
 
-impl TryResolve<parser::symbols::expressions::Exprs> for Exprs {
+impl TryResolve<biwac_parser::Exprs> for Exprs {
     fn try_resolve(
-        value: parser::symbols::expressions::Exprs,
+        value: biwac_parser::Exprs,
         imports: &[QualifiedId],
-        modpath: &ModulePath,
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         match value {
-            parser::symbols::expressions::Exprs::Primary(prim) => {
+            biwac_parser::Exprs::Primary(prim) => {
                 Ok(Self::Primary(Primary::try_resolve(prim, imports, modpath)?))
             }
-            parser::symbols::expressions::Exprs::Unary(op, expr) => Ok(Self::Unary(
+            biwac_parser::Exprs::Unary(op, expr) => Ok(Self::Unary(
                 op,
                 Box::new(Self::try_resolve(*expr, imports, modpath)?),
             )),
-            parser::symbols::expressions::Exprs::Binary(op, left, right) => Ok(Self::Binary(
+            biwac_parser::Exprs::Binary(op, left, right) => Ok(Self::Binary(
                 op,
                 Box::new(Self::try_resolve(*left, imports, modpath)?),
                 Box::new(Self::try_resolve(*right, imports, modpath)?),

@@ -1,10 +1,9 @@
+use biwac_base::ModPath;
+use biwac_parser::types::TypDecl;
+
 use crate::{
-    packager::resolver::{
-        symbols::expressions::{Exprs, Primary},
-        ResolveError, TryResolve,
-    },
-    parser,
-    validator::types::AbsoluteType,
+    Exprs, Primary, Typ,
+    resolver::{ResolveError, TryResolve},
 };
 
 #[derive(Debug)]
@@ -22,7 +21,7 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone)]
 pub struct VarDec {
-    pub typ: AbsoluteType,
+    pub typ: Option<Typ>,
     pub id: String,
     pub init: Exprs,
 }
@@ -38,35 +37,35 @@ pub enum Stmt {
     Assign(Primary, Exprs), // dst, src
 }
 
-impl TryResolve<parser::symbols::statements::Stmt> for Stmt {
+impl TryResolve<biwac_parser::Stmt> for Stmt {
     fn try_resolve(
-        value: parser::symbols::statements::Stmt,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
-    ) -> Result<Self, crate::packager::resolver::ResolveError> {
+        value: biwac_parser::Stmt,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
+    ) -> Result<Self, ResolveError> {
         match value {
-            parser::symbols::statements::Stmt::If(i) => Ok(Self::If(Box::new(
-                IfStmt::try_resolve(*i, imports, modpath)?,
-            ))),
-            parser::symbols::statements::Stmt::While(w) => Ok(Self::While(Box::new(
-                WhileStmt::try_resolve(*w, imports, modpath)?,
-            ))),
-            parser::symbols::statements::Stmt::Block(stmts) => Ok(Self::Block(
+            biwac_parser::Stmt::If(i) => Ok(Self::If(Box::new(IfStmt::try_resolve(
+                *i, imports, modpath,
+            )?))),
+            biwac_parser::Stmt::While(w) => Ok(Self::While(Box::new(WhileStmt::try_resolve(
+                *w, imports, modpath,
+            )?))),
+            biwac_parser::Stmt::Block(stmts) => Ok(Self::Block(
                 stmts
                     .into_iter()
                     .map(|stmt| Stmt::try_resolve(stmt, imports, modpath))
                     .collect::<Result<Vec<Stmt>, ResolveError>>()?,
             )),
-            parser::symbols::statements::Stmt::Expr(expr) => {
+            biwac_parser::Stmt::Expr(expr) => {
                 Ok(Self::Expr(Exprs::try_resolve(expr, imports, modpath)?))
             }
-            parser::symbols::statements::Stmt::Return(expr) => {
+            biwac_parser::Stmt::Return(expr) => {
                 Ok(Self::Return(Exprs::try_resolve(expr, imports, modpath)?))
             }
-            parser::symbols::statements::Stmt::VarDec(var) => {
+            biwac_parser::Stmt::VarDec(var) => {
                 Ok(Self::VarDec(VarDec::try_resolve(var, imports, modpath)?))
             }
-            parser::symbols::statements::Stmt::Assign(dst, src) => Ok(Self::Assign(
+            biwac_parser::Stmt::Assign(dst, src) => Ok(Self::Assign(
                 Primary::try_resolve(dst, imports, modpath)?,
                 Exprs::try_resolve(src, imports, modpath)?,
             )),
@@ -74,12 +73,12 @@ impl TryResolve<parser::symbols::statements::Stmt> for Stmt {
     }
 }
 
-impl TryResolve<parser::symbols::statements::if_stmt::IfStmt> for IfStmt {
+impl TryResolve<biwac_parser::IfStmt> for IfStmt {
     fn try_resolve(
-        value: parser::symbols::statements::if_stmt::IfStmt,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
-    ) -> Result<Self, crate::packager::resolver::ResolveError> {
+        value: biwac_parser::IfStmt,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
+    ) -> Result<Self, ResolveError> {
         Ok(Self {
             cond: Exprs::try_resolve(value.cond, imports, modpath)?,
             then: value
@@ -99,11 +98,11 @@ impl TryResolve<parser::symbols::statements::if_stmt::IfStmt> for IfStmt {
     }
 }
 
-impl TryResolve<parser::symbols::statements::while_stmt::WhileStmt> for WhileStmt {
+impl TryResolve<biwac_parser::WhileStmt> for WhileStmt {
     fn try_resolve(
-        value: parser::symbols::statements::while_stmt::WhileStmt,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
+        value: biwac_parser::WhileStmt,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
             cond: Exprs::try_resolve(value.cond, imports, modpath)?,
@@ -116,14 +115,17 @@ impl TryResolve<parser::symbols::statements::while_stmt::WhileStmt> for WhileStm
     }
 }
 
-impl TryResolve<parser::symbols::statements::vardec::VarDec> for VarDec {
+impl TryResolve<biwac_parser::VarDec> for VarDec {
     fn try_resolve(
-        value: parser::symbols::statements::vardec::VarDec,
-        imports: &[parser::symbols::QualifiedId],
-        modpath: &crate::packager::ModulePath,
+        value: biwac_parser::VarDec,
+        imports: &[biwac_parser::QualifiedId],
+        modpath: &ModPath,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
-            typ: AbsoluteType::try_resolve(value.typ, imports, modpath)?,
+            typ: match value.typ {
+                TypDecl::Typ(typ) => Some(Typ::try_resolve(typ, imports, modpath)?),
+                TypDecl::Any => None,
+            },
             id: value.name,
             init: Exprs::try_resolve(value.init, imports, modpath)?,
         })

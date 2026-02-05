@@ -6,7 +6,8 @@ use biwac_lexer::{TkKind, Token};
 
 pub use symbols::{
     ModAst, QualifiedId,
-    expressions::{BinOperator, Exprs, UnOperator},
+    expressions::{BinOperator, Exprs, FnCall, Literal, MemberAccess, Primary, UnOperator},
+    globals::{FnDef, Globals, StructDef, TypeDef},
     statements::{Stmt, if_stmt::IfStmt, vardec::VarDec, while_stmt::WhileStmt},
 };
 pub use types::{DefTyp, GenArg, PrimTyp, TypRepr};

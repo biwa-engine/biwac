@@ -1,4 +1,4 @@
-use biwac_lexer::token::{TkKind, TkVal, Token};
+use biwac_lexer::{TkKind, Token};
 
 use crate::{DefTyp, ParseError, PrimTyp, TypRepr, symbols::QualifiedId};
 
@@ -99,7 +99,7 @@ impl<'t> TokenStream<'t> {
             } else {
                 Err(ParseError::InvalidToken(
                     vec![TkKind::Uint, TkKind::Int, TkKind::Bool, TkKind::Ident],
-                    t.clone().clone(),
+                    t.to_owned().clone(),
                 ))
             }
         } else {

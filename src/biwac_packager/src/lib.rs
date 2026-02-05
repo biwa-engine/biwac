@@ -1,7 +1,16 @@
 pub(crate) mod loader;
 pub(crate) mod resolver;
 
-use crate::packager::loader::PackageSymbolMap;
+use crate::loader::{PkgLoadError, PkgSymMap};
+pub use crate::resolver::{
+    AbsId,
+    symbols::{
+        expressions::{Exprs, Primary},
+        globals::{FnDefContent, GlobalVarDec, TypeDefContent},
+        statements::{IfStmt, Stmt, WhileStmt},
+    },
+    types::Typ,
+};
 
 #[derive(Debug, Clone)]
 struct ModulePath(Vec<String>);
@@ -15,6 +24,6 @@ impl ModulePath {
     }
 }
 
-pub fn load(rootpath: &str) -> PackageSymbolMap {
-    PackageSymbolMap::load(rootpath)
+pub fn load(rootpath: &str) -> Result<PkgSymMap, PkgLoadError> {
+    PkgSymMap::load(rootpath)
 }

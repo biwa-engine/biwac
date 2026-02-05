@@ -10,12 +10,10 @@ use crate::{
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_primary_expression(&mut self) -> Result<super::Exprs, ParseError> {
         // Primary = Literal | "(" Expr ")"
-        let t = *self
-            .peek()
-            .ok_or(ParseError::InvalidEOF(vec![
-                TkKind::Ident,
-                TkKind::IntegerLiteral,
-            ]))?;
+        let t = *self.peek().ok_or(ParseError::InvalidEOF(vec![
+            TkKind::Ident,
+            TkKind::IntegerLiteral,
+        ]))?;
 
         match &t.kind {
             TkKind::IntegerLiteral => {
@@ -67,7 +65,7 @@ impl<'t> TokenStream<'t> {
                                     } else {
                                         return Err(ParseError::InvalidToken(
                                             vec![TkKind::RPare, TkKind::Comma],
-                                            t.clone().clone(),
+                                            t.to_owned().clone(),
                                         ));
                                     }
                                 } else {
@@ -107,7 +105,7 @@ impl<'t> TokenStream<'t> {
                                     } else {
                                         return Err(ParseError::InvalidToken(
                                             vec![TkKind::RBrace, TkKind::Comma],
-                                            t.clone().clone(),
+                                            t.to_owned().clone(),
                                         ));
                                     }
                                 } else {

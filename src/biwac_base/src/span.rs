@@ -82,4 +82,38 @@ impl ModPath {
             Self::Mod(path) => format!("{}.biwa", path.join("/")),
         }
     }
+
+    pub fn push(self, child: String) -> Self {
+        match self {
+            Self::Main => Self::Mod([child].into()),
+            Self::Lib => Self::Mod([child].into()),
+            Self::Mod(mut m) => {
+                m.push(child);
+
+                Self::Mod(m)
+            }
+        }
+    }
+
+    pub fn extend(self, path: Vec<String>) -> Self {
+        match self {
+            Self::Main => Self::Mod(path),
+            Self::Lib => Self::Mod(path),
+            Self::Mod(mut m) => {
+                m.extend(path);
+
+                Self::Mod(m)
+            }
+        }
+    }
+}
+
+impl From<ModPath> for Vec<String> {
+    fn from(value: ModPath) -> Self {
+        match value {
+            ModPath::Main => vec![],
+            ModPath::Lib => vec![],
+            ModPath::Mod(m) => m,
+        }
+    }
 }

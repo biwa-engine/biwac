@@ -4,7 +4,7 @@ pub mod statements;
 pub mod types;
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt::Display,
 };
 
@@ -12,8 +12,8 @@ use crate::{
     packager::{
         loader::PackageSymbolMap,
         resolver::symbols::{
-            globals::{FnDefContent, StructDefContent, TypeDefContent},
             ModuleSymbols,
+            globals::{FnDefContent, StructDefContent, TypeDefContent},
         },
     },
     parser::symbols::QualifiedId,
@@ -346,12 +346,18 @@ impl ValidateError {
             Self::ArgumentMismatch(callee_typ, calling_typ) => {
                 if let Some(callee_typ) = callee_typ {
                     if let Some(calling_typ) = calling_typ {
-                        eprint!("types mismatch in function call, expected `{callee_typ}`, but found `{calling_typ}`");
+                        eprint!(
+                            "types mismatch in function call, expected `{callee_typ}`, but found `{calling_typ}`"
+                        );
                     } else {
-                        eprint!("types mismatch in function call, expected `{callee_typ}`, but found nothing");
+                        eprint!(
+                            "types mismatch in function call, expected `{callee_typ}`, but found nothing"
+                        );
                     }
                 } else if let Some(calling_typ) = calling_typ {
-                    eprint!("types mismatch in function call, expected nothing, but found `{calling_typ}`");
+                    eprint!(
+                        "types mismatch in function call, expected nothing, but found `{calling_typ}`"
+                    );
                 } else {
                     eprint!("types mismatch in function call, expected nothing, but found nothing");
                     // ISSUE: ???
