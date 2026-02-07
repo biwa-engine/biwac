@@ -71,5 +71,5 @@ name = "biwac_validator"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
- "biwac_packager",
+ "biwac_name_resolver",
 ]

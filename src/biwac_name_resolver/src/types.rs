@@ -1,10 +1,6 @@
-use biwac_base::ModPath;
-use biwac_parser::{PrimTyp, QualifiedId, TypRepr};
+use biwac_parser::{PrimTyp, TypRepr};
 
-use crate::{
-    AbsId,
-    resolver::{ResolveError, TryResolve},
-};
+use crate::{AbsId, ModuleLevelTryResolve};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Typ {
@@ -22,23 +18,18 @@ pub struct FnTyp {
     // pub(crate) genargs: Vec<String>,
 }
 
-impl TryResolve<TypRepr> for Typ {
-    fn try_resolve(
+impl ModuleLevelTryResolve<TypRepr> for Typ {
+    fn try_resolve<'pctx>(
         value: TypRepr,
-        imports: &[QualifiedId],
-        modpath: &ModPath,
-    ) -> Result<Self, ResolveError> {
+        mctx: &crate::context::ModLvlRslvCtx<'pctx>,
+    ) -> crate::RsvResult<Self> {
         match value {
             TypRepr::Primitive(p) => match p {
                 PrimTyp::Int => Ok(Typ::Int),
                 PrimTyp::Uint => Ok(Typ::Int),
                 PrimTyp::Bool => Ok(Typ::Int),
             },
-            TypRepr::Defined(deftyp) => Ok(Typ::Defined(AbsId::try_resolve(
-                deftyp.qualid,
-                imports,
-                modpath,
-            )?)),
+            TypRepr::Defined(deftyp) => Ok(Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?)),
         }
     }
 }

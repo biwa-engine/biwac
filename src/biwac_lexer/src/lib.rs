@@ -6,7 +6,7 @@ use biwac_base::ModPath;
 
 pub use token::{TkKind, TkVal, Token};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TokenizeError {
     SingleQuoteCloseNotFound,
     DoubleQuoteCloseNotFound,
