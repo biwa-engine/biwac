@@ -1,16 +1,15 @@
-use std::collections::{HashMap, hash_map::Entry};
-
+use biwac_base::Span;
 use biwac_lexer::token::{TkKind, TkVal};
 
 use crate::{
-    ParseError, QualifiedId, Stmt, TypRepr, parser::TokenStream,
+    BlockStmt, Ident, ParseError, QualifiedId, TypRepr, parser::TokenStream,
     symbols::statements::vardec::VarDec,
 };
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
-    pub id: String,
-    pub members: HashMap<String, (TypRepr, usize)>,
+    pub id: Ident,
+    pub members: Vec<(Ident, TypRepr)>,
 }
 
 #[derive(Debug)]
@@ -23,10 +22,11 @@ pub enum Globals {
 
 #[derive(Debug)]
 pub struct FnDef {
-    pub name: String,
+    pub id: Ident,
     pub args: Vec<(TypRepr, String)>,
-    pub stmts: Vec<Stmt>,
+    pub body: BlockStmt,
     pub rtype: Option<TypRepr>, // None means void
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -47,6 +47,7 @@ impl<'t> TokenStream<'t> {
                     return Ok(Some(Globals::Import(qualed_id)));
                 }
                 TkKind::Fn => {
+                    let begin = t.span.clone();
                     self.next();
 
                     let id = self.consume_identifier()?;
@@ -58,11 +59,15 @@ impl<'t> TokenStream<'t> {
                         None
                     };
 
+                    let body = self.consume_block_statement()?;
+                    let end = body.span.clone();
+
                     return Ok(Some(Globals::FnDef(FnDef {
-                        name: id,
+                        id,
                         args,
-                        stmts: self.consume_block_statement()?,
+                        body,
                         rtype,
+                        span: Span::merge(&begin, &end),
                     })));
                 }
                 TkKind::Let => {
@@ -77,8 +82,7 @@ impl<'t> TokenStream<'t> {
 
                     let _ = self.must_consume_next(vec![TkKind::LBrace])?;
 
-                    let mut members = HashMap::new();
-                    let mut member_index = 0;
+                    let mut members = vec![];
 
                     loop {
                         let t = self
@@ -102,24 +106,18 @@ impl<'t> TokenStream<'t> {
                                 let t = t.clone();
                                 let typ = self.must_consume_type_annotation()?;
 
-                                match members.entry(memberid.to_owned()) {
-                                    Entry::Occupied(_) => {
-                                        return Err(ParseError::StructMemberConflict(
-                                            id,
-                                            memberid.to_owned(),
-                                            Box::new(t),
-                                        ));
-                                    }
-                                    Entry::Vacant(e) => {
-                                        e.insert((typ, member_index));
-                                    }
-                                }
+                                members.push((
+                                    Ident {
+                                        id: memberid,
+                                        span: t.span,
+                                    },
+                                    typ,
+                                ));
 
                                 let t =
                                     self.must_consume_next(vec![TkKind::Comma, TkKind::RBrace])?;
                                 if let TkKind::Comma = t.kind {
                                     self.next();
-                                    member_index += 1;
                                     continue;
                                 } else if let TkKind::RBrace = t.kind {
                                     continue;

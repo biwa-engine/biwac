@@ -1,6 +1,6 @@
 use biwac_lexer::TkKind;
 
-use crate::{BinOperator, Exprs, ParseError, parser::TokenStream};
+use crate::{BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream};
 
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_relational_expression(&mut self) -> Result<Exprs, ParseError> {
@@ -20,44 +20,44 @@ impl<'t> TokenStream<'t> {
                     // したがって、構文木レベルで再帰適用を弾いて良い
                     let right = self.consume_arithmetic_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Lt,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Lt,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 TkKind::Greater => {
                     self.next();
 
                     let right = self.consume_arithmetic_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Gt,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Gt,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 TkKind::LesEq => {
                     self.next();
 
                     let right = self.consume_arithmetic_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Le,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Le,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 TkKind::GrtEq => {
                     self.next();
 
                     let right = self.consume_arithmetic_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Ge,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Ge,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 _ => Ok(left),
             }

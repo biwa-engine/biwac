@@ -1,6 +1,9 @@
 use biwac_lexer::{TkKind, Token};
 
-use crate::{DefTyp, ParseError, PrimTyp, TypRepr, symbols::QualifiedId};
+use crate::{
+    DefTyp, ParseError, PrimTyp, TypRepr,
+    symbols::{Ident, QualifiedId},
+};
 
 pub(crate) struct TokenStream<'t> {
     tokens: std::iter::Peekable<std::slice::Iter<'t, Token>>,
@@ -42,6 +45,31 @@ impl<'t> TokenStream<'t> {
         }
 
         Err(ParseError::InvalidToken(kinds, t.clone()))
+    }
+
+    pub(crate) fn must_consume_semicolon(&mut self) -> Result<Token, ParseError> {
+        let t = self
+            .next()
+            .ok_or(ParseError::InvalidEOF(vec![TkKind::SemiColon]))?
+            .clone();
+
+        if t.kind == TkKind::SemiColon {
+            self.next();
+            Ok(t)
+        } else {
+            Err(ParseError::InvalidToken(vec![TkKind::SemiColon], t.clone()))
+        }
+    }
+
+    pub(crate) fn opt_consume_semicolon(&mut self) -> Option<Token> {
+        if let Some(t) = self.next().cloned()
+            && t.kind == TkKind::SemiColon
+        {
+            self.next();
+            Some(t)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn must_consume_type_annotation(&mut self) -> Result<TypRepr, ParseError> {
@@ -159,13 +187,16 @@ impl<'t> TokenStream<'t> {
         }
     }
 
-    pub(crate) fn consume_identifier(&mut self) -> Result<String, ParseError> {
+    pub(crate) fn consume_identifier(&mut self) -> Result<Ident, ParseError> {
         let t = self
             .next()
             .ok_or(ParseError::InvalidEOF(vec![TkKind::Ident]))?;
 
         if let TkKind::Ident = &t.kind {
-            Ok(t.unwrap_string_value())
+            Ok(Ident {
+                id: t.unwrap_string_value(),
+                span: t.span.clone(),
+            })
         } else {
             Err(ParseError::InvalidToken(vec![TkKind::Ident], t.clone()))
         }
@@ -179,13 +210,13 @@ impl<'t> TokenStream<'t> {
             false
         };
 
-        ids.push(self.consume_identifier()?);
+        ids.push(self.consume_identifier()?.id);
 
         loop {
             if let Some(t) = self.peek() {
                 if let TkKind::DoubleColon = t.kind {
                     self.next();
-                    ids.push(self.consume_identifier()?);
+                    ids.push(self.consume_identifier()?.id);
                 } else {
                     return Ok(QualifiedId {
                         is_from_root,

@@ -1,6 +1,6 @@
 use biwac_lexer::TkKind;
 
-use crate::{BinOperator, Exprs, ParseError, parser::TokenStream};
+use crate::{BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream};
 
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_arithmetic_expression(&mut self) -> Result<Exprs, ParseError> {
@@ -19,22 +19,22 @@ impl<'t> TokenStream<'t> {
                     // 再帰的に適用され得る
                     let right = self.consume_arithmetic_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Add,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Add,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 TkKind::Minus => {
                     self.next();
 
                     let right = self.consume_arithmetic_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Sub,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Sub,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 _ => Ok(left),
             }

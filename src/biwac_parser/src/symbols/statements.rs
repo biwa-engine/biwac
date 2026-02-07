@@ -3,57 +3,103 @@ pub mod if_stmt;
 pub mod vardec;
 pub mod while_stmt;
 
+use biwac_base::Span;
 use biwac_lexer::token::TkKind;
 use if_stmt::IfStmt;
 use while_stmt::WhileStmt;
 
-use crate::{Exprs, ParseError, VarDec, parser::TokenStream, symbols::expressions::Primary};
+use crate::{BlockStmt, Exprs, ParseError, Primary, VarDec, parser::TokenStream};
 
 #[derive(Debug)]
 pub enum Stmt {
-    Block(Vec<Stmt>),
-    Expr(Exprs),
-    Return(Exprs),
-    If(Box<IfStmt>),
-    While(Box<WhileStmt>),
+    Block(BlockStmt),
+    Expr(ExprStmt),
+    Return(ReturnStmt),
+    If(IfStmt),
+    While(WhileStmt),
     VarDec(VarDec),
-    Assign(Primary, Exprs), // dst, src
+    Assign(AssignStmt),
+}
+
+#[derive(Debug)]
+pub struct ExprStmt {
+    pub expr: Exprs,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct ReturnStmt {
+    pub expr: Exprs,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct AssignStmt {
+    pub dst: Primary,
+    pub src: Exprs,
+    pub span: Span,
 }
 
 impl<'t> TokenStream<'t> {
+    // TODO: 将来的にはconsume_statement_or_expression
+    // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
     pub(crate) fn consume_statement(&mut self) -> Result<Stmt, ParseError> {
-        if let Some(t) = self.peek() {
+        if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::If => Ok(Stmt::If(Box::new(self.consume_if_statement()?))),
-                TkKind::While => Ok(Stmt::While(Box::new(self.consume_while_statement()?))),
+                TkKind::If => Ok(Stmt::If(self.consume_if_statement()?)),
+                TkKind::While => Ok(Stmt::While(self.consume_while_statement()?)),
                 TkKind::Return => {
+                    // "return" <expression> ";"
                     self.next();
-                    Ok(Stmt::Return(self.consume_expression()?))
+
+                    // <expression>
+                    let expr = self.consume_expression()?;
+
+                    // ";"
+                    let end = self.must_consume_semicolon()?.span.clone();
+
+                    Ok(Stmt::Return(ReturnStmt {
+                        expr,
+                        span: Span::merge(&t.span, &end),
+                    }))
                 }
                 TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement()?)),
                 TkKind::Let => Ok(Stmt::VarDec(self.consume_variable_declaration_statment()?)),
                 _ => {
                     let expr = self.consume_expression()?;
 
-                    if let Some(t) = self.peek().copied() {
-                        if let TkKind::Assign = t.kind {
-                            self.next();
+                    if let Some(t) = self.peek().copied()
+                        && let TkKind::Assign = t.kind
+                    {
+                        // <primary> "=" <expression> ";"
+                        self.next();
 
-                            if let Exprs::Primary(dst) = expr {
-                                let src = self.consume_expression()?;
+                        if let Exprs::Primary(dst) = expr {
+                            // <expression>
+                            let src = self.consume_expression()?;
 
-                                Ok(Stmt::Assign(dst, src))
-                            } else {
-                                Err(ParseError::InvalidToken(
-                                    vec![TkKind::Let, TkKind::If, TkKind::While, TkKind::Return],
-                                    t.to_owned(),
-                                ))
-                            }
+                            // ";"
+                            let end = self.must_consume_semicolon()?.span.clone();
+
+                            Ok(Stmt::Assign(AssignStmt {
+                                span: Span::merge(&dst.span(), &end),
+                                dst,
+                                src,
+                            }))
                         } else {
-                            Ok(Stmt::Expr(expr))
+                            Err(ParseError::InvalidToken(
+                                vec![TkKind::Let, TkKind::If, TkKind::While, TkKind::Return],
+                                t.to_owned(),
+                            ))
                         }
                     } else {
-                        Ok(Stmt::Expr(expr))
+                        // ";"
+                        let end = self.must_consume_semicolon()?.span.clone();
+
+                        Ok(Stmt::Expr(ExprStmt {
+                            span: Span::merge(&expr.span(), &end),
+                            expr,
+                        }))
                     }
                 }
             }

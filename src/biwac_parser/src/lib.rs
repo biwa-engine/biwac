@@ -5,10 +5,16 @@ pub mod types;
 use biwac_lexer::{TkKind, Token};
 
 pub use symbols::{
-    ModAst, QualifiedId,
-    expressions::{BinOperator, Exprs, FnCall, Literal, MemberAccess, Primary, UnOperator},
+    Ident, ModAst, QualifiedId,
+    expressions::{
+        BinOperator, BinaryExpr, BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, MemberAccess,
+        Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr,
+    },
     globals::{FnDef, Globals, StructDef, TypeDef},
-    statements::{Stmt, if_stmt::IfStmt, vardec::VarDec, while_stmt::WhileStmt},
+    statements::{
+        AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt, vardec::VarDec,
+        while_stmt::WhileStmt,
+    },
 };
 pub use types::{DefTyp, GenArg, PrimTyp, TypRepr};
 

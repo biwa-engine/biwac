@@ -1,6 +1,6 @@
 use biwac_lexer::TkKind;
 
-use crate::{BinOperator, Exprs, ParseError, parser::TokenStream};
+use crate::{BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream};
 
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_multiplication_expression(&mut self) -> Result<Exprs, ParseError> {
@@ -13,33 +13,33 @@ impl<'t> TokenStream<'t> {
 
                     let right = self.consume_multiplication_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Mul,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Mul,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 TkKind::Slash => {
                     self.next();
 
                     let right = self.consume_multiplication_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Div,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Div,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 TkKind::Percent => {
                     self.next();
 
                     let right = self.consume_multiplication_expression()?;
 
-                    Ok(Exprs::Binary(
-                        BinOperator::Mod,
-                        Box::new(left),
-                        Box::new(right),
-                    ))
+                    Ok(Exprs::Binary(BinaryExpr {
+                        op: BinOperator::Mod,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }))
                 }
                 _ => Ok(left),
             }

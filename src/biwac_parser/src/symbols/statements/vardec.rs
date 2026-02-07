@@ -1,41 +1,47 @@
-use biwac_lexer::{TkKind, TkVal};
+use biwac_base::Span;
+use biwac_lexer::TkKind;
 
-use crate::{Exprs, ParseError, parser::TokenStream, types::TypDecl};
+use crate::{Exprs, Ident, ParseError, parser::TokenStream, types::TypDecl};
 
 #[derive(Debug, Clone)]
 pub struct VarDec {
     pub typ: TypDecl,
-    pub name: String,
+    pub id: Ident,
     pub init: Exprs,
+    pub span: Span,
 }
 
 impl<'t> TokenStream<'t> {
+    // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"
     pub(crate) fn consume_variable_declaration_statment(&mut self) -> Result<VarDec, ParseError> {
-        let _ = self.must_consume_next(vec![TkKind::Let])?;
-        let t = self.must_consume_next(vec![TkKind::Ident])?.clone();
+        // "let"
+        let begin = self.must_consume_next(vec![TkKind::Let])?.span.clone();
+        // <identifier>
+        let id = self.consume_identifier()?;
 
-        if let TkKind::Ident = t.kind
-            && let Some(TkVal::String(id)) = t.val
-        {
-            let typ = if let Some(t) = self.opt_consume_type_annotation()? {
-                TypDecl::Typ(t)
-            } else {
-                TypDecl::Any
-            };
-
-            // NOTE: 変数宣言時、初期化は必須
-            // 代入漏れバリデーション能力が向上したら初期化しないパターンもサポートするかも
-            let _ = self.must_consume_next(vec![TkKind::Assign])?;
-
-            let init = self.consume_expression()?;
-
-            Ok(VarDec {
-                typ,
-                name: id.clone(),
-                init,
-            })
+        // (":" <type-representation>)?
+        let typ = if let Some(t) = self.opt_consume_type_annotation()? {
+            TypDecl::Typ(t)
         } else {
-            Err(ParseError::InvalidToken(vec![TkKind::Let], t.clone()))
-        }
+            TypDecl::Any
+        };
+
+        // "="
+        // NOTE: 変数宣言時、初期化は必須
+        // 代入漏れバリデーション能力が向上したら初期化しないパターンもサポートするかも
+        let _ = self.must_consume_next(vec![TkKind::Assign])?;
+
+        // <expression>
+        let init = self.consume_expression()?;
+
+        // ";"
+        let end = self.must_consume_semicolon()?.span.clone();
+
+        Ok(VarDec {
+            id,
+            typ,
+            init,
+            span: Span::merge(&begin, &end),
+        })
     }
 }

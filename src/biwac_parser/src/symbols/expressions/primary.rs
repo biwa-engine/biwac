@@ -1,9 +1,12 @@
+use biwac_base::Span;
 use biwac_lexer::TkKind;
 
 use crate::{
-    ParseError,
+    Ident, ParseError,
     parser::TokenStream,
-    symbols::expressions::{Exprs, FnCall, Literal, Primary},
+    symbols::expressions::{
+        BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, Primary, StringLiteral, StructLiteral,
+    },
 };
 
 // Primary = Literal | Identifier ( "(" ")" )? | "(" Exprs ")"
@@ -19,38 +22,56 @@ impl<'t> TokenStream<'t> {
             TkKind::IntegerLiteral => {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Integer(
-                    t.unwrap_integer_value(),
+                    IntegerLiteral {
+                        val: t.unwrap_integer_value(),
+                        span: t.span.clone(),
+                    },
                 ))))
             }
             TkKind::StringLiteral => {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::String(
-                    t.unwrap_string_value(),
+                    StringLiteral {
+                        val: t.unwrap_string_value(),
+                        span: t.span.clone(),
+                    },
                 ))))
             }
             TkKind::BoolLiteralTrue => {
                 self.next();
-                Ok(Exprs::Primary(Primary::Literal(Literal::Bool(true))))
+                Ok(Exprs::Primary(Primary::Literal(Literal::Bool(
+                    BoolLiteral {
+                        val: true,
+                        span: t.span.clone(),
+                    },
+                ))))
             }
             TkKind::BoolLiteralFalse => {
                 self.next();
-                Ok(Exprs::Primary(Primary::Literal(Literal::Bool(false))))
+                Ok(Exprs::Primary(Primary::Literal(Literal::Bool(
+                    BoolLiteral {
+                        val: false,
+                        span: t.span.clone(),
+                    },
+                ))))
             }
             TkKind::Ident => {
                 let qualed_id = self.consume_qualified_identifier()?;
 
-                if let Some(t) = self.peek() {
-                    if let TkKind::LPare = t.kind {
+                if let Some(t2) = self.peek() {
+                    if let TkKind::LPare = t2.kind {
                         self.next();
 
                         let mut args: Vec<Exprs> = vec![];
 
-                        while let Some(t) = self.peek() {
-                            if let TkKind::RPare = t.kind {
+                        while let Some(t3) = self.peek() {
+                            if let TkKind::RPare = t3.kind {
+                                let end = t3.span.clone();
                                 self.next();
                                 return Ok(Exprs::Primary(Primary::FnCall(FnCall {
                                     qualed_id,
                                     args,
+                                    span: Span::merge(&t.span, &end),
                                 })));
                             } else {
                                 let expr = self.consume_expression()?;
@@ -78,16 +99,21 @@ impl<'t> TokenStream<'t> {
                         }
 
                         Err(ParseError::InvalidEOF(vec![TkKind::RPare]))
-                    } else if let TkKind::LBrace = t.kind {
+                    } else if let TkKind::LBrace = t2.kind {
                         self.next();
 
-                        let mut members: Vec<(String, Box<Exprs>)> = vec![];
+                        let mut members: Vec<(Ident, Box<Exprs>)> = vec![];
 
-                        while let Some(t) = self.peek() {
-                            if let TkKind::RBrace = t.kind {
+                        while let Some(t3) = self.peek() {
+                            if let TkKind::RBrace = t3.kind {
+                                let end = t3.span.clone();
                                 self.next();
                                 return Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
-                                    qualed_id, members,
+                                    StructLiteral {
+                                        qualid: qualed_id,
+                                        members,
+                                        span: Span::merge(&t.span, &end),
+                                    },
                                 ))));
                             } else {
                                 let member = self.consume_identifier()?;
@@ -121,12 +147,18 @@ impl<'t> TokenStream<'t> {
                     } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
                         panic!("variable cannot qualified");
                     } else {
-                        Ok(Exprs::Primary(Primary::Variable(qualed_id.id)))
+                        Ok(Exprs::Primary(Primary::Variable(Ident {
+                            id: qualed_id.id,
+                            span: t.span.clone(),
+                        })))
                     }
                 } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
                     panic!("variable cannot qualified");
                 } else {
-                    Ok(Exprs::Primary(Primary::Variable(qualed_id.id)))
+                    Ok(Exprs::Primary(Primary::Variable(Ident {
+                        id: qualed_id.id,
+                        span: t.span.clone(),
+                    })))
                 }
             }
             TkKind::LPare => {

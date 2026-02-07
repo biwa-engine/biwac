@@ -2,13 +2,14 @@ pub mod expressions;
 pub mod globals;
 pub mod statements;
 
+use biwac_base::Span;
 use biwac_lexer::Token;
 
 use crate::{ParseError, parser::TokenStream, symbols::globals::Globals};
 
 #[derive(Debug)]
 pub struct ModAst {
-    pub globals: Vec<Globals>, // pub fns: Vec<FnDec>,
+    pub globals: Vec<Globals>,
 }
 
 impl ModAst {
@@ -30,4 +31,10 @@ pub struct QualifiedId {
     pub is_from_root: bool,
     pub quals: Vec<String>,
     pub id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Ident {
+    pub id: String,
+    pub span: Span,
 }
