@@ -4,7 +4,7 @@ use biwac_lexer::TkKind;
 use crate::{Exprs, Ident, ParseError, parser::TokenStream, types::TypDecl};
 
 #[derive(Debug, Clone)]
-pub struct VarDec {
+pub struct VarDecl {
     pub typ: TypDecl,
     pub id: Ident,
     pub init: Exprs,
@@ -13,7 +13,7 @@ pub struct VarDec {
 
 impl<'t> TokenStream<'t> {
     // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"
-    pub(crate) fn consume_variable_declaration_statment(&mut self) -> Result<VarDec, ParseError> {
+    pub(crate) fn consume_variable_declaration_statment(&mut self) -> Result<VarDecl, ParseError> {
         // "let"
         let begin = self.must_consume_next(vec![TkKind::Let])?.span.clone();
         // <identifier>
@@ -37,7 +37,7 @@ impl<'t> TokenStream<'t> {
         // ";"
         let end = self.must_consume_semicolon()?.span.clone();
 
-        Ok(VarDec {
+        Ok(VarDecl {
             id,
             typ,
             init,

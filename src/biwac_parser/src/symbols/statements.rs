@@ -8,32 +8,32 @@ use biwac_lexer::token::TkKind;
 use if_stmt::IfStmt;
 use while_stmt::WhileStmt;
 
-use crate::{BlockStmt, Exprs, ParseError, Primary, VarDec, parser::TokenStream};
+use crate::{BlockStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Block(BlockStmt),
     Expr(ExprStmt),
     Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
-    VarDec(VarDec),
+    VarDecl(VarDecl),
     Assign(AssignStmt),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExprStmt {
     pub expr: Exprs,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReturnStmt {
     pub expr: Exprs,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssignStmt {
     pub dst: Primary,
     pub src: Exprs,
@@ -64,7 +64,7 @@ impl<'t> TokenStream<'t> {
                     }))
                 }
                 TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement()?)),
-                TkKind::Let => Ok(Stmt::VarDec(self.consume_variable_declaration_statment()?)),
+                TkKind::Let => Ok(Stmt::VarDecl(self.consume_variable_declaration_statment()?)),
                 _ => {
                     let expr = self.consume_expression()?;
 

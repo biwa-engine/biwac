@@ -3,7 +3,7 @@ use biwac_lexer::TkKind;
 
 use crate::{BlockStmt, Exprs, ParseError, parser::TokenStream};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhileStmt {
     pub cond: Exprs,
     pub stmts: BlockStmt,

@@ -1,6 +1,6 @@
 const BIWA_SRC_EXT: &str = "biwa";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ModPath {
     Main,
     Lib,
@@ -28,6 +28,14 @@ pub struct Pos {
 impl Span {
     pub fn new(modu: ModPath, begin: Pos, end: Pos) -> Self {
         Self { modu, begin, end }
+    }
+
+    pub fn merge(begin: &Self, end: &Self) -> Self {
+        Self {
+            modu: begin.modu.clone(),
+            begin: begin.begin.clone(),
+            end: end.end.clone(),
+        }
     }
 
     pub fn begin(&self) -> &Pos {

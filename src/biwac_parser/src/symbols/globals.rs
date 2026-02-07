@@ -1,10 +1,7 @@
 use biwac_base::Span;
 use biwac_lexer::token::{TkKind, TkVal};
 
-use crate::{
-    BlockStmt, Ident, ParseError, QualifiedId, TypRepr, parser::TokenStream,
-    symbols::statements::vardec::VarDec,
-};
+use crate::{BlockStmt, Ident, ParseError, QualifiedId, TypRepr, VarDecl, parser::TokenStream};
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
@@ -14,13 +11,19 @@ pub struct StructDef {
 
 #[derive(Debug)]
 pub enum Globals {
-    Import(QualifiedId),
+    Import(ImportDecl),
     FnDef(FnDef),
-    VarDec(VarDec),
+    VarDecl(VarDecl),
     TypeDef(TypeDef),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct ImportDecl {
+    pub qualid: QualifiedId,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct FnDef {
     pub id: Ident,
     pub args: Vec<(TypRepr, String)>,
@@ -29,7 +32,7 @@ pub struct FnDef {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TypeDef {
     Struct(StructDef),
     // Enum(EnumType),
@@ -41,10 +44,18 @@ impl<'t> TokenStream<'t> {
         if let Some(t) = self.peek() {
             match t.kind {
                 TkKind::Import => {
+                    // "import" <qualified-identifier> ";"
+                    let begin = t.span.clone();
                     self.next();
-                    let qualed_id = self.consume_qualified_identifier()?;
+                    let qualid = self.consume_qualified_identifier()?;
 
-                    return Ok(Some(Globals::Import(qualed_id)));
+                    // ";"
+                    let end = self.must_consume_semicolon()?.span.clone();
+
+                    return Ok(Some(Globals::Import(ImportDecl {
+                        qualid,
+                        span: Span::merge(&begin, &end),
+                    })));
                 }
                 TkKind::Fn => {
                     let begin = t.span.clone();
@@ -71,7 +82,7 @@ impl<'t> TokenStream<'t> {
                     })));
                 }
                 TkKind::Let => {
-                    return Ok(Some(Globals::VarDec(
+                    return Ok(Some(Globals::VarDecl(
                         self.consume_variable_declaration_statment()?,
                     )));
                 }

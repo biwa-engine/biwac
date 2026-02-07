@@ -3,7 +3,7 @@ use biwac_lexer::TkKind;
 
 use crate::{ParseError, Stmt, parser::TokenStream};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockStmt {
     pub stmts: Vec<Stmt>,
     pub span: Span,

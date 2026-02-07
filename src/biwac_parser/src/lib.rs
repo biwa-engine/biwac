@@ -10,15 +10,15 @@ pub use symbols::{
         BinOperator, BinaryExpr, BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, MemberAccess,
         Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr,
     },
-    globals::{FnDef, Globals, StructDef, TypeDef},
+    globals::{FnDef, Globals, ImportDecl, StructDef, TypeDef},
     statements::{
-        AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt, vardec::VarDec,
+        AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt, vardec::VarDecl,
         while_stmt::WhileStmt,
     },
 };
 pub use types::{DefTyp, GenArg, PrimTyp, TypRepr};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParseError {
     InvalidToken(Vec<TkKind>, Token), // expected TokenKind, ... or TokenKind, but found Token in Token.range
     InvalidEOF(Vec<TkKind>),          // expected TokenKind, ... or TokenKind, but found EOF
