@@ -9,7 +9,7 @@ pub enum ModPath {
 
 /// `struct Span` represents span of any form of symbols,
 /// such as lexer token, AST node, and other IR node.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
     modu: ModPath,
     begin: Pos,
@@ -19,7 +19,7 @@ pub struct Span {
 /// `struct Pos` represents position in raw source codes.
 /// NOTE: `line: usize` is 0 indexed,
 ///     so when we show an error message, we have to add 1 to show real line number.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pos {
     line: usize,
     idx: usize,

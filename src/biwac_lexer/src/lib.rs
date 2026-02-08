@@ -1,6 +1,9 @@
 mod lexer;
 pub mod token;
 
+#[cfg(test)]
+mod tests;
+
 use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
 use biwac_base::ModPath;
 
@@ -17,12 +20,12 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
 
     let pretokens = pre_lex(modu, src, regions);
 
-    let mut lines = src.lines();
+    let lines: Vec<&str> = src.lines().collect();
     let tokens = pretokens
         .into_iter()
         .map(|p| match p.kind {
             PreTkKind::Word => {
-                let w = &lines.nth(p.span.begin().line()).unwrap()
+                let w = &lines.get(p.span.begin().line()).unwrap()
                     [p.span.begin().idx()..p.span.end().idx()];
 
                 let (kind, val) = match w {
@@ -66,7 +69,7 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                 kind: TkKind::StringLiteral,
                 span: p.span.clone(),
                 val: Some(TkVal::String(
-                    lines.nth(p.span.begin().line()).unwrap()
+                    lines.get(p.span.begin().line()).unwrap()
                         [p.span.begin().idx() + 1..p.span.end().idx() - 1]
                         .to_string(),
                 )),

@@ -7,7 +7,7 @@ pub struct Token {
     pub val: Option<TkVal>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TkVal {
     Integer(u64),
     String(String),

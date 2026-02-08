@@ -109,81 +109,88 @@ pub(crate) enum PreTkKind {
 }
 
 pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
-    let mut lines = src.lines();
+    let lines: Vec<&str> = src.lines().collect();
     let mut pretokens = vec![];
     for r in &regions {
         match r.kind {
             RegionKind::Raw => {
-                let lidx = r.span.begin().line();
-                let mut idx = 0;
-                let mut last_idx = 0;
-                let s = &lines.nth(lidx).unwrap()[r.span.begin().idx()..r.span.end().idx()];
-                while idx < s.len() {
-                    // two characters reserved mark
-                    if idx + 1 < s.len() {
-                        if let Some(kind) = match &s[idx..idx + 2] {
-                            "<=" => Some(TkKind::LesEq),
-                            ">=" => Some(TkKind::GrtEq),
-                            "==" => Some(TkKind::Equal),
-                            "!=" => Some(TkKind::NotEq),
-                            "->" => Some(TkKind::Arrow),
-                            "::" => Some(TkKind::DoubleColon),
+                let mut lidx = r.span.begin().line();
+                while lidx <= r.span.end().line() {
+                    // NOTE: region の開始行は開始インデックスに注意
+                    let mut idx = if lidx == r.span.begin().line() {
+                        r.span.begin().idx()
+                    } else {
+                        0
+                    };
+                    let mut last_idx = idx;
+
+                    // NOTE: region の終了行は終了インデックスに注意
+                    let line = if lidx == r.span.end().line() {
+                        &lines.get(lidx).unwrap()[idx..r.span.end().idx()]
+                    } else {
+                        &lines.get(lidx).unwrap()[idx..]
+                    };
+                    while idx < line.len() {
+                        // two characters reserved mark
+                        if idx + 1 < line.len() {
+                            if let Some(kind) = match &line[idx..idx + 2] {
+                                "<=" => Some(TkKind::LesEq),
+                                ">=" => Some(TkKind::GrtEq),
+                                "==" => Some(TkKind::Equal),
+                                "!=" => Some(TkKind::NotEq),
+                                "->" => Some(TkKind::Arrow),
+                                "::" => Some(TkKind::DoubleColon),
+                                _ => None,
+                            } {
+                                if last_idx < idx {
+                                    pretokens.push(PreToken {
+                                        kind: PreTkKind::Word,
+                                        span: Span::new(
+                                            modu.clone(),
+                                            Pos::new(lidx, last_idx),
+                                            Pos::new(lidx, idx),
+                                        ),
+                                    });
+                                }
+
+                                pretokens.push(PreToken {
+                                    kind: PreTkKind::Mark(kind),
+                                    span: Span::new(
+                                        modu.clone(),
+                                        Pos::new(lidx, idx),
+                                        Pos::new(lidx, idx + 2),
+                                    ),
+                                });
+
+                                idx += 2;
+                                last_idx = idx;
+                                continue;
+                            }
+                        }
+
+                        // single character reserved mark
+                        if let Some(kind) = match &line[idx..idx + 1] {
+                            "." => Some(TkKind::Dot),
+                            "(" => Some(TkKind::LPare),
+                            ")" => Some(TkKind::RPare),
+                            "{" => Some(TkKind::LBrace),
+                            "}" => Some(TkKind::RBrace),
+                            "[" => Some(TkKind::LBracket),
+                            "]" => Some(TkKind::RBracket),
+                            "+" => Some(TkKind::Plus),
+                            "-" => Some(TkKind::Minus),
+                            "*" => Some(TkKind::Asterisk),
+                            "/" => Some(TkKind::Slash),
+                            "%" => Some(TkKind::Percent),
+                            "&" => Some(TkKind::Ampersand),
+                            "<" => Some(TkKind::Lesser),
+                            ">" => Some(TkKind::Greater),
+                            "=" => Some(TkKind::Assign),
+                            "," => Some(TkKind::Comma),
+                            ":" => Some(TkKind::Colon),
+                            ";" => Some(TkKind::SemiColon),
                             _ => None,
                         } {
-                            pretokens.push(PreToken {
-                                kind: PreTkKind::Mark(kind),
-                                span: Span::new(
-                                    modu.clone(),
-                                    Pos::new(lidx, idx),
-                                    Pos::new(lidx, idx + 2),
-                                ),
-                            });
-
-                            idx += 2;
-                            last_idx = idx;
-                            continue;
-                        }
-                    }
-
-                    // single character reserved mark
-                    if let Some(kind) = match &s[idx..idx + 1] {
-                        "." => Some(TkKind::Dot),
-                        "(" => Some(TkKind::LPare),
-                        ")" => Some(TkKind::RPare),
-                        "{" => Some(TkKind::LBrace),
-                        "}" => Some(TkKind::RBrace),
-                        "[" => Some(TkKind::LBracket),
-                        "]" => Some(TkKind::RBracket),
-                        "+" => Some(TkKind::Plus),
-                        "-" => Some(TkKind::Minus),
-                        "*" => Some(TkKind::Asterisk),
-                        "/" => Some(TkKind::Slash),
-                        "%" => Some(TkKind::Percent),
-                        "&" => Some(TkKind::Ampersand),
-                        "<" => Some(TkKind::Lesser),
-                        ">" => Some(TkKind::Greater),
-                        "=" => Some(TkKind::Assign),
-                        "," => Some(TkKind::Comma),
-                        ":" => Some(TkKind::Colon),
-                        ";" => Some(TkKind::SemiColon),
-                        _ => None,
-                    } {
-                        pretokens.push(PreToken {
-                            kind: PreTkKind::Mark(kind),
-                            span: Span::new(
-                                modu.clone(),
-                                Pos::new(lidx, idx),
-                                Pos::new(lidx, idx + 1),
-                            ),
-                        });
-
-                        idx += 1;
-                        last_idx = idx;
-                        continue;
-                    }
-
-                    match &s[idx..idx + 1] {
-                        " " | "\t" => {
                             if last_idx < idx {
                                 pretokens.push(PreToken {
                                     kind: PreTkKind::Word,
@@ -195,24 +202,54 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                                 });
                             }
 
+                            pretokens.push(PreToken {
+                                kind: PreTkKind::Mark(kind),
+                                span: Span::new(
+                                    modu.clone(),
+                                    Pos::new(lidx, idx),
+                                    Pos::new(lidx, idx + 1),
+                                ),
+                            });
+
                             idx += 1;
                             last_idx = idx;
+                            continue;
                         }
-                        _ => {
-                            idx += 1;
+
+                        match &line[idx..idx + 1] {
+                            " " | "\t" => {
+                                if last_idx < idx {
+                                    pretokens.push(PreToken {
+                                        kind: PreTkKind::Word,
+                                        span: Span::new(
+                                            modu.clone(),
+                                            Pos::new(lidx, last_idx),
+                                            Pos::new(lidx, idx),
+                                        ),
+                                    });
+                                }
+
+                                idx += 1;
+                                last_idx = idx;
+                            }
+                            _ => {
+                                idx += 1;
+                            }
                         }
                     }
-                }
 
-                if last_idx + 1 < s.len() {
-                    pretokens.push(PreToken {
-                        kind: PreTkKind::Word,
-                        span: Span::new(
-                            modu.clone(),
-                            Pos::new(lidx, last_idx),
-                            Pos::new(lidx, s.len()),
-                        ),
-                    });
+                    if last_idx + 1 < line.len() {
+                        pretokens.push(PreToken {
+                            kind: PreTkKind::Word,
+                            span: Span::new(
+                                modu.clone(),
+                                Pos::new(lidx, last_idx),
+                                Pos::new(lidx, line.len()),
+                            ),
+                        });
+                    }
+
+                    lidx += 1;
                 }
             }
             RegionKind::StringLiteral => {
