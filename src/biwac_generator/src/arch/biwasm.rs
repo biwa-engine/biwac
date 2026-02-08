@@ -1,5 +1,5 @@
-use crate::validator::Package;
+use biwac_validator::Pkg;
 
-pub fn generate(_pkg: &Package) {
+pub fn generate(_pkg: &Pkg) {
     todo!()
 }
