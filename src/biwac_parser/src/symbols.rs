@@ -31,6 +31,7 @@ pub struct QualifiedId {
     pub is_from_root: bool,
     pub quals: Vec<String>,
     pub id: String,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

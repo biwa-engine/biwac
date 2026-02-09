@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-
-use biwac_base::ModPath;
-use biwac_parser::{VarDecl, types::TypDecl};
+use biwac_parser::{Ident, VarDecl};
 
 use crate::{
-    AbsId, Exprs, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, Typ, context::ModLvlRslvCtx,
+    Exprs, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve, Typ,
+    context::{FnLvlRslvCtx, ModLvlRslvCtx},
 };
 
 #[derive(Debug, Clone)]
@@ -29,86 +27,68 @@ pub enum TypeDefContent {
 
 #[derive(Debug, Clone)]
 pub struct StructDefContent {
-    pub members: HashMap<String, (Typ, usize)>,
+    pub members: Vec<(Ident, Typ)>,
 }
 
 impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
-    fn try_resolve<'pctx>(
+    fn try_resolve_in_module<'pctx>(
         value: biwac_parser::FnDef,
         mctx: &ModLvlRslvCtx<'pctx>,
     ) -> RsvResult<Self> {
-        todo!()
-        // Ok(Self {
-        //     args: value
-        //         .args
-        //         .into_iter()
-        //         .map(
-        //             |(atyp, aid)| match Typ::try_resolve(atyp, imports, modpath) {
-        //                 Ok(typ) => Ok((typ, aid)),
-        //                 Err(e) => Err(e),
-        //             },
-        //         )
-        //         .collect::<Result<Vec<(Typ, String)>, ResolveError>>()?,
-        //     stmts: value
-        //         .stmts
-        //         .into_iter()
-        //         .map(|stmt| Stmt::try_resolve(stmt, imports, modpath))
-        //         .collect::<Result<Vec<Stmt>, ResolveError>>()?,
-        //     rtype: value
-        //         .rtype
-        //         .map(|typ| Typ::try_resolve(typ, imports, modpath))
-        //         .transpose()?,
-        // })
+        let mut fctx = FnLvlRslvCtx::new(mctx);
+
+        Ok(Self {
+            args: value
+                .args
+                .into_iter()
+                .map(|(atyp, aid)| match Typ::try_resolve_in_module(atyp, mctx) {
+                    Ok(typ) => Ok((typ, aid)),
+                    Err(e) => Err(e),
+                })
+                .collect::<Result<Vec<(Typ, String)>, ResolveError>>()?,
+            stmts: value
+                .body
+                .stmts
+                .into_iter()
+                .map(|stmt| Stmt::try_resolve(stmt, &mut fctx))
+                .collect::<Result<Vec<Stmt>, ResolveError>>()?,
+            rtype: value
+                .rtype
+                .map(|typ| Typ::try_resolve_in_module(typ, mctx))
+                .transpose()?,
+        })
     }
 }
 
 impl ModuleLevelTryResolve<biwac_parser::StructDef> for StructDefContent {
-    fn try_resolve<'pctx>(
+    fn try_resolve_in_module<'pctx>(
         value: biwac_parser::StructDef,
         mctx: &ModLvlRslvCtx<'pctx>,
     ) -> RsvResult<Self> {
-        todo!()
+        Ok(Self {
+            members: value
+                .members
+                .into_iter()
+                .map(|(id, typ)| Typ::try_resolve_in_module(typ, mctx).map(|typ| (id, typ)))
+                .collect::<Result<Vec<_>, ResolveError>>()?,
+        })
     }
-    // fn try_resolve(
-    //     value: biwac_parser::StructDef,
-    //     imports: &[biwac_parser::QualifiedId],
-    //     modpath: &ModPath,
-    // ) -> Result<(AbsId, Self), ResolveError> {
-    //     Ok((
-    //         AbsId::new(modpath.clone().into(), value.id),
-    //         Self {
-    //             members: value
-    //                 .members
-    //                 .into_iter()
-    //                 .map(|(id, (typ, index))| {
-    //                     Typ::try_resolve(typ, imports, modpath).map(|typ| (id, (typ, index)))
-    //                 })
-    //                 .collect::<Result<HashMap<String, (Typ, usize)>, ResolveError>>()?,
-    //         },
-    //     ))
-    // }
 }
 
 impl ModuleLevelTryResolve<VarDecl> for GlobalVarDecl {
-    fn try_resolve<'pctx>(value: VarDecl, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self> {
+    fn try_resolve_in_module<'pctx>(
+        value: VarDecl,
+        mctx: &ModLvlRslvCtx<'pctx>,
+    ) -> RsvResult<Self> {
         todo!()
+        // let typ = match value.typ {
+        //     TypDecl::Any => None,
+        //     TypDecl::Typ(t) => Some(Typ::try_resolve(t, mctx)?),
+        // };
+        //
+        // Ok(Self {
+        //     typ,
+        //     init: Exprs::try_resolve(value.init, mctx)?,
+        // })
     }
-    // fn try_resolve(
-    //     value: VarDecl,
-    //     imports: &[biwac_parser::QualifiedId],
-    //     modpath: &ModPath,
-    // ) -> Result<(AbsId, Self), ResolveError> {
-    //     let typ = match value.typ {
-    //         TypDecl::Any => None,
-    //         TypDecl::Typ(t) => Some(Typ::try_resolve(t, imports, modpath)?),
-    //     };
-    //
-    //     Ok((
-    //         AbsId::new(modpath.clone().into(), value.name),
-    //         Self {
-    //             typ,
-    //             init: Exprs::try_resolve(value.init, imports, modpath)?,
-    //         },
-    //     ))
-    // }
 }

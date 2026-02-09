@@ -1,4 +1,4 @@
-use biwac_parser::{PrimTyp, TypRepr};
+use biwac_parser::{PrimTyp, TypRepr, TypReprVal};
 
 use crate::{AbsId, ModuleLevelTryResolve};
 
@@ -19,17 +19,19 @@ pub struct FnTyp {
 }
 
 impl ModuleLevelTryResolve<TypRepr> for Typ {
-    fn try_resolve<'pctx>(
+    fn try_resolve_in_module<'pctx>(
         value: TypRepr,
         mctx: &crate::context::ModLvlRslvCtx<'pctx>,
     ) -> crate::RsvResult<Self> {
-        match value {
-            TypRepr::Primitive(p) => match p {
+        match value.val {
+            TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => Ok(Typ::Int),
                 PrimTyp::Uint => Ok(Typ::Int),
                 PrimTyp::Bool => Ok(Typ::Int),
             },
-            TypRepr::Defined(deftyp) => Ok(Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?)),
+            TypReprVal::Defined(deftyp) => {
+                Ok(Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?))
+            }
         }
     }
 }

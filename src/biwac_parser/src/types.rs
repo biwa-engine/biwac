@@ -1,3 +1,5 @@
+use biwac_base::Span;
+
 use crate::symbols::QualifiedId;
 
 // NOTE:
@@ -27,7 +29,13 @@ pub enum TypDecl {
 ///                |          |          |           |
 /// All of them are representation of types.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypRepr {
+pub struct TypRepr {
+    pub val: TypReprVal,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypReprVal {
     Primitive(PrimTyp),
     Defined(DefTyp),
     // NOTE:

@@ -19,7 +19,7 @@ pub use symbols::{
         while_stmt::WhileStmt,
     },
 };
-pub use types::{DefTyp, GenArg, PrimTyp, TypRepr};
+pub use types::{DefTyp, GenArg, PrimTyp, TypRepr, TypReprVal};
 
 #[derive(Debug, Clone)]
 pub enum ParseError {

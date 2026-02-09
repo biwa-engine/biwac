@@ -1,7 +1,8 @@
+use biwac_base::Span;
 use biwac_lexer::{TkKind, Token};
 
 use crate::{
-    DefTyp, ParseError, PrimTyp, TypRepr,
+    DefTyp, ParseError, PrimTyp, TypRepr, TypReprVal,
     symbols::{Ident, QualifiedId},
 };
 
@@ -105,25 +106,43 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn consume_type_representaion(&mut self) -> Result<TypRepr, ParseError> {
         if let Some(t) = self.peek() {
             if let TkKind::Uint = t.kind {
+                let span = t.span.clone();
                 self.next();
-                Ok(TypRepr::Primitive(PrimTyp::Uint))
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Uint),
+                    span,
+                })
             } else if let TkKind::Int = t.kind {
+                let span = t.span.clone();
                 self.next();
-                Ok(TypRepr::Primitive(PrimTyp::Int))
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Int),
+                    span,
+                })
             } else if let TkKind::Bool = t.kind {
+                let span = t.span.clone();
                 self.next();
-                Ok(TypRepr::Primitive(PrimTyp::Bool))
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Bool),
+                    span,
+                })
             } else if let TkKind::Ident = t.kind {
                 // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
                 let qualid = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args()?;
 
-                Ok(TypRepr::Defined(DefTyp { qualid, genargs }))
+                Ok(TypRepr {
+                    span: qualid.span.clone(),
+                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
+                })
             } else if let TkKind::Package = t.kind {
                 let qualid = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args()?;
 
-                Ok(TypRepr::Defined(DefTyp { qualid, genargs }))
+                Ok(TypRepr {
+                    span: qualid.span.clone(),
+                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
+                })
             } else {
                 Err(ParseError::InvalidToken(
                     vec![TkKind::Uint, TkKind::Int, TkKind::Bool, TkKind::Ident],
@@ -204,29 +223,35 @@ impl<'t> TokenStream<'t> {
 
     pub(crate) fn consume_qualified_identifier(&mut self) -> Result<QualifiedId, ParseError> {
         let mut ids = vec![];
-        let is_from_root = if let Some(t) = self.peek()
+        let (is_from_root, begin, mut end) = if let Some(t) = self.peek().cloned()
             && matches!(t.kind, TkKind::Package)
         {
             self.next();
             self.must_consume_next(vec![TkKind::DoubleColon])?;
 
-            true
-        } else {
-            false
-        };
+            ids.push(self.consume_identifier()?.id);
 
-        ids.push(self.consume_identifier()?.id);
+            (true, t.span.clone(), t.span.clone())
+        } else {
+            let ident = self.consume_identifier()?;
+            ids.push(ident.id);
+
+            (false, ident.span.clone(), ident.span)
+        };
 
         loop {
             if let Some(t) = self.peek() {
                 if let TkKind::DoubleColon = t.kind {
                     self.next();
-                    ids.push(self.consume_identifier()?.id);
+                    let ident = self.consume_identifier()?;
+                    ids.push(ident.id);
+                    end = ident.span;
                 } else {
                     return Ok(QualifiedId {
                         is_from_root,
                         quals: ids[..ids.len() - 1].to_vec(),
                         id: ids.last().expect("no identifier parsed").clone(),
+                        span: Span::merge(&begin, &end),
                     });
                 }
             } else {
@@ -234,6 +259,7 @@ impl<'t> TokenStream<'t> {
                     is_from_root,
                     quals: ids[..ids.len() - 1].to_vec(),
                     id: ids.last().expect("no identifier parsed").clone(),
+                    span: Span::merge(&begin, &end),
                 });
             }
         }

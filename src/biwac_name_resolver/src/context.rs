@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
-use biwac_base::ModPath;
+use biwac_base::{ModPath, Span};
 use biwac_package_loader::Pkg;
-use biwac_parser::{Globals, Ident, ImportDecl, ModAst, PrimTyp, QualifiedId, TypRepr, TypeDef};
+use biwac_parser::{
+    Globals, Ident, ImportDecl, ModAst, PrimTyp, QualifiedId, TypRepr, TypReprVal, TypeDef,
+};
 
 use crate::{AbsId, ResolveError, RsvResult, TryResolve, Typ};
 
@@ -140,7 +142,7 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
             } else if let Some(i) = self.imports.get(&qualid.id) {
                 // `import package::piyo::foo::hoge` の場合
                 if i.qualid.is_from_root {
-                    Ok(AbsId::new(qualid.quals.clone(), qualid.id.clone()))
+                    Ok(AbsId::new(i.qualid.quals.clone(), qualid.id.clone()))
                 } else {
                     // `import piyo::foo::hoge` の場合
                     // TODO: 外部packageとの区別
@@ -151,7 +153,12 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
                     ))
                 }
             } else {
-                Err(ResolveError::IdentifierNotFound(qualid.clone()))
+                // 現在のモジュールからの相対パス
+                // TODO: 外部packageとの区別
+                Ok(AbsId::new(
+                    [self.modpath.clone().into(), qualid.quals.clone()].concat(),
+                    qualid.id.clone(),
+                ))
             }
         } else if let Some(i) = self.imports.get(qualid.quals.first().unwrap()) {
             // `import hoge::fuga; fuga::piyo::foo` の場合
@@ -173,13 +180,21 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
                 Ok(AbsId::new(quals, qualid.id.clone()))
             }
         } else {
-            Err(ResolveError::IdentifierNotFound(qualid.clone()))
+            // 現在のモジュールからの相対パス
+            // TODO: 外部packageとの区別
+            Ok(AbsId::new(
+                [self.modpath.clone().into(), qualid.quals.clone()].concat(),
+                qualid.id.clone(),
+            ))
         }?;
 
         if self.pkgctx.syms.contains(&absid) {
             Ok(absid)
         } else {
-            Err(ResolveError::PackageSymbolNotFound(absid))
+            Err(ResolveError::PackageSymbolNotFound {
+                qualid: Box::new(qualid.clone()),
+                absid: Box::new(absid),
+            })
         }
     }
 
@@ -196,7 +211,7 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
             } else if let Some(i) = self.imports.get(&qualid.id) {
                 // `import package::piyo::foo::hoge` の場合
                 if i.qualid.is_from_root {
-                    Ok(AbsId::new(qualid.quals.clone(), qualid.id.clone()))
+                    Ok(AbsId::new(i.qualid.quals.clone(), qualid.id.clone()))
                 } else {
                     // `import piyo::foo::hoge` の場合
                     // TODO: 外部packageとの区別
@@ -207,7 +222,12 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
                     ))
                 }
             } else {
-                Err(ResolveError::IdentifierNotFound(qualid.clone()))
+                // 現在のモジュールからの相対パス
+                // TODO: 外部packageとの区別
+                Ok(AbsId::new(
+                    [self.modpath.clone().into(), qualid.quals.clone()].concat(),
+                    qualid.id.clone(),
+                ))
             }
         } else if let Some(i) = self.imports.get(qualid.quals.first().unwrap()) {
             // `import hoge::fuga; fuga::piyo::foo` の場合
@@ -229,13 +249,21 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
                 Ok(AbsId::new(quals, qualid.id.clone()))
             }
         } else {
-            Err(ResolveError::IdentifierNotFound(qualid.clone()))
+            // 現在のモジュールからの相対パス
+            // TODO: 外部packageとの区別
+            Ok(AbsId::new(
+                [self.modpath.clone().into(), qualid.quals.clone()].concat(),
+                qualid.id.clone(),
+            ))
         }?;
 
         if self.pkgctx.syms.contains(&absid) {
             Ok(absid)
         } else {
-            Err(ResolveError::PackageSymbolNotFound(absid))
+            Err(ResolveError::PackageSymbolNotFound {
+                qualid: Box::new(qualid.clone()),
+                absid: Box::new(absid),
+            })
         }
     }
 }
@@ -282,13 +310,13 @@ impl TryResolve<TypRepr> for Typ {
         value: TypRepr,
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> crate::RsvResult<Self> {
-        match value {
-            TypRepr::Primitive(p) => match p {
+        match value.val {
+            TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => Ok(Typ::Int),
                 PrimTyp::Uint => Ok(Typ::Int),
                 PrimTyp::Bool => Ok(Typ::Int),
             },
-            TypRepr::Defined(deftyp) => Ok(Typ::Defined(
+            TypReprVal::Defined(deftyp) => Ok(Typ::Defined(
                 fctx.modctx.try_resolve_deftyp(&deftyp.qualid)?,
             )),
         }

@@ -2,6 +2,9 @@ pub(crate) mod context;
 mod symbols;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 
 use biwac_base::ModPath;
@@ -39,8 +42,13 @@ use crate::{
 
 #[derive(Debug)]
 pub enum ResolveError {
-    PackageSymbolNotFound(AbsId),
-    IdentifierNotFound(QualifiedId),
+    PackageSymbolNotFound {
+        qualid: Box<QualifiedId>,
+        absid: Box<AbsId>,
+    },
+    IdentifierNotFound {
+        qualid: QualifiedId,
+    },
     DuplicatedImportedName {
         name: String,
         imp1: Box<ImportDecl>,
@@ -76,7 +84,10 @@ impl PkgSymMap {
                     biwac_parser::Globals::Import(_) => {}
                     biwac_parser::Globals::FnDef(f) => {
                         let id = AbsId::from_modpath(&modpath, f.id.id.clone());
-                        syms.insert(id, ModSym::FnDef(FnDefContent::try_resolve(f, &mctx)?));
+                        syms.insert(
+                            id,
+                            ModSym::FnDef(FnDefContent::try_resolve_in_module(f, &mctx)?),
+                        );
                     }
                     biwac_parser::Globals::TypeDef(t) => match t {
                         TypeDef::Struct(s) => {
@@ -84,14 +95,17 @@ impl PkgSymMap {
                             syms.insert(
                                 id,
                                 ModSym::TypeDef(TypeDefContent::Struct(
-                                    StructDefContent::try_resolve(s, &mctx)?,
+                                    StructDefContent::try_resolve_in_module(s, &mctx)?,
                                 )),
                             );
                         }
                     },
                     biwac_parser::Globals::VarDecl(v) => {
                         let id = AbsId::from_modpath(&modpath, v.id.id.clone());
-                        syms.insert(id, ModSym::VarDecl(GlobalVarDecl::try_resolve(v, &mctx)?));
+                        syms.insert(
+                            id,
+                            ModSym::VarDecl(GlobalVarDecl::try_resolve_in_module(v, &mctx)?),
+                        );
                     }
                 }
             }
@@ -130,5 +144,5 @@ trait TryResolve<T>: Sized {
 }
 
 trait ModuleLevelTryResolve<T>: Sized {
-    fn try_resolve<'pctx>(value: T, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self>;
+    fn try_resolve_in_module<'pctx>(value: T, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self>;
 }
