@@ -3,7 +3,7 @@ use biwac_lexer::TkKind;
 
 use crate::{ParseError, Stmt, parser::TokenStream};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStmt {
     pub stmts: Vec<Stmt>,
     pub span: Span,
@@ -24,14 +24,14 @@ impl<'t> TokenStream<'t> {
                         stmts,
                         span: Span::merge(&begin, &end),
                     });
+                } else {
+                    let stmt = self.consume_statement()?;
+
+                    stmts.push(stmt);
                 }
             } else {
                 return Err(ParseError::InvalidEOF(vec![TkKind::RBrace]));
             }
-
-            let stmt = self.consume_statement()?;
-
-            stmts.push(stmt);
         }
     }
 }

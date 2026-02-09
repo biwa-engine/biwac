@@ -7,7 +7,7 @@ fn test1() {
     let modu = ModPath::Main;
 
     // NOTE: Rustの生文字列の扱いでは以下の場合
-    // から文字列の0行目が含まれ、fnは1行目となるため注意
+    // 空文字列の0行目が含まれ、fnは1行目となるため注意
     let src = r#"
 fn foo() {
     let x = 0;

@@ -3,7 +3,7 @@ use biwac_lexer::TkKind;
 
 use crate::{Exprs, Ident, ParseError, parser::TokenStream, types::TypDecl};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarDecl {
     pub typ: TypDecl,
     pub id: Ident,

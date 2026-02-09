@@ -10,7 +10,7 @@ use biwac_base::Span;
 
 use crate::{Ident, ParseError, parser::TokenStream, symbols::QualifiedId};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primary {
     Literal(Literal),
     Variable(Ident),
@@ -30,7 +30,7 @@ impl Primary {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnCall {
     pub qualed_id: QualifiedId,
     pub args: Vec<Exprs>,
@@ -38,7 +38,7 @@ pub struct FnCall {
 }
 
 // id . (member | methodcall ) . (member | methodcall) . ...
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemberAccess {
     pub left: Box<Exprs>,
     pub member: Ident,
@@ -57,7 +57,7 @@ impl MemberAccess {
 //     pub args: Vec<Exprs>,
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Integer(IntegerLiteral),
     // Float(f64),
@@ -77,32 +77,32 @@ impl Literal {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegerLiteral {
     pub val: u64,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolLiteral {
     pub val: bool,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringLiteral {
     pub val: String,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLiteral {
     pub qualid: QualifiedId,
     pub members: Vec<(Ident, Box<Exprs>)>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Exprs {
     Primary(Primary),
     Unary(UnaryExpr),
@@ -119,7 +119,7 @@ impl Exprs {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOperator {
     Add, // +
     Sub, // -
@@ -134,7 +134,7 @@ pub enum BinOperator {
     Ne,  // !=
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryExpr {
     pub op: BinOperator,
     pub left: Box<Exprs>,
@@ -147,13 +147,13 @@ impl BinaryExpr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOperator {
     Neg, // -
          // Not, // !
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnaryExpr {
     pub op: UnOperator,
     pub right: Box<Exprs>,

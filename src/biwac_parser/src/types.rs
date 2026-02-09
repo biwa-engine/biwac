@@ -15,7 +15,7 @@ use crate::symbols::QualifiedId;
 /// Type declaration, especially for variable declataion.
 /// Variables often do not have explicit type representation.
 /// If not, we mark as `Any` and must inter its type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypDecl {
     Any,
     Typ(TypRepr),
@@ -26,7 +26,7 @@ pub enum TypDecl {
 ///                ^^^^       ^^^^^^     ^^          ^^^^
 ///                |          |          |           |
 /// All of them are representation of types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypRepr {
     Primitive(PrimTyp),
     Defined(DefTyp),
@@ -47,7 +47,7 @@ pub enum PrimTyp {
 }
 
 /// User-defined types such as `struct Foo`, `enum Bar`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefTyp {
     pub qualid: QualifiedId,
     pub genargs: Vec<TypRepr>,

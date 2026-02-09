@@ -5,6 +5,7 @@ use crate::{
     symbols::{Ident, QualifiedId},
 };
 
+#[derive(Debug)]
 pub(crate) struct TokenStream<'t> {
     tokens: std::iter::Peekable<std::slice::Iter<'t, Token>>,
 }
@@ -54,7 +55,6 @@ impl<'t> TokenStream<'t> {
             .clone();
 
         if t.kind == TkKind::SemiColon {
-            self.next();
             Ok(t)
         } else {
             Err(ParseError::InvalidToken(vec![TkKind::SemiColon], t.clone()))
@@ -62,11 +62,11 @@ impl<'t> TokenStream<'t> {
     }
 
     pub(crate) fn opt_consume_semicolon(&mut self) -> Option<Token> {
-        if let Some(t) = self.next().cloned()
+        if let Some(t) = self.peek().cloned()
             && t.kind == TkKind::SemiColon
         {
             self.next();
-            Some(t)
+            Some(t.to_owned())
         } else {
             None
         }

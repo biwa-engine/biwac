@@ -26,14 +26,14 @@ impl ModAst {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualifiedId {
     pub is_from_root: bool,
     pub quals: Vec<String>,
     pub id: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
     pub id: String,
     pub span: Span,

@@ -10,7 +10,7 @@ use while_stmt::WhileStmt;
 
 use crate::{BlockStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Block(BlockStmt),
     Expr(ExprStmt),
@@ -21,19 +21,19 @@ pub enum Stmt {
     Assign(AssignStmt),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprStmt {
     pub expr: Exprs,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnStmt {
     pub expr: Exprs,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignStmt {
     pub dst: Primary,
     pub src: Exprs,
@@ -88,7 +88,7 @@ impl<'t> TokenStream<'t> {
                             }))
                         } else {
                             Err(ParseError::InvalidToken(
-                                vec![TkKind::Let, TkKind::If, TkKind::While, TkKind::Return],
+                                vec![TkKind::SemiColon],
                                 t.to_owned(),
                             ))
                         }

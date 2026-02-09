@@ -2,6 +2,9 @@ mod parser;
 pub mod symbols;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 use biwac_lexer::{TkKind, Token};
 
 pub use symbols::{

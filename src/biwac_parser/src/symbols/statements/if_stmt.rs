@@ -3,7 +3,7 @@ use biwac_lexer::TkKind;
 
 use crate::{BlockStmt, Exprs, ParseError, parser::TokenStream};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfStmt {
     pub cond: Exprs,
     pub then: BlockStmt,
