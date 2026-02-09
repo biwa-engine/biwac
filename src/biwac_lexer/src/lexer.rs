@@ -125,10 +125,11 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                     let mut last_idx = idx;
 
                     // NOTE: region の終了行は終了インデックスに注意
+                    // なお、lineは対象行の0文字目からregion終了インデックスまで
                     let line = if lidx == r.span.end().line() {
-                        &lines.get(lidx).unwrap()[idx..r.span.end().idx()]
+                        &lines.get(lidx).unwrap()[..r.span.end().idx()]
                     } else {
-                        &lines.get(lidx).unwrap()[idx..]
+                        lines.get(lidx).unwrap()
                     };
                     while idx < line.len() {
                         // two characters reserved mark

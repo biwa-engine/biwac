@@ -23,11 +23,55 @@ fn foo() {
     assert_eq!(TkKind::Ident, tokens[1].kind);
     assert_eq!(Some(TkVal::String("foo".to_string())), tokens[1].val);
     assert_eq!(
-        Span::new(modu, Pos::new(1, 3), Pos::new(1, 6),),
+        Span::new(modu.clone(), Pos::new(1, 3), Pos::new(1, 6),),
         tokens[1].span
     );
 
     assert_eq!(TkKind::LPare, tokens[2].kind);
 
     assert_eq!(TkKind::RPare, tokens[3].kind);
+
+    assert_eq!(TkKind::LBrace, tokens[4].kind);
+
+    assert_eq!(TkKind::Let, tokens[5].kind);
+
+    assert_eq!(TkKind::Ident, tokens[6].kind);
+    assert_eq!(Some(TkVal::String("x".to_string())), tokens[6].val);
+    assert_eq!(
+        Span::new(modu.clone(), Pos::new(2, 8), Pos::new(2, 9),),
+        tokens[6].span
+    );
+
+    assert_eq!(TkKind::Assign, tokens[7].kind);
+
+    assert_eq!(TkKind::IntegerLiteral, tokens[8].kind);
+    assert_eq!(Some(TkVal::Integer(0)), tokens[8].val);
+    assert_eq!(
+        Span::new(modu.clone(), Pos::new(2, 12), Pos::new(2, 13),),
+        tokens[8].span
+    );
+
+    assert_eq!(TkKind::SemiColon, tokens[9].kind);
+
+    assert_eq!(TkKind::Let, tokens[10].kind);
+
+    assert_eq!(TkKind::Ident, tokens[11].kind);
+    assert_eq!(Some(TkVal::String("str".to_string())), tokens[11].val);
+    assert_eq!(
+        Span::new(modu.clone(), Pos::new(4, 8), Pos::new(4, 11),),
+        tokens[11].span
+    );
+
+    assert_eq!(TkKind::Assign, tokens[12].kind);
+
+    assert_eq!(TkKind::StringLiteral, tokens[13].kind);
+    assert_eq!(Some(TkVal::String("string".to_string())), tokens[13].val);
+    assert_eq!(
+        Span::new(modu.clone(), Pos::new(4, 14), Pos::new(4, 22),),
+        tokens[13].span
+    );
+
+    assert_eq!(TkKind::SemiColon, tokens[14].kind);
+
+    assert_eq!(TkKind::RBrace, tokens[15].kind);
 }
