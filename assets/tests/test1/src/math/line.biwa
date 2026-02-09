@@ -1,0 +1,6 @@
+import package::math::pos::Pos;
+
+struct Line {
+  begin: Pos,
+  end: Pos,
+}

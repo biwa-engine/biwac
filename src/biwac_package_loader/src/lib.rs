@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::HashMap,
     fs::File,
@@ -115,7 +118,7 @@ impl Pkg {
             modules.insert(modpath.clone(), module);
 
             if let Some(dir) = dirs.get(&id) {
-                let submodules = Self::try_load_from_dir(dir, modpath.push(id.to_owned()))?.modules;
+                let submodules = Self::try_load_from_dir(dir, modpath)?.modules;
                 modules.extend(submodules);
             }
         }

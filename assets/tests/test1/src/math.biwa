@@ -1,0 +1,7 @@
+fn fact(n: Int) -> Int {
+  if n == 0 {
+    return 1;
+  } else {
+    return n * fact(n - 1);
+  }
+}

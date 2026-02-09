@@ -128,10 +128,11 @@ impl<'t> TokenStream<'t> {
                                 let t =
                                     self.must_consume_next(vec![TkKind::Comma, TkKind::RBrace])?;
                                 if let TkKind::Comma = t.kind {
-                                    self.next();
                                     continue;
                                 } else if let TkKind::RBrace = t.kind {
-                                    continue;
+                                    return Ok(Some(Globals::TypeDef(TypeDef::Struct(
+                                        StructDef { id, members },
+                                    ))));
                                 }
                             } else {
                                 return Err(ParseError::InvalidToken(

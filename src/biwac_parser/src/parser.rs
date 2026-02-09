@@ -204,8 +204,13 @@ impl<'t> TokenStream<'t> {
 
     pub(crate) fn consume_qualified_identifier(&mut self) -> Result<QualifiedId, ParseError> {
         let mut ids = vec![];
-        let is_from_root = if let Some(t) = self.peek() {
-            matches!(t.kind, TkKind::Package)
+        let is_from_root = if let Some(t) = self.peek()
+            && matches!(t.kind, TkKind::Package)
+        {
+            self.next();
+            self.must_consume_next(vec![TkKind::DoubleColon])?;
+
+            true
         } else {
             false
         };
