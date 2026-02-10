@@ -13,7 +13,7 @@ pub use symbols::{
         BinOperator, BinaryExpr, BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, MemberAccess,
         Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr,
     },
-    globals::{FnDef, Globals, ImportDecl, StructDef, TypeDef},
+    globals::{ArgDecl, FnDef, Globals, ImportDecl, StructDef, TypeDef},
     statements::{
         AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt, vardec::VarDecl,
         while_stmt::WhileStmt,

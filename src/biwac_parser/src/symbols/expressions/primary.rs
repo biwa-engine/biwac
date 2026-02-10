@@ -145,7 +145,10 @@ impl<'t> TokenStream<'t> {
 
                         Err(ParseError::InvalidEOF(vec![TkKind::RBrace]))
                     } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                        panic!("variable cannot qualified");
+                        Err(ParseError::InvalidToken(
+                            vec![TkKind::LPare, TkKind::LBrace],
+                            t2.to_owned().clone(),
+                        ))
                     } else {
                         Ok(Exprs::Primary(Primary::Variable(Ident {
                             id: qualed_id.id,
@@ -153,7 +156,7 @@ impl<'t> TokenStream<'t> {
                         })))
                     }
                 } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                    panic!("variable cannot qualified");
+                    Err(ParseError::InvalidEOF(vec![TkKind::LPare, TkKind::LBrace]))
                 } else {
                     Ok(Exprs::Primary(Primary::Variable(Ident {
                         id: qualed_id.id,

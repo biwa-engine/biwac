@@ -1,13 +1,7 @@
 use biwac_base::Span;
-use biwac_parser::{Ident, types::TypDecl};
+use biwac_parser::types::TypDecl;
 
-use crate::{
-    Exprs,
-    Primary,
-    RsvResult,
-    TryResolve,
-    Typ, // resolver::{ResolveError, TryResolve},
-};
+use crate::{Exprs, LocVarId, Primary, RsvResult, TryResolve, Typ};
 
 #[derive(Debug, Clone)]
 pub struct BlockStmt {
@@ -30,8 +24,7 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone)]
 pub struct VarDecl {
-    pub typ: Option<Typ>,
-    pub id: Ident,
+    pub id: LocVarId,
     pub init: Exprs,
 }
 
@@ -73,14 +66,23 @@ impl TryResolve<biwac_parser::Stmt> for Stmt {
         match value {
             biwac_parser::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx)?)),
             biwac_parser::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx)?)),
-            biwac_parser::Stmt::Block(b) => Ok(Self::Block(BlockStmt {
-                span: b.span,
-                stmts: b
+            biwac_parser::Stmt::Block(b) => {
+                // ブロック文はスコープを作る
+                fctx.enter_scope();
+
+                let stmts = b
                     .stmts
                     .into_iter()
                     .map(|stmt| Stmt::try_resolve(stmt, fctx))
-                    .collect::<RsvResult<Vec<Stmt>>>()?,
-            })),
+                    .collect::<RsvResult<Vec<Stmt>>>()?;
+
+                fctx.exit_scope();
+
+                Ok(Self::Block(BlockStmt {
+                    span: b.span,
+                    stmts,
+                }))
+            }
             biwac_parser::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
                 span: expr.span,
                 expr: Exprs::try_resolve(expr.expr, fctx)?,
@@ -155,17 +157,15 @@ impl TryResolve<biwac_parser::VarDecl> for VarDecl {
         value: biwac_parser::VarDecl,
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> crate::RsvResult<Self> {
-        // TODO:
-        // LocVarIdを発行し、
-        // fctxの現在の変数スコープに名前 -> LocVarIdのマップを保存
-        // fctxの現在の変数スコープに同じ名前があればエラー
-        //  -> そのエラーを上手く出すため、 LocVarId -> Identのマップも持っていたほうが良い
+        // 変数の宣言をcontextに登録
+        let typ = match value.typ {
+            TypDecl::Typ(typ) => Some(Typ::try_resolve(typ, fctx)?),
+            TypDecl::Any => None,
+        };
+        let id = fctx.declare_variable(&value.id, typ)?;
+
         Ok(Self {
-            typ: match value.typ {
-                TypDecl::Typ(typ) => Some(Typ::try_resolve(typ, fctx)?),
-                TypDecl::Any => None,
-            },
-            id: value.id,
+            id,
             init: Exprs::try_resolve(value.init, fctx)?,
         })
     }

@@ -26,9 +26,16 @@ pub struct ImportDecl {
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub id: Ident,
-    pub args: Vec<(TypRepr, String)>,
+    pub args: Vec<ArgDecl>,
     pub body: BlockStmt,
     pub rtype: Option<TypRepr>, // None means void
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgDecl {
+    pub typ: TypRepr,
+    pub id: Ident,
     pub span: Span,
 }
 
@@ -154,7 +161,7 @@ impl<'t> TokenStream<'t> {
 
         Ok(None)
     }
-    pub(crate) fn consume_argsdec(&mut self) -> Result<Vec<(TypRepr, String)>, ParseError> {
+    pub(crate) fn consume_argsdec(&mut self) -> Result<Vec<ArgDecl>, ParseError> {
         self.must_consume_next(vec![TkKind::LPare])?;
 
         let mut args = vec![];
@@ -172,7 +179,14 @@ impl<'t> TokenStream<'t> {
             {
                 let typ = self.must_consume_type_annotation()?;
 
-                args.push((typ, arg.clone()));
+                args.push(ArgDecl {
+                    span: Span::merge(&t.span, &typ.span),
+                    typ,
+                    id: Ident {
+                        id: arg.clone(),
+                        span: t.span.clone(),
+                    },
+                });
 
                 if let Some(t) = self.peek() {
                     if let TkKind::Comma = t.kind {

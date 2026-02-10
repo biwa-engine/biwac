@@ -23,10 +23,16 @@ impl Exprs {
 #[derive(Debug, Clone)]
 pub enum Primary {
     Literal(Literal),
-    Variable(Ident), // TODO: support using external module variables
+    Variable(Variable), // TODO: support using external module variables
     FnCall(FnCall),
     MemberAccess(MemberAccess),
     // MethodCall(MethodCall),
+}
+
+#[derive(Debug, Clone)]
+pub struct Variable {
+    pub id: ResolvedIdent,
+    pub span: Span,
 }
 
 impl Primary {
@@ -121,7 +127,10 @@ impl TryResolve<biwac_parser::Primary> for Primary {
     ) -> crate::RsvResult<Self> {
         match value {
             biwac_parser::Primary::Literal(l) => Ok(Self::Literal(Literal::try_resolve(l, fctx)?)),
-            biwac_parser::Primary::Variable(v) => Ok(Self::Variable(v)),
+            biwac_parser::Primary::Variable(v) => Ok(Self::Variable(Variable {
+                id: fctx.try_resolve_variable(&v)?,
+                span: v.span,
+            })),
             biwac_parser::Primary::FnCall(f) => Ok(Self::FnCall(FnCall::try_resolve(f, fctx)?)),
             biwac_parser::Primary::MemberAccess(m) => {
                 Ok(Self::MemberAccess(MemberAccess::try_resolve(m, fctx)?))

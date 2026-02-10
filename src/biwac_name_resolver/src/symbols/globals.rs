@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use biwac_parser::{Ident, VarDecl};
 
 use crate::{
-    Exprs, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve, Typ,
+    DecledVar, Exprs, LocVarId, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve,
+    Typ,
     context::{FnLvlRslvCtx, ModLvlRslvCtx},
 };
 
@@ -13,9 +16,15 @@ pub struct GlobalVarDecl {
 
 #[derive(Debug)]
 pub struct FnDefContent {
-    pub args: Vec<(Typ, String)>,
+    pub args: Vec<DecledArg>,
     pub stmts: Vec<Stmt>,
     pub rtype: Option<Typ>, // None means void
+    pub vars: HashMap<LocVarId, DecledVar>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DecledArg {
+    pub id: LocVarId,
 }
 
 #[derive(Debug, Clone)]
@@ -35,17 +44,23 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
         value: biwac_parser::FnDef,
         mctx: &ModLvlRslvCtx<'pctx>,
     ) -> RsvResult<Self> {
+        // 関数のベースのスコープも初期化される
         let mut fctx = FnLvlRslvCtx::new(mctx);
 
         Ok(Self {
             args: value
                 .args
                 .into_iter()
-                .map(|(atyp, aid)| match Typ::try_resolve_in_module(atyp, mctx) {
-                    Ok(typ) => Ok((typ, aid)),
+                .map(|arg| match Typ::try_resolve_in_module(arg.typ, mctx) {
+                    Ok(typ) => {
+                        // 引数も変数の宣言として記録
+                        let id = fctx.declare_variable(&arg.id, Some(typ))?;
+
+                        Ok(DecledArg { id })
+                    }
                     Err(e) => Err(e),
                 })
-                .collect::<Result<Vec<(Typ, String)>, ResolveError>>()?,
+                .collect::<RsvResult<_>>()?,
             stmts: value
                 .body
                 .stmts
@@ -56,6 +71,7 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
                 .rtype
                 .map(|typ| Typ::try_resolve_in_module(typ, mctx))
                 .transpose()?,
+            vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
         })
     }
 }

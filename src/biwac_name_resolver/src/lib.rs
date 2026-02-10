@@ -12,10 +12,10 @@ use biwac_package_loader::Pkg;
 use biwac_parser::{Ident, ImportDecl, QualifiedId, TypeDef};
 
 pub use crate::{
-    context::LocVarId,
+    context::{DecledVar, LocVarId, ResolvedIdent},
     symbols::{
         ModSym,
-        expressions::{Exprs, Primary},
+        expressions::{Exprs, Primary, Variable},
         globals::{FnDefContent, GlobalVarDecl, TypeDefContent},
         statements::{IfStmt, Stmt, WhileStmt},
     },
@@ -61,6 +61,10 @@ pub enum ResolveError {
     DuplicatedTypeName {
         tid1: Box<Ident>,
         tid2: Box<Ident>,
+    },
+    DuplicatedVarName {
+        vid1: Box<Ident>,
+        vid2: Box<Ident>,
     },
 }
 

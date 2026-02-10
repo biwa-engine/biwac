@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
-use biwac_base::{ModPath, Span};
+use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
 use biwac_parser::{
     Globals, Ident, ImportDecl, ModAst, PrimTyp, QualifiedId, TypRepr, TypReprVal, TypeDef,
@@ -33,16 +33,21 @@ pub(crate) struct ModLvlRslvCtx<'pctx> {
 #[derive(Debug)]
 pub(crate) struct FnLvlRslvCtx<'mctx> {
     modctx: &'mctx ModLvlRslvCtx<'mctx>,
-    // TODO:
     // scope based variable name pool
     // ローカル変数に関数ローカルに一意なid
-    // VarIdをつけたい
-    // VarDecStmt はVarIdも持つようにし、
-    // 他の変数の参照をするExprはすべてVarIdだけもたせる
+    // LocVarIdをつける
+    // Stmt::VarDecl はLocVarIdも持つようにし、
+    // 他の変数の参照をするExprはすべてLocVarIdだけもたせる
     // これにより、以降の型検査などでスコープのネストによる
     // 名前空間を考えなくて良くなる。フラットに考えられる
+    scopes: Vec<HashMap<String, (DecledVar, LocVarId)>>,
     next_var_id: usize,
-    // mut である必要がある
+}
+
+#[derive(Debug, Clone)]
+pub struct DecledVar {
+    pub id: Ident,
+    pub typ: Option<Typ>, // None means not annotationed
 }
 
 impl PkgLvlRslvCtx {
@@ -273,7 +278,8 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocVarId(usize);
 
-pub(crate) enum ResolvedIdent {
+#[derive(Debug, Clone)]
+pub enum ResolvedIdent {
     Var(LocVarId),
     Abs(AbsId),
 }
@@ -282,6 +288,7 @@ impl<'mctx> FnLvlRslvCtx<'mctx> {
     pub fn new(modctx: &'mctx ModLvlRslvCtx) -> Self {
         Self {
             modctx,
+            scopes: vec![HashMap::new()],
             next_var_id: 0,
         }
     }
@@ -289,19 +296,88 @@ impl<'mctx> FnLvlRslvCtx<'mctx> {
     // try_resolve_qualid
     // は変数名、関数名を解決する
     pub fn try_resolve_qualid(&self, qualid: &QualifiedId) -> RsvResult<ResolvedIdent> {
-        // TODO: <identifier> なら先に関数ローカルで解決を試みる
-        // LocVarId を返す
+        // 先に関数ローカルで、内側のスコープから、解決を試みる
+        if !qualid.is_from_root && qualid.quals.is_empty() {
+            for scope in self.scopes.iter().rev() {
+                if let Some((_, var_id)) = scope.get(&qualid.id) {
+                    return Ok(ResolvedIdent::Var(*var_id));
+                }
+            }
+        }
 
         Ok(ResolvedIdent::Abs(self.modctx.try_resolve_qualid(qualid)?))
+    }
+
+    // try_resolve_variable
+    // は変数名を解決する
+    pub fn try_resolve_variable(&self, ident: &Ident) -> RsvResult<ResolvedIdent> {
+        // 先に関数ローカルで、内側のスコープから、解決を試みる
+        for scope in self.scopes.iter().rev() {
+            if let Some((_, var_id)) = scope.get(&ident.id) {
+                return Ok(ResolvedIdent::Var(*var_id));
+            }
+        }
+
+        Ok(ResolvedIdent::Abs(self.modctx.try_resolve_qualid(
+            &QualifiedId {
+                is_from_root: false,
+                quals: vec![],
+                id: ident.id.clone(),
+                span: ident.span.clone(),
+            },
+        )?))
     }
 
     // try_resolve_deftyp
     // は型名を解決する
     #[inline]
-    pub fn try_resolve_deftyp(&self, qualid: &QualifiedId) -> RsvResult<AbsId> {
+    pub(crate) fn try_resolve_deftyp(&self, qualid: &QualifiedId) -> RsvResult<AbsId> {
         // NOTE: 関数ローカルに型は宣言できないのでmodctxをそのまま呼び出すだけ
         // modctxを直接触らせないため必要
         self.modctx.try_resolve_deftyp(qualid)
+    }
+
+    pub(crate) fn enter_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    pub(crate) fn exit_scope(&mut self) {
+        // popping when empty is compiler bug
+        self.scopes.pop().unwrap();
+    }
+
+    pub(crate) fn declare_variable(
+        &mut self,
+        var: &Ident,
+        typ: Option<Typ>,
+    ) -> RsvResult<LocVarId> {
+        match self.scopes.last_mut().unwrap().entry(var.id.clone()) {
+            Entry::Vacant(e) => {
+                let var_id = LocVarId(self.next_var_id);
+                e.insert((
+                    DecledVar {
+                        id: var.clone(),
+                        typ,
+                    },
+                    var_id,
+                ));
+                self.next_var_id += 1;
+
+                Ok(var_id)
+            }
+            Entry::Occupied(e) => Err(ResolveError::DuplicatedVarName {
+                vid1: Box::new(var.clone()),
+                vid2: Box::new(e.get().0.id.clone()),
+            }),
+        }
+    }
+
+    pub(crate) fn into_vars(self) -> HashMap<LocVarId, DecledVar> {
+        self.scopes
+            .into_iter()
+            .flat_map(|scope| scope.into_iter())
+            .map(|(_, (ident, var_id))| (var_id, ident))
+            .collect()
     }
 }
 
