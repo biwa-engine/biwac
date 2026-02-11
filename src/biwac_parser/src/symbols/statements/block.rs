@@ -1,7 +1,7 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{ParseError, Stmt, parser::TokenStream};
+use crate::{AssignStmt, ExprStmt, Exprs, ParseError, ReturnStmt, Stmt, parser::TokenStream};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStmt {
@@ -32,6 +32,76 @@ impl<'t> TokenStream<'t> {
             } else {
                 return Err(ParseError::InvalidEOF(vec![TkKind::RBrace]));
             }
+        }
+    }
+
+    pub(crate) fn consume_statement(&mut self) -> Result<Stmt, ParseError> {
+        if let Some(t) = self.peek().copied() {
+            match t.kind {
+                TkKind::If => Ok(Stmt::If(self.consume_if_statement()?)),
+                TkKind::While => Ok(Stmt::While(self.consume_while_statement()?)),
+                TkKind::Return => {
+                    // "return" <expression> ";"
+                    self.next();
+
+                    // <expression>
+                    let expr = self.consume_expression()?;
+
+                    // ";"
+                    let end = self.must_consume_semicolon()?.span.clone();
+
+                    Ok(Stmt::Return(ReturnStmt {
+                        expr,
+                        span: Span::merge(&t.span, &end),
+                    }))
+                }
+                TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement()?)),
+                TkKind::Let => Ok(Stmt::VarDecl(self.consume_variable_declaration_statment()?)),
+                _ => {
+                    let expr = self.consume_expression()?;
+
+                    if let Some(t) = self.peek().copied()
+                        && let TkKind::Assign = t.kind
+                    {
+                        // <primary> "=" <expression> ";"
+                        self.next();
+
+                        if let Exprs::Primary(dst) = expr {
+                            // <expression>
+                            let src = self.consume_expression()?;
+
+                            // ";"
+                            let end = self.must_consume_semicolon()?.span.clone();
+
+                            Ok(Stmt::Assign(AssignStmt {
+                                span: Span::merge(&dst.span(), &end),
+                                dst,
+                                src,
+                            }))
+                        } else {
+                            Err(ParseError::InvalidToken(
+                                vec![TkKind::SemiColon],
+                                t.to_owned(),
+                            ))
+                        }
+                    } else {
+                        // ";"
+                        let end = self.must_consume_semicolon()?.span.clone();
+
+                        Ok(Stmt::Expr(ExprStmt {
+                            span: Span::merge(&expr.span(), &end),
+                            expr,
+                        }))
+                    }
+                }
+            }
+        } else {
+            Err(ParseError::InvalidEOF(vec![
+                TkKind::Let,
+                TkKind::If,
+                TkKind::While,
+                TkKind::Return,
+            ]))
         }
     }
 }

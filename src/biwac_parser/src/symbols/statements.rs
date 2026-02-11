@@ -1,6 +1,6 @@
 pub mod block;
 pub mod if_stmt;
-pub mod vardec;
+pub mod vardecl;
 pub mod while_stmt;
 
 use biwac_base::Span;
@@ -8,7 +8,7 @@ use biwac_lexer::token::TkKind;
 use if_stmt::IfStmt;
 use while_stmt::WhileStmt;
 
-use crate::{BlockStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream};
+use crate::{BlockStmt, ExprOrStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
@@ -43,11 +43,20 @@ pub struct AssignStmt {
 impl<'t> TokenStream<'t> {
     // TODO: 将来的にはconsume_statement_or_expression
     // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
-    pub(crate) fn consume_statement(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn consume_expression_or_statement(
+        &mut self,
+    ) -> Result<ExprOrStmt<Exprs, Stmt>, ParseError> {
         if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::If => Ok(Stmt::If(self.consume_if_statement()?)),
-                TkKind::While => Ok(Stmt::While(self.consume_while_statement()?)),
+                TkKind::If => match self.consume_if_expression_or_statement()? {
+                    ExprOrStmt::Expr(if_expr) => {
+                        Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::IfExpr(if_expr))))
+                    }
+                    ExprOrStmt::Stmt(if_stmt) => Ok(ExprOrStmt::Stmt(Stmt::If(if_stmt))),
+                },
+                TkKind::While => Ok(ExprOrStmt::Stmt(Stmt::While(
+                    self.consume_while_statement()?,
+                ))),
                 TkKind::Return => {
                     // "return" <expression> ";"
                     self.next();
@@ -58,13 +67,20 @@ impl<'t> TokenStream<'t> {
                     // ";"
                     let end = self.must_consume_semicolon()?.span.clone();
 
-                    Ok(Stmt::Return(ReturnStmt {
+                    Ok(ExprOrStmt::Stmt(Stmt::Return(ReturnStmt {
                         expr,
                         span: Span::merge(&t.span, &end),
-                    }))
+                    })))
                 }
-                TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement()?)),
-                TkKind::Let => Ok(Stmt::VarDecl(self.consume_variable_declaration_statment()?)),
+                TkKind::LBrace => match self.consume_block_expression_or_statement()? {
+                    ExprOrStmt::Expr(block_expr) => {
+                        Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::Block(block_expr))))
+                    }
+                    ExprOrStmt::Stmt(block_stmt) => Ok(ExprOrStmt::Stmt(Stmt::Block(block_stmt))),
+                },
+                TkKind::Let => Ok(ExprOrStmt::Stmt(Stmt::VarDecl(
+                    self.consume_variable_declaration_statment()?,
+                ))),
                 _ => {
                     let expr = self.consume_expression()?;
 
@@ -81,11 +97,11 @@ impl<'t> TokenStream<'t> {
                             // ";"
                             let end = self.must_consume_semicolon()?.span.clone();
 
-                            Ok(Stmt::Assign(AssignStmt {
+                            Ok(ExprOrStmt::Stmt(Stmt::Assign(AssignStmt {
                                 span: Span::merge(&dst.span(), &end),
                                 dst,
                                 src,
-                            }))
+                            })))
                         } else {
                             Err(ParseError::InvalidToken(
                                 vec![TkKind::SemiColon],
@@ -94,12 +110,20 @@ impl<'t> TokenStream<'t> {
                         }
                     } else {
                         // ";"
-                        let end = self.must_consume_semicolon()?.span.clone();
-
-                        Ok(Stmt::Expr(ExprStmt {
-                            span: Span::merge(&expr.span(), &end),
-                            expr,
-                        }))
+                        if let Some(t) = self.opt_consume_semicolon() {
+                            // NOTE:
+                            // セミコロンがあるならディスカードされて式文
+                            // if there is a semicolon `;`, expression value is discarded,
+                            // and it is treated as an expression-statement.
+                            Ok(ExprOrStmt::Stmt(Stmt::Expr(ExprStmt {
+                                span: Span::merge(&expr.span(), &t.span),
+                                expr,
+                            })))
+                        } else {
+                            // NOTE: ないなら、式
+                            // if not, it is treated as an expression.
+                            Ok(ExprOrStmt::Expr(expr))
+                        }
                     }
                 }
             }

@@ -39,3 +39,9 @@ pub struct Ident {
     pub id: String,
     pub span: Span,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprOrStmt<E, S> {
+    Expr(E),
+    Stmt(S),
+}

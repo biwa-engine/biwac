@@ -18,6 +18,7 @@ pub struct GlobalVarDecl {
 pub struct FnDefContent {
     pub args: Vec<DecledArg>,
     pub stmts: Vec<Stmt>,
+    pub expr: Option<Exprs>,
     pub rtype: Option<Typ>, // None means void
     pub vars: HashMap<LocVarId, DecledVar>,
 }
@@ -62,11 +63,14 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
                 })
                 .collect::<RsvResult<_>>()?,
             stmts: value
-                .body
                 .stmts
                 .into_iter()
                 .map(|stmt| Stmt::try_resolve(stmt, &mut fctx))
                 .collect::<Result<Vec<Stmt>, ResolveError>>()?,
+            expr: value
+                .expr
+                .map(|expr| Exprs::try_resolve(expr, &mut fctx))
+                .transpose()?,
             rtype: value
                 .rtype
                 .map(|typ| Typ::try_resolve_in_module(typ, mctx))

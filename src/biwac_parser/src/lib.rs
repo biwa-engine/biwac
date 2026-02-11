@@ -8,15 +8,16 @@ mod tests;
 use biwac_lexer::{TkKind, Token};
 
 pub use symbols::{
-    Ident, ModAst, QualifiedId,
+    ExprOrStmt, Ident, ModAst, QualifiedId,
     expressions::{
         BinOperator, BinaryExpr, BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, MemberAccess,
-        Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr,
+        Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr, block::BlockExpr,
+        if_expr::IfExpr,
     },
     globals::{ArgDecl, FnDef, Globals, ImportDecl, StructDef, TypeDef},
     statements::{
-        AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt, vardec::VarDecl,
-        while_stmt::WhileStmt,
+        AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt,
+        vardecl::VarDecl, while_stmt::WhileStmt,
     },
 };
 pub use types::{DefTyp, GenArg, PrimTyp, TypRepr, TypReprVal};

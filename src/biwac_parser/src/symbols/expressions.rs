@@ -1,5 +1,7 @@
 pub mod arithmetic;
+pub mod block;
 pub mod equality;
+pub mod if_expr;
 pub mod multiplication;
 pub mod postfix;
 pub mod primary;
@@ -8,7 +10,7 @@ pub mod unary;
 
 use biwac_base::Span;
 
-use crate::{Ident, ParseError, parser::TokenStream, symbols::QualifiedId};
+use crate::{BlockExpr, Ident, IfExpr, ParseError, parser::TokenStream, symbols::QualifiedId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primary {
@@ -16,7 +18,8 @@ pub enum Primary {
     Variable(Ident),
     FnCall(FnCall),
     MemberAccess(MemberAccess),
-    // MethodCall(MethodCall),
+    IfExpr(IfExpr),
+    Block(BlockExpr), // MethodCall(MethodCall),
 }
 
 impl Primary {
@@ -26,6 +29,8 @@ impl Primary {
             Self::Variable(v) => v.span.clone(),
             Self::FnCall(f) => f.span.clone(),
             Self::MemberAccess(m) => m.span(),
+            Self::IfExpr(i) => i.span.clone(),
+            Self::Block(b) => b.span.clone(),
         }
     }
 }

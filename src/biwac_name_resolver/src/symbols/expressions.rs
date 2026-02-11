@@ -1,7 +1,7 @@
 use biwac_base::Span;
 use biwac_parser::{BinOperator, BoolLiteral, Ident, IntegerLiteral, StringLiteral, UnOperator};
 
-use crate::{AbsId, LocVarId, RsvResult, TryResolve, context::ResolvedIdent};
+use crate::{AbsId, LocVarId, RsvResult, Stmt, TryResolve, context::ResolvedIdent};
 
 #[derive(Debug, Clone)]
 pub enum Exprs {
@@ -26,7 +26,24 @@ pub enum Primary {
     Variable(Variable), // TODO: support using external module variables
     FnCall(FnCall),
     MemberAccess(MemberAccess),
-    // MethodCall(MethodCall),
+    IfExpr(IfExpr),
+    Block(BlockExpr), // MethodCall(MethodCall),
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockExpr {
+    pub stmts: Vec<Stmt>,
+    pub expr: Box<Exprs>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct IfExpr {
+    pub cond: Box<Exprs>,
+    pub then: BlockExpr,
+    // pub else_ifs: Vec<(Exprs, BlockExpr)>,
+    pub els: BlockExpr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +59,8 @@ impl Primary {
             Self::Variable(v) => v.span.clone(),
             Self::FnCall(f) => f.span.clone(),
             Self::MemberAccess(m) => m.span.clone(),
+            Self::IfExpr(i) => i.span.clone(),
+            Self::Block(b) => b.span.clone(),
         }
     }
 }
@@ -135,7 +154,40 @@ impl TryResolve<biwac_parser::Primary> for Primary {
             biwac_parser::Primary::MemberAccess(m) => {
                 Ok(Self::MemberAccess(MemberAccess::try_resolve(m, fctx)?))
             }
+            biwac_parser::Primary::IfExpr(i) => Ok(Self::IfExpr(IfExpr::try_resolve(i, fctx)?)),
+            biwac_parser::Primary::Block(b) => Ok(Self::Block(BlockExpr::try_resolve(b, fctx)?)),
         }
+    }
+}
+
+impl TryResolve<biwac_parser::IfExpr> for IfExpr {
+    fn try_resolve<'mctx>(
+        value: biwac_parser::IfExpr,
+        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
+    ) -> RsvResult<Self> {
+        Ok(Self {
+            cond: Box::new(Exprs::try_resolve(*value.cond, fctx)?),
+            then: BlockExpr::try_resolve(value.then, fctx)?,
+            els: BlockExpr::try_resolve(value.els, fctx)?,
+            span: value.span,
+        })
+    }
+}
+
+impl TryResolve<biwac_parser::BlockExpr> for BlockExpr {
+    fn try_resolve<'mctx>(
+        value: biwac_parser::BlockExpr,
+        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
+    ) -> RsvResult<Self> {
+        Ok(Self {
+            stmts: value
+                .stmts
+                .into_iter()
+                .map(|stmt| Stmt::try_resolve(stmt, fctx))
+                .collect::<RsvResult<_>>()?,
+            expr: Box::new(Exprs::try_resolve(*value.expr, fctx)?),
+            span: value.span,
+        })
     }
 }
 

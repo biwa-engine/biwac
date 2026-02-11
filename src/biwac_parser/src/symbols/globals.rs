@@ -1,7 +1,10 @@
 use biwac_base::Span;
 use biwac_lexer::token::{TkKind, TkVal};
 
-use crate::{BlockStmt, Ident, ParseError, QualifiedId, TypRepr, VarDecl, parser::TokenStream};
+use crate::{
+    Exprs, Ident, ParseError, QualifiedId, Stmt, TypRepr, VarDecl, parser::TokenStream,
+    symbols::ExprOrStmt,
+};
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
@@ -27,7 +30,8 @@ pub struct ImportDecl {
 pub struct FnDef {
     pub id: Ident,
     pub args: Vec<ArgDecl>,
-    pub body: BlockStmt,
+    pub stmts: Vec<Stmt>,
+    pub expr: Option<Exprs>,
     pub rtype: Option<TypRepr>, // None means void
     pub span: Span,
 }
@@ -77,13 +81,18 @@ impl<'t> TokenStream<'t> {
                         None
                     };
 
-                    let body = self.consume_block_statement()?;
-                    let end = body.span.clone();
+                    let (stmts, expr, end) = match self.consume_block_expression_or_statement()? {
+                        ExprOrStmt::Expr(block_expr) => {
+                            (block_expr.stmts, Some(*block_expr.expr), block_expr.span)
+                        }
+                        ExprOrStmt::Stmt(block_stmt) => (block_stmt.stmts, None, block_stmt.span),
+                    };
 
                     return Ok(Some(Globals::FnDef(FnDef {
                         id,
                         args,
-                        body,
+                        stmts,
+                        expr,
                         rtype,
                         span: Span::merge(&begin, &end),
                     })));

@@ -31,7 +31,7 @@ fn foo() {
         panic!("not a function: {g0:#?}");
     };
 
-    assert_eq!(2, fn_foo.body.stmts.len());
+    assert_eq!(2, fn_foo.stmts.len());
     assert_eq!(
         &Stmt::VarDecl(VarDecl {
             typ: TypDecl::Any,
@@ -45,7 +45,7 @@ fn foo() {
             }))),
             span: Span::new(modu.clone(), Pos::new(2, 4), Pos::new(2, 14))
         }),
-        fn_foo.body.stmts.first().unwrap()
+        fn_foo.stmts.first().unwrap()
     );
     assert_eq!(
         &Stmt::VarDecl(VarDecl {
@@ -60,6 +60,7 @@ fn foo() {
             }))),
             span: Span::new(modu.clone(), Pos::new(4, 4), Pos::new(4, 23))
         }),
-        fn_foo.body.stmts.get(1).unwrap()
+        fn_foo.stmts.get(1).unwrap()
     );
+    assert_eq!(None, fn_foo.expr);
 }

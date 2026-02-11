@@ -239,7 +239,7 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                         }
                     }
 
-                    if last_idx + 1 < line.len() {
+                    if last_idx < line.len() {
                         pretokens.push(PreToken {
                             kind: PreTkKind::Word,
                             span: Span::new(
