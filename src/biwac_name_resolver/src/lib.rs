@@ -11,19 +11,16 @@ use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
 use biwac_parser::{Ident, ImportDecl, QualifiedId, TypeDef};
 
+use crate::context::{FnLvlRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx};
 pub use crate::{
-    context::{DecledVar, LocVarId, ResolvedIdent},
+    context::{DecledVar, ExprId, LocVarId, ResolvedIdent},
     symbols::{
         ModSym,
-        expressions::{Exprs, Primary, Variable},
-        globals::{FnDefContent, GlobalVarDecl, TypeDefContent},
+        expressions::{Callee, Expr, ExprVal, FnCall, Literal, MemberAccess, Primary, Variable},
+        globals::{DecledArg, FnDefContent, GlobalVarDecl, StructDefContent, TypeDefContent},
         statements::{IfStmt, Stmt, WhileStmt},
     },
-    types::Typ,
-};
-use crate::{
-    context::{FnLvlRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx},
-    symbols::globals::StructDefContent,
+    types::{FnTyp, Typ},
 };
 
 // このcrate biwac_name_resolver は、

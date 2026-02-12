@@ -1,53 +1,53 @@
 use biwac_base::Span;
 use biwac_parser::types::TypDecl;
 
-use crate::{Exprs, LocVarId, Primary, RsvResult, TryResolve, Typ};
+use crate::{Expr, LocVarId, Primary, RsvResult, TryResolve, Typ};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStmt {
     pub stmts: Vec<Stmt>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfStmt {
-    pub cond: Exprs,
+    pub cond: Expr,
     pub then: BlockStmt,
     pub els: Option<BlockStmt>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhileStmt {
-    pub cond: Exprs,
+    pub cond: Expr,
     pub stmts: BlockStmt,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarDecl {
     pub id: LocVarId,
-    pub init: Exprs,
+    pub init: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprStmt {
-    pub expr: Exprs,
+    pub expr: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnStmt {
-    pub expr: Exprs,
+    pub expr: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignStmt {
     pub dst: Primary,
-    pub src: Exprs,
+    pub src: Expr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Block(BlockStmt),
     Expr(ExprStmt),
@@ -85,17 +85,17 @@ impl TryResolve<biwac_parser::Stmt> for Stmt {
             }
             biwac_parser::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
                 span: expr.span,
-                expr: Exprs::try_resolve(expr.expr, fctx)?,
+                expr: Expr::try_resolve(expr.expr, fctx)?,
             })),
             biwac_parser::Stmt::Return(expr) => Ok(Self::Return(ReturnStmt {
                 span: expr.span,
-                expr: Exprs::try_resolve(expr.expr, fctx)?,
+                expr: Expr::try_resolve(expr.expr, fctx)?,
             })),
             biwac_parser::Stmt::VarDecl(var) => Ok(Self::VarDecl(VarDecl::try_resolve(var, fctx)?)),
             biwac_parser::Stmt::Assign(assign) => Ok(Self::Assign(AssignStmt {
                 span: assign.span,
                 dst: Primary::try_resolve(assign.dst, fctx)?,
-                src: Exprs::try_resolve(assign.src, fctx)?,
+                src: Expr::try_resolve(assign.src, fctx)?,
             })),
         }
     }
@@ -107,7 +107,7 @@ impl TryResolve<biwac_parser::IfStmt> for IfStmt {
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> crate::RsvResult<Self> {
         Ok(Self {
-            cond: Exprs::try_resolve(value.cond, fctx)?,
+            cond: Expr::try_resolve(value.cond, fctx)?,
             then: BlockStmt {
                 stmts: value
                     .then
@@ -138,7 +138,7 @@ impl TryResolve<biwac_parser::WhileStmt> for WhileStmt {
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> crate::RsvResult<Self> {
         Ok(Self {
-            cond: Exprs::try_resolve(value.cond, fctx)?,
+            cond: Expr::try_resolve(value.cond, fctx)?,
             stmts: BlockStmt {
                 stmts: value
                     .stmts
@@ -166,7 +166,7 @@ impl TryResolve<biwac_parser::VarDecl> for VarDecl {
 
         Ok(Self {
             id,
-            init: Exprs::try_resolve(value.init, fctx)?,
+            init: Expr::try_resolve(value.init, fctx)?,
         })
     }
 }

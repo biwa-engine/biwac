@@ -13,9 +13,9 @@ pub enum Typ {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnTyp {
-    pub(crate) args: Vec<Typ>,
-    pub(crate) ret: Box<Typ>,
-    // pub(crate) genargs: Vec<String>,
+    pub args: Vec<Typ>,
+    pub ret: Box<Typ>,
+    // pub genargs: Vec<String>,
 }
 
 impl ModuleLevelTryResolve<TypRepr> for Typ {

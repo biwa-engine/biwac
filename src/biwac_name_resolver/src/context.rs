@@ -42,6 +42,7 @@ pub(crate) struct FnLvlRslvCtx<'mctx> {
     // 名前空間を考えなくて良くなる。フラットに考えられる
     scopes: Vec<HashMap<String, (DecledVar, LocVarId)>>,
     next_var_id: usize,
+    next_expr_id: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -273,12 +274,17 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
     }
 }
 
+// ExprId
+// function local expression id
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExprId(usize);
+
 // LocVarId
 // function local variable id
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocVarId(usize);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedIdent {
     Var(LocVarId),
     Abs(AbsId),
@@ -290,6 +296,7 @@ impl<'mctx> FnLvlRslvCtx<'mctx> {
             modctx,
             scopes: vec![HashMap::new()],
             next_var_id: 0,
+            next_expr_id: 0,
         }
     }
 
@@ -370,6 +377,13 @@ impl<'mctx> FnLvlRslvCtx<'mctx> {
                 vid2: Box::new(e.get().0.id.clone()),
             }),
         }
+    }
+
+    pub(crate) fn new_expr_id(&mut self) -> ExprId {
+        let id = ExprId(self.next_expr_id);
+        self.next_expr_id += 1;
+
+        id
     }
 
     pub(crate) fn into_vars(self) -> HashMap<LocVarId, DecledVar> {

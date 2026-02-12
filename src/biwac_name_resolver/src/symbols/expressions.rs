@@ -1,26 +1,32 @@
 use biwac_base::Span;
 use biwac_parser::{BinOperator, BoolLiteral, Ident, IntegerLiteral, StringLiteral, UnOperator};
 
-use crate::{AbsId, LocVarId, RsvResult, Stmt, TryResolve, context::ResolvedIdent};
+use crate::{AbsId, ExprId, LocVarId, RsvResult, Stmt, TryResolve, context::ResolvedIdent};
 
-#[derive(Debug, Clone)]
-pub enum Exprs {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expr {
+    pub expr: ExprVal,
+    pub id: ExprId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprVal {
     Primary(Primary),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
 }
 
-impl Exprs {
+impl Expr {
     pub fn span(&self) -> Span {
-        match self {
-            Self::Primary(p) => p.span(),
-            Self::Unary(u) => u.span.clone(),
-            Self::Binary(b) => b.span(),
+        match &self.expr {
+            ExprVal::Primary(p) => p.span(),
+            ExprVal::Unary(u) => u.span.clone(),
+            ExprVal::Binary(b) => b.span(),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primary {
     Literal(Literal),
     Variable(Variable), // TODO: support using external module variables
@@ -30,23 +36,23 @@ pub enum Primary {
     Block(BlockExpr), // MethodCall(MethodCall),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockExpr {
     pub stmts: Vec<Stmt>,
-    pub expr: Box<Exprs>,
+    pub expr: Box<Expr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfExpr {
-    pub cond: Box<Exprs>,
+    pub cond: Box<Expr>,
     pub then: BlockExpr,
-    // pub else_ifs: Vec<(Exprs, BlockExpr)>,
+    // pub else_ifs: Vec<(Expr, BlockExpr)>,
     pub els: BlockExpr,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
     pub id: ResolvedIdent,
     pub span: Span,
@@ -65,7 +71,7 @@ impl Primary {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Integer(IntegerLiteral),
     // Float(f64),
@@ -85,17 +91,17 @@ impl Literal {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLiteral {
     pub id: AbsId,
-    pub members: Vec<(Ident, Exprs)>,
+    pub members: Vec<(Ident, Expr)>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnCall {
     pub callee: Callee,
-    pub args: Vec<Exprs>,
+    pub args: Vec<Expr>,
     pub span: Span,
 }
 
@@ -105,25 +111,25 @@ pub enum Callee {
     Abs(AbsId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemberAccess {
-    pub left: Box<Exprs>,
+    pub left: Box<Expr>,
     pub member: Ident,
     pub span: Span,
 }
 
 // #[derive(Debug, Clone)]
 // pub struct MethodCall {
-//     pub left: Box<Exprs>,
+//     pub left: Box<Expr>,
 //     pub method: String,
-//     pub args: Vec<Exprs>,
+//     pub args: Vec<Expr>,
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryExpr {
     pub op: BinOperator,
-    pub left: Box<Exprs>,
-    pub right: Box<Exprs>,
+    pub left: Box<Expr>,
+    pub right: Box<Expr>,
 }
 
 impl BinaryExpr {
@@ -132,10 +138,10 @@ impl BinaryExpr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnaryExpr {
     pub op: UnOperator,
-    pub right: Box<Exprs>,
+    pub right: Box<Expr>,
     pub span: Span,
 }
 
@@ -166,7 +172,7 @@ impl TryResolve<biwac_parser::IfExpr> for IfExpr {
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> RsvResult<Self> {
         Ok(Self {
-            cond: Box::new(Exprs::try_resolve(*value.cond, fctx)?),
+            cond: Box::new(Expr::try_resolve(*value.cond, fctx)?),
             then: BlockExpr::try_resolve(value.then, fctx)?,
             els: BlockExpr::try_resolve(value.els, fctx)?,
             span: value.span,
@@ -185,7 +191,7 @@ impl TryResolve<biwac_parser::BlockExpr> for BlockExpr {
                 .into_iter()
                 .map(|stmt| Stmt::try_resolve(stmt, fctx))
                 .collect::<RsvResult<_>>()?,
-            expr: Box::new(Exprs::try_resolve(*value.expr, fctx)?),
+            expr: Box::new(Expr::try_resolve(*value.expr, fctx)?),
             span: value.span,
         })
     }
@@ -204,8 +210,8 @@ impl TryResolve<biwac_parser::FnCall> for FnCall {
             args: value
                 .args
                 .into_iter()
-                .map(|expr| Exprs::try_resolve(expr, fctx))
-                .collect::<RsvResult<Vec<Exprs>>>()?,
+                .map(|expr| Expr::try_resolve(expr, fctx))
+                .collect::<RsvResult<Vec<Expr>>>()?,
             span: value.span,
         })
     }
@@ -218,7 +224,7 @@ impl TryResolve<biwac_parser::MemberAccess> for MemberAccess {
     ) -> crate::RsvResult<Self> {
         Ok(Self {
             span: value.span(),
-            left: Box::new(Exprs::try_resolve(*value.left, fctx)?),
+            left: Box::new(Expr::try_resolve(*value.left, fctx)?),
             member: value.member,
         })
     }
@@ -238,36 +244,43 @@ impl TryResolve<biwac_parser::Literal> for Literal {
                 members: s
                     .members
                     .into_iter()
-                    .map(|(id, expr)| match Exprs::try_resolve(*expr, fctx) {
+                    .map(|(id, expr)| match Expr::try_resolve(*expr, fctx) {
                         Ok(expr) => Ok((id, expr)),
                         Err(e) => Err(e),
                     })
-                    .collect::<RsvResult<Vec<(Ident, Exprs)>>>()?,
+                    .collect::<RsvResult<Vec<(Ident, Expr)>>>()?,
                 span: s.span,
             })),
         }
     }
 }
 
-impl TryResolve<biwac_parser::Exprs> for Exprs {
+impl TryResolve<biwac_parser::Exprs> for Expr {
     fn try_resolve<'mctx>(
         value: biwac_parser::Exprs,
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> crate::RsvResult<Self> {
         match value {
-            biwac_parser::Exprs::Primary(prim) => {
-                Ok(Self::Primary(Primary::try_resolve(prim, fctx)?))
-            }
-            biwac_parser::Exprs::Unary(u) => Ok(Self::Unary(UnaryExpr {
-                op: u.op,
-                right: Box::new(Self::try_resolve(*u.right, fctx)?),
-                span: u.span,
-            })),
-            biwac_parser::Exprs::Binary(b) => Ok(Self::Binary(BinaryExpr {
-                op: b.op,
-                left: Box::new(Self::try_resolve(*b.left, fctx)?),
-                right: Box::new(Self::try_resolve(*b.right, fctx)?),
-            })),
+            biwac_parser::Exprs::Primary(prim) => Ok(Self {
+                expr: ExprVal::Primary(Primary::try_resolve(prim, fctx)?),
+                id: fctx.new_expr_id(),
+            }),
+            biwac_parser::Exprs::Unary(u) => Ok(Self {
+                expr: ExprVal::Unary(UnaryExpr {
+                    op: u.op,
+                    right: Box::new(Self::try_resolve(*u.right, fctx)?),
+                    span: u.span,
+                }),
+                id: fctx.new_expr_id(),
+            }),
+            biwac_parser::Exprs::Binary(b) => Ok(Self {
+                expr: ExprVal::Binary(BinaryExpr {
+                    op: b.op,
+                    left: Box::new(Self::try_resolve(*b.left, fctx)?),
+                    right: Box::new(Self::try_resolve(*b.right, fctx)?),
+                }),
+                id: fctx.new_expr_id(),
+            }),
         }
     }
 }

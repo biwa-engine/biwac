@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use biwac_parser::{Ident, VarDecl};
 
 use crate::{
-    DecledVar, Exprs, LocVarId, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve,
+    DecledVar, Expr, LocVarId, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve,
     Typ,
     context::{FnLvlRslvCtx, ModLvlRslvCtx},
 };
@@ -11,14 +11,14 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct GlobalVarDecl {
     pub typ: Option<Typ>,
-    pub init: Exprs,
+    pub init: Expr,
 }
 
 #[derive(Debug)]
 pub struct FnDefContent {
     pub args: Vec<DecledArg>,
     pub stmts: Vec<Stmt>,
-    pub expr: Option<Exprs>,
+    pub expr: Option<Expr>,
     pub rtype: Option<Typ>, // None means void
     pub vars: HashMap<LocVarId, DecledVar>,
 }
@@ -69,7 +69,7 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
                 .collect::<Result<Vec<Stmt>, ResolveError>>()?,
             expr: value
                 .expr
-                .map(|expr| Exprs::try_resolve(expr, &mut fctx))
+                .map(|expr| Expr::try_resolve(expr, &mut fctx))
                 .transpose()?,
             rtype: value
                 .rtype
@@ -108,7 +108,7 @@ impl ModuleLevelTryResolve<VarDecl> for GlobalVarDecl {
         //
         // Ok(Self {
         //     typ,
-        //     init: Exprs::try_resolve(value.init, mctx)?,
+        //     init: Expr::try_resolve(value.init, mctx)?,
         // })
     }
 }
