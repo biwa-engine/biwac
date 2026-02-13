@@ -14,7 +14,7 @@ dependencies = [
  "biwac_generator",
  "biwac_name_resolver",
  "biwac_package_loader",
- "biwac_validator",
+ "biwac_type_inferrer",
 ]
 
 [[package]]
@@ -22,7 +22,7 @@ name = "biwac_generator"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
- "biwac_validator",
+ "biwac_type_inferrer",
 ]
 
 [[package]]
@@ -60,9 +60,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "biwac_validator"
+name = "biwac_type_inferrer"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
  "biwac_name_resolver",
+ "biwac_package_loader",
+ "biwac_parser",
 ]

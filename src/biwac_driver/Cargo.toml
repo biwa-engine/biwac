@@ -7,5 +7,5 @@ edition.workspace = true
 biwac_base = { path = "../biwac_base"}
 biwac_package_loader = { path = "../biwac_package_loader"}
 biwac_name_resolver = { path = "../biwac_name_resolver"}
-biwac_validator = { path = "../biwac_validator"}
+biwac_type_inferrer = { path = "../biwac_type_inferrer"}
 biwac_generator = { path = "../biwac_generator"}

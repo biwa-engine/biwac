@@ -11,10 +11,10 @@ fn main() {
         let pkg = biwac_name_resolver::PkgSymMap::try_resolve_symbol(pkg).unwrap();
         // println!("pkg: {pkg:#?}");
 
-        let pkg = biwac_validator::Pkg::try_validate(pkg).unwrap();
+        let pkg = biwac_type_inferrer::infer(pkg).unwrap();
         // println!("pkg: {pkg:#?}");
 
-        biwac_generator::arch::biwasm::generate(&pkg);
+        // biwac_generator::arch::biwasm::generate(&pkg);
     } else {
         panic!("1 Argument Required: <package-path>")
     }

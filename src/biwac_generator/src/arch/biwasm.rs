@@ -1,5 +1,5 @@
-use biwac_validator::Pkg;
+use biwac_type_inferrer::TypedPkg;
 
-pub fn generate(_pkg: &Pkg) {
+pub fn generate(_pkg: &TypedPkg) {
     todo!()
 }

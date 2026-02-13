@@ -5,7 +5,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
@@ -16,9 +16,14 @@ pub use crate::{
     context::{DecledVar, ExprId, LocVarId, ResolvedIdent},
     symbols::{
         ModSym,
-        expressions::{Callee, Expr, ExprVal, FnCall, Literal, MemberAccess, Primary, Variable},
+        expressions::{
+            BlockExpr, Callee, Expr, ExprVal, FnCall, Literal, MemberAccess, Primary,
+            StructLiteral, Variable,
+        },
         globals::{DecledArg, FnDefContent, GlobalVarDecl, StructDefContent, TypeDefContent},
-        statements::{IfStmt, Stmt, WhileStmt},
+        statements::{
+            AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,
+        },
     },
     types::{FnTyp, Typ},
 };
@@ -146,4 +151,14 @@ trait TryResolve<T>: Sized {
 
 trait ModuleLevelTryResolve<T>: Sized {
     fn try_resolve_in_module<'pctx>(value: T, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self>;
+}
+
+impl Display for AbsId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.quals.is_empty() {
+            write!(f, "{}", &self.id)
+        } else {
+            write!(f, "{}::{}", self.quals.join("::"), &self.id)
+        }
+    }
 }

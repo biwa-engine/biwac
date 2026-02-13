@@ -5,7 +5,7 @@ members = [
   "src/biwac_parser",
   "src/biwac_package_loader",
   "src/biwac_name_resolver",
-  "src/biwac_validator",
+  "src/biwac_type_inferrer",
   "src/biwac_generator",
   "src/biwac_driver"
 ]
