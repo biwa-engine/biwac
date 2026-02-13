@@ -250,7 +250,6 @@ impl<'pctx> TyCtx<'pctx> {
         };
 
         self.exprs.insert(expr.id, res.clone()?);
-        println!("expr: id: {:?}, ty: {:?}", expr.id, res.clone()?);
 
         res
     }
@@ -442,7 +441,6 @@ impl<'pctx> TyCtx<'pctx> {
                 let ty = self.infer_expr(&v.init)?;
                 let ty = self.apply(ty);
 
-                println!("vardecl: id: {:?}, ty: {ty:?}", v.id,);
                 self.vars.insert(v.id, ty);
 
                 Ok(Ty::Void)
@@ -548,7 +546,6 @@ pub fn infer(pkg: PkgSymMap) -> TyResult<TypedPkg> {
     let mut syms = HashMap::new();
 
     for (id, sym) in pkg.syms {
-        println!("sym: {id}");
         match sym {
             ModSym::FnDef(f) => {
                 // 戻り値の型を文脈に記録

@@ -276,7 +276,7 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
 
 // ExprId
 // function local expression id
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ExprId(usize);
 
 // LocVarId
