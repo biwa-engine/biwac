@@ -5,4 +5,15 @@ edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
+biwac_parser = { path = "../biwac_parser"}
+biwac_package_loader = { path = "../biwac_package_loader"}
+biwac_name_resolver = { path = "../biwac_name_resolver"}
 biwac_type_inferrer = { path = "../biwac_type_inferrer"}
+oxc_codegen = { workspace = true, optional = true }
+oxc_ast = { workspace = true, optional = true }
+oxc_span = { workspace = true, optional = true }
+oxc_allocator = { workspace = true, optional = true }
+
+[features]
+default = [ "typescript" ]
+typescript = [ "dep:oxc_codegen", "dep:oxc_ast", "dep:oxc_span", "dep:oxc_allocator" ]
