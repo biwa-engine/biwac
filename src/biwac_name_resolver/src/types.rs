@@ -2,7 +2,7 @@ use biwac_parser::{PrimTyp, TypRepr, TypReprVal};
 
 use crate::{AbsId, ModuleLevelTryResolve};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Typ {
     Int,
     Float,
@@ -11,7 +11,7 @@ pub enum Typ {
     Defined(AbsId),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnTyp {
     pub args: Vec<Typ>,
     pub ret: Box<Typ>,

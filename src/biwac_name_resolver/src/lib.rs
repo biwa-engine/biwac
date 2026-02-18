@@ -21,8 +21,8 @@ pub use crate::{
             StructLiteral, Variable,
         },
         globals::{
-            DecledArg, FnDefContent, GlobalVarDecl, NativeFnDefContent, StructDefContent,
-            TypeDefContent,
+            DecledArg, FnDefContent, GlobalVarDecl, NativeFnArgDecl, NativeFnDefContent,
+            StructDefContent, TypeDefContent,
         },
         statements::{
             AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,

@@ -130,9 +130,16 @@ impl TyInfo {
 
 #[derive(Debug)]
 pub struct NativeFnDefContent {
-    pub args: Vec<Ty>,
+    pub args: Vec<NativeFnArg>,
     pub rty: Ty,
     pub native: String,
     pub native_span: Span,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct NativeFnArg {
+    pub ty: Ty,
+    pub id: Ident,
     pub span: Span,
 }

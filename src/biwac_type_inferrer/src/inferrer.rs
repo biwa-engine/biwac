@@ -10,7 +10,7 @@ use biwac_name_resolver::{
 use biwac_parser::{BinOperator, Ident, UnOperator};
 
 use crate::{
-    FnDefContent, NativeFnDefContent, Sym, TyError, TyInfo, TyResult, TypedPkg,
+    FnDefContent, NativeFnArg, NativeFnDefContent, Sym, TyError, TyInfo, TyResult, TypedPkg,
     inferrer::{
         context::{PkgTyCtx, SymTy, TyCtx},
         types::{FnTy, Ty, TyVar},
@@ -630,7 +630,15 @@ pub fn infer(pkg: PkgSymMap) -> TyResult<TypedPkg> {
                 syms.insert(
                     id,
                     Sym::NativeFnDef(NativeFnDefContent {
-                        args: f.args.into_iter().map(|typ| typ.into()).collect(),
+                        args: f
+                            .args
+                            .into_iter()
+                            .map(|arg| NativeFnArg {
+                                ty: arg.typ.into(),
+                                id: arg.id,
+                                span: arg.span,
+                            })
+                            .collect(),
                         rty: match f.rtype {
                             Some(typ) => typ.into(),
                             None => Ty::Void,

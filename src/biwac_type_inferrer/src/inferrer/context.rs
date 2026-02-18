@@ -171,7 +171,7 @@ impl<'ast> TyCtxBuilder<'ast> {
         f: &NativeFnDefContent,
     ) -> TyResult<()> {
         let fty = FnTy {
-            args: f.args.iter().map(|a| Ty::from(a.clone())).collect(),
+            args: f.args.iter().map(|a| Ty::from(a.typ.clone())).collect(),
             ret: match &f.rtype {
                 Some(typ) => Box::new(self.build_ty(typ)?),
                 None => Box::new(Ty::Void),

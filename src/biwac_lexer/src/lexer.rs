@@ -16,7 +16,7 @@ enum RegionKind {
 }
 
 pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
-    let mut pretokens: Vec<SrcRegion> = vec![];
+    let mut regions: Vec<SrcRegion> = vec![];
 
     let mut quoted = false;
     let mut inner_dsl = false;
@@ -41,7 +41,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                 {
                     // end of DSL
                     inner_dsl = false;
-                    pretokens.push(SrcRegion {
+                    regions.push(SrcRegion {
                         kind: RegionKind::Dsl,
                         span: Span::new(modu.clone(), last_pos, Pos::new(lidx, 0)),
                     });
@@ -56,7 +56,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                     if let '\"' = l.chars().nth(idx).unwrap() {
                         // end of string literal
                         quoted = false;
-                        pretokens.push(SrcRegion {
+                        regions.push(SrcRegion {
                             kind: RegionKind::StringLiteral,
                             span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx + 1)),
                         });
@@ -68,7 +68,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                     // start of string literal
                     quoted = true;
                     if idx > 0 {
-                        pretokens.push(SrcRegion {
+                        regions.push(SrcRegion {
                             kind: RegionKind::Raw,
                             span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
                         });
@@ -78,7 +78,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                     && let Some('/') = l.chars().nth(idx + 1)
                 {
                     // start of comment (to line end)
-                    pretokens.push(SrcRegion {
+                    regions.push(SrcRegion {
                         kind: RegionKind::Raw,
                         span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
                     });
@@ -90,7 +90,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                     && let Some('{') = l.chars().nth(idx + 1)
                 {
                     // start of DSL such as novel mode, or inline native code.
-                    pretokens.push(SrcRegion {
+                    regions.push(SrcRegion {
                         kind: RegionKind::Raw,
                         span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
                     });
@@ -106,8 +106,8 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
 
         if quoted {
             return Err(TokenizeError::DoubleQuoteCloseNotFound);
-        } else if !comment_end && idx < l.len() {
-            pretokens.push(SrcRegion {
+        } else if !comment_end && idx < l.len() && !inner_dsl {
+            regions.push(SrcRegion {
                 kind: RegionKind::Raw,
                 span: Span::new(modu.clone(), last_pos, Pos::new(lidx, l.len())),
             });
@@ -118,7 +118,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
     if quoted {
         Err(TokenizeError::DoubleQuoteCloseNotFound)
     } else {
-        pretokens.push(SrcRegion {
+        regions.push(SrcRegion {
             kind: RegionKind::Raw,
             span: Span::new(
                 modu.clone(),
@@ -127,7 +127,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
             ),
         });
 
-        Ok(pretokens)
+        Ok(regions)
     }
 }
 

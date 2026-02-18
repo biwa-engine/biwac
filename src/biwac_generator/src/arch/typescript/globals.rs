@@ -209,35 +209,33 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDefContent {
                         span: span(),
                         kind: oxc_ast::ast::FormalParameterKind::FormalParameter,
                         items: oxc_allocator::Vec::from_iter_in(
-                            self.args.iter().enumerate().map(|(i, a)| {
-                                oxc_ast::ast::FormalParameter {
-                                    span: span(),
-                                    decorators: oxc_allocator::Vec::new_in(allocator),
-                                    pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
-                                        oxc_allocator::Box::new_in(
-                                            oxc_ast::ast::BindingIdentifier {
-                                                span: span(),
-                                                name: oxc_span::Ident::new_const(
-                                                    allocator.alloc_str(&format!("lv{i}")),
-                                                ),
-                                                symbol_id: Cell::new(None),
-                                            },
-                                            allocator,
-                                        ),
-                                    ),
-                                    type_annotation: Some(oxc_allocator::Box::new_in(
-                                        oxc_ast::ast::TSTypeAnnotation {
+                            self.args.iter().map(|a| oxc_ast::ast::FormalParameter {
+                                span: span(),
+                                decorators: oxc_allocator::Vec::new_in(allocator),
+                                pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
+                                    oxc_allocator::Box::new_in(
+                                        oxc_ast::ast::BindingIdentifier {
                                             span: span(),
-                                            type_annotation: a.clone().into_oxc(allocator),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&a.id.id),
+                                            ),
+                                            symbol_id: Cell::new(None),
                                         },
                                         allocator,
-                                    )),
-                                    initializer: None,
-                                    optional: false,
-                                    accessibility: None,
-                                    readonly: false,
-                                    r#override: false,
-                                }
+                                    ),
+                                ),
+                                type_annotation: Some(oxc_allocator::Box::new_in(
+                                    oxc_ast::ast::TSTypeAnnotation {
+                                        span: span(),
+                                        type_annotation: a.ty.clone().into_oxc(allocator),
+                                    },
+                                    allocator,
+                                )),
+                                initializer: None,
+                                optional: false,
+                                accessibility: None,
+                                readonly: false,
+                                r#override: false,
                             }),
                             allocator,
                         ),

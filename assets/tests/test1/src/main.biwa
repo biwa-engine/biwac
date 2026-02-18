@@ -11,4 +11,11 @@ fn main() {
     begin = pos_new(0, x),
     end = pos_new(11, y),
   };
+  let z = native_add(3, 2);
 }
+
+[[native(arch="typescript")]]
+fn native_add(x: Int, y: Int) -> Int {{
+  console.log("Hello, TypeScript World!");
+  return x + y;
+}}

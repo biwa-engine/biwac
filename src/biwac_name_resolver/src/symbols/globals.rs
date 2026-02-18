@@ -26,10 +26,17 @@ pub struct FnDefContent {
 
 #[derive(Debug)]
 pub struct NativeFnDefContent {
-    pub args: Vec<Typ>,
+    pub args: Vec<NativeFnArgDecl>,
     pub rtype: Option<Typ>, // None means void
     pub native: String,
     pub native_span: Span,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeFnArgDecl {
+    pub typ: Typ,
+    pub id: Ident,
     pub span: Span,
 }
 
@@ -99,7 +106,13 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
             args: value
                 .args
                 .into_iter()
-                .map(|arg| Typ::try_resolve_in_module(arg.typ, mctx))
+                .map(|arg| {
+                    Ok(NativeFnArgDecl {
+                        typ: Typ::try_resolve_in_module(arg.typ, mctx)?,
+                        span: arg.span,
+                        id: arg.id,
+                    })
+                })
                 .collect::<RsvResult<_>>()?,
             rtype: value
                 .rtype

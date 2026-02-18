@@ -399,6 +399,7 @@ impl<'t> TokenStream<'t> {
             if let Some(t2) = self.peek().copied()
                 && TkKind::LBracket == t2.kind
             {
+                self.next();
                 let flag = self.consume_identifier()?;
 
                 if let Some(t) = self.peek().copied()
@@ -406,8 +407,14 @@ impl<'t> TokenStream<'t> {
                 {
                     let args = self.consume_compiler_flag_args()?;
 
+                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
+                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
+
                     Ok(Some(CompilerFlag { flag, args }))
                 } else {
+                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
+                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
+
                     Ok(Some(CompilerFlag { flag, args: vec![] }))
                 }
             } else {
