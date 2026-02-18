@@ -16,7 +16,7 @@ fn main() {
 
         let bin = biwac_generator::arch::typescript::generate(&pkg);
 
-        println!("----generated binary----\n{bin}");
+        biwac_driver::write_bin(rootpath, &bin).unwrap();
     } else {
         panic!("1 Argument Required: <package-path>")
     }
