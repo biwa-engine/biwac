@@ -14,7 +14,9 @@ fn main() {
         let pkg = biwac_type_inferrer::infer(pkg).unwrap();
         // println!("pkg: {pkg:#?}");
 
-        // biwac_generator::arch::biwasm::generate(&pkg);
+        let bin = biwac_generator::arch::typescript::generate(&pkg);
+
+        println!("----generated binary----\n{bin}");
     } else {
         panic!("1 Argument Required: <package-path>")
     }

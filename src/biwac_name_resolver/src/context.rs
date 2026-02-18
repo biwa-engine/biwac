@@ -284,6 +284,12 @@ pub struct ExprId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocVarId(usize);
 
+impl LocVarId {
+    pub fn value(&self) -> &usize {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedIdent {
     Var(LocVarId),
