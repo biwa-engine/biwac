@@ -1,3 +1,4 @@
+pub mod macros;
 mod parser;
 pub mod symbols;
 pub mod types;
@@ -7,6 +8,7 @@ mod tests;
 
 use biwac_lexer::{TkKind, Token};
 
+pub use macros::{CompilerFlag, CompilerFlagArg, CompilerFlagLiteral};
 pub use symbols::{
     ExprOrStmt, Ident, ModAst, QualifiedId,
     expressions::{
@@ -14,7 +16,7 @@ pub use symbols::{
         Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr, block::BlockExpr,
         if_expr::IfExpr,
     },
-    globals::{ArgDecl, FnDef, Globals, ImportDecl, StructDef, TypeDef},
+    globals::{ArgDecl, FnDef, Globals, ImportDecl, NativeFnDef, StructDef, TypeDef},
     statements::{
         AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt,
         vardecl::VarDecl, while_stmt::WhileStmt,

@@ -17,6 +17,7 @@ pub fn generate(pkg: &TypedPkg) -> String {
         body: oxc_allocator::Vec::from_iter_in(
             pkg.syms.iter().map(|(id, sym)| match sym {
                 Sym::FnDef(f) => f.as_oxc_global(id, &allocator),
+                Sym::NativeFnDef(f) => f.as_oxc_global(id, &allocator),
                 Sym::TypeDef(t) => match t {
                     TypeDefContent::Struct(s) => s.as_oxc_global(id, &allocator),
                 },

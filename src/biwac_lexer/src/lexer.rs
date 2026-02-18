@@ -12,12 +12,14 @@ pub(crate) struct SrcRegion {
 enum RegionKind {
     Raw,
     StringLiteral,
+    Dsl,
 }
 
 pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
     let mut pretokens: Vec<SrcRegion> = vec![];
 
     let mut quoted = false;
+    let mut inner_dsl = false;
     let mut last_pos = Pos::new(0, 0);
     let mut lmaxidx = 0;
     for (lidx, l) in src.lines().enumerate() {
@@ -25,22 +27,44 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
         let mut idx = 0;
         let mut comment_end = false;
         while idx < l.len() {
-            if quoted {
-                // TODO: if backslach appear, start escape
-                // if &l[idx..idx + 1] == "\\" {}
-                if let '\"' = l.chars().nth(idx).unwrap() {
-                    // end of string literal
-                    quoted = false;
+            if inner_dsl {
+                // DSLの領域は
+                // ```biwa
+                // }}
+                // ```
+                // の行が来たら終了
+                // それまではここでは何もしない
+                // パースは独自のパーサに委譲する
+                if l.len() == 2
+                    && '}' == l.chars().nth(0).unwrap()
+                    && '}' == l.chars().nth(1).unwrap()
+                {
+                    // end of DSL
+                    inner_dsl = false;
                     pretokens.push(SrcRegion {
-                        kind: RegionKind::StringLiteral,
-                        span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx + 1)),
+                        kind: RegionKind::Dsl,
+                        span: Span::new(modu.clone(), last_pos, Pos::new(lidx, 0)),
                     });
-                    last_pos = Pos::new(lidx, idx + 1);
+                    last_pos = Pos::new(lidx, 2);
+                } else {
+                    break;
                 }
-
-                idx += 1;
             } else {
-                if let '\"' = l.chars().nth(idx).unwrap() {
+                if quoted {
+                    // TODO: if backslach appear, start escape
+                    // if &l[idx..idx + 1] == "\\" {}
+                    if let '\"' = l.chars().nth(idx).unwrap() {
+                        // end of string literal
+                        quoted = false;
+                        pretokens.push(SrcRegion {
+                            kind: RegionKind::StringLiteral,
+                            span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx + 1)),
+                        });
+                        last_pos = Pos::new(lidx, idx + 1);
+                    }
+
+                    idx += 1;
+                } else if let '\"' = l.chars().nth(idx).unwrap() {
                     // start of string literal
                     quoted = true;
                     if idx > 0 {
@@ -53,7 +77,7 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                 } else if let '/' = l.chars().nth(idx).unwrap()
                     && let Some('/') = l.chars().nth(idx + 1)
                 {
-                    // start of comment out (to line end)
+                    // start of comment (to line end)
                     pretokens.push(SrcRegion {
                         kind: RegionKind::Raw,
                         span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
@@ -61,6 +85,18 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                     last_pos = Pos::new(lidx + 1, 0);
 
                     comment_end = true;
+                    break;
+                } else if let '{' = l.chars().nth(idx).unwrap()
+                    && let Some('{') = l.chars().nth(idx + 1)
+                {
+                    // start of DSL such as novel mode, or inline native code.
+                    pretokens.push(SrcRegion {
+                        kind: RegionKind::Raw,
+                        span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
+                    });
+                    last_pos = Pos::new(lidx, idx + 2);
+
+                    inner_dsl = true;
                     break;
                 }
 
@@ -106,6 +142,7 @@ pub(crate) enum PreTkKind {
     Word, // 識別子または予約語; identifier ([a-zA-Z_][a-zA-Z0-9_]) or reserved word (only alphabet)
     Mark(TkKind), // 記号; reserved mark, such as `+`, `/`, `::`
     StringLiteral, // 文字列リテラル; string literal `"..."`, span contains double quotes
+    Dsl,
 }
 
 pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
@@ -256,6 +293,12 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
             RegionKind::StringLiteral => {
                 pretokens.push(PreToken {
                     kind: PreTkKind::StringLiteral,
+                    span: r.span.clone(),
+                });
+            }
+            RegionKind::Dsl => {
+                pretokens.push(PreToken {
+                    kind: PreTkKind::Dsl,
                     span: r.span.clone(),
                 });
             }

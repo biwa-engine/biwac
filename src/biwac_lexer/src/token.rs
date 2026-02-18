@@ -75,6 +75,9 @@ pub enum TkKind {
     Colon,            // :
     SemiColon,        // ;
     DoubleColon,      // ::
+    DoubleLBrace,     // {{
+    DoubleRBrace,     // }}
+    DslLiteral,       // DSL
 }
 
 impl TkKind {
@@ -122,6 +125,9 @@ impl TkKind {
             Self::Colon => ":".to_string(),
             Self::SemiColon => ";".to_string(),
             Self::DoubleColon => "::".to_string(),
+            Self::DoubleLBrace => "{{".to_string(),
+            Self::DoubleRBrace => "}}".to_string(),
+            Self::DslLiteral => "...".to_string(),
         }
     }
 }

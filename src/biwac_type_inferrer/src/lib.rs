@@ -98,6 +98,7 @@ pub enum Sym {
     FnDef(FnDefContent),
     VarDecl(GlobalVarDecl),
     TypeDef(TypeDefContent),
+    NativeFnDef(NativeFnDefContent),
 }
 
 #[derive(Debug)]
@@ -105,7 +106,7 @@ pub struct FnDefContent {
     pub args: Vec<DecledArg>,
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
-    pub rtype: Option<Ty>, // None means void
+    pub rty: Ty, // None means void
     pub vars: HashMap<LocVarId, DecledVar>,
     // 推論結果
     pub ty_info: TyInfo,
@@ -125,4 +126,13 @@ impl TyInfo {
     pub fn unwrap_type_of_variable(&self, var: &LocVarId) -> &Ty {
         self.vars.get(var).unwrap()
     }
+}
+
+#[derive(Debug)]
+pub struct NativeFnDefContent {
+    pub args: Vec<Ty>,
+    pub rty: Ty,
+    pub native: String,
+    pub native_span: Span,
+    pub span: Span,
 }

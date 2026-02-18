@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use biwac_name_resolver::{AbsId, StructDefContent};
-use biwac_type_inferrer::{FnDefContent, Ty};
+use biwac_type_inferrer::{FnDefContent, NativeFnDefContent, Ty};
 
 use crate::arch::typescript::{AsOxc, AsOxcGlobal, FnAstBuildEnv, IntoOxc, Mangled, span};
 
@@ -166,11 +166,98 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDefContent {
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: match &self.rtype {
-                            Some(ty) => ty.clone(),
-                            None => Ty::Void,
-                        }
-                        .into_oxc(allocator),
+                        type_annotation: self.rty.clone().into_oxc(allocator),
+                    },
+                    allocator,
+                )),
+            },
+            allocator,
+        ))
+    }
+}
+
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDefContent {
+    fn as_oxc_global(
+        &'a self,
+        id: &AbsId,
+        allocator: &'a oxc_allocator::Allocator,
+    ) -> oxc_ast::ast::Statement<'a> {
+        // TODO: そもそもnativeのターゲットがTSかチェック
+
+        // TSをパースして取り込む
+        let ts =
+            oxc_parser::Parser::new(allocator, &self.native, oxc_span::SourceType::ts()).parse();
+
+        oxc_ast::ast::Statement::FunctionDeclaration(oxc_allocator::Box::new_in(
+            oxc_ast::ast::Function {
+                span: span(),
+                id: Some(oxc_ast::ast::BindingIdentifier {
+                    span: span(),
+                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    symbol_id: Cell::new(None),
+                }),
+                generator: false,
+                r#type: oxc_ast::ast::FunctionType::FunctionDeclaration,
+                r#async: false,
+                pure: false,
+                pife: false,
+                declare: false,
+                scope_id: Cell::new(None),
+                this_param: None,
+                params: oxc_allocator::Box::new_in(
+                    oxc_ast::ast::FormalParameters {
+                        span: span(),
+                        kind: oxc_ast::ast::FormalParameterKind::FormalParameter,
+                        items: oxc_allocator::Vec::from_iter_in(
+                            self.args.iter().enumerate().map(|(i, a)| {
+                                oxc_ast::ast::FormalParameter {
+                                    span: span(),
+                                    decorators: oxc_allocator::Vec::new_in(allocator),
+                                    pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
+                                        oxc_allocator::Box::new_in(
+                                            oxc_ast::ast::BindingIdentifier {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator.alloc_str(&format!("lv{i}")),
+                                                ),
+                                                symbol_id: Cell::new(None),
+                                            },
+                                            allocator,
+                                        ),
+                                    ),
+                                    type_annotation: Some(oxc_allocator::Box::new_in(
+                                        oxc_ast::ast::TSTypeAnnotation {
+                                            span: span(),
+                                            type_annotation: a.clone().into_oxc(allocator),
+                                        },
+                                        allocator,
+                                    )),
+                                    initializer: None,
+                                    optional: false,
+                                    accessibility: None,
+                                    readonly: false,
+                                    r#override: false,
+                                }
+                            }),
+                            allocator,
+                        ),
+                        rest: None,
+                    },
+                    allocator,
+                ),
+                body: Some(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::FunctionBody {
+                        span: span(),
+                        directives: oxc_allocator::Vec::new_in(allocator),
+                        statements: ts.program.body,
+                    },
+                    allocator,
+                )),
+                type_parameters: None,
+                return_type: Some(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::TSTypeAnnotation {
+                        span: span(),
+                        type_annotation: self.rty.clone().into_oxc(allocator),
                     },
                     allocator,
                 )),

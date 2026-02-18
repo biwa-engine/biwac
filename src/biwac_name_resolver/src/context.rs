@@ -62,6 +62,9 @@ impl PkgLvlRslvCtx {
                     Globals::FnDef(f) => {
                         syms.insert(AbsId::from_modpath(modpath, f.id.id.clone()));
                     }
+                    Globals::NativeFnDef(f) => {
+                        syms.insert(AbsId::from_modpath(modpath, f.id.id.clone()));
+                    }
                     Globals::TypeDef(t) => match t {
                         TypeDef::Struct(s) => {
                             syms.insert(AbsId::from_modpath(modpath, s.id.id.clone()));
@@ -99,6 +102,17 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
                     }
                 },
                 Globals::FnDef(f) => match fns.entry(f.id.id.clone()) {
+                    Entry::Vacant(e) => {
+                        e.insert(f.id.clone());
+                    }
+                    Entry::Occupied(e) => {
+                        return Err(ResolveError::DuplicatedFnName {
+                            fid1: Box::new(f.id.clone()),
+                            fid2: Box::new(e.remove()),
+                        });
+                    }
+                },
+                Globals::NativeFnDef(f) => match fns.entry(f.id.id.clone()) {
                     Entry::Vacant(e) => {
                         e.insert(f.id.clone());
                     }

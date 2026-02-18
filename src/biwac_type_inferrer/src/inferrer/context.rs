@@ -1,8 +1,8 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_name_resolver::{
-    AbsId, ExprId, FnDefContent, FnTyp, LocVarId, ModSym, PkgSymMap, StructDefContent, Typ,
-    TypeDefContent,
+    AbsId, ExprId, FnDefContent, FnTyp, LocVarId, ModSym, NativeFnDefContent, PkgSymMap,
+    StructDefContent, Typ, TypeDefContent,
 };
 use biwac_parser::Ident;
 
@@ -98,6 +98,9 @@ impl<'ast> TyCtxBuilder<'ast> {
                 ModSym::FnDef(f) => {
                     self.build_and_store_fn(id, f)?;
                 }
+                ModSym::NativeFnDef(f) => {
+                    self.build_and_store_native_fn(id, f)?;
+                }
                 ModSym::VarDecl(_) => {
                     // 型を記録
                     // グローバル変数は型アノテーションを必須とするくらいの制約を設けたほうが良い
@@ -123,6 +126,7 @@ impl<'ast> TyCtxBuilder<'ast> {
 
                 match sym {
                     ModSym::FnDef(_) => Err(TyError::SymbolNotAType { id: id.clone() }),
+                    ModSym::NativeFnDef(_) => Err(TyError::SymbolNotAType { id: id.clone() }),
                     ModSym::VarDecl(_) => Err(TyError::SymbolNotAType { id: id.clone() }),
                     ModSym::TypeDef(t) => match t {
                         TypeDefContent::Struct(_) => Ok(Ty::Struct(id.clone())),
@@ -150,6 +154,24 @@ impl<'ast> TyCtxBuilder<'ast> {
                 .iter()
                 .map(|a| self.build_ty(f.vars.get(&a.id).as_ref().unwrap().typ.as_ref().unwrap()))
                 .collect::<TyResult<_>>()?,
+            ret: match &f.rtype {
+                Some(typ) => Box::new(self.build_ty(typ)?),
+                None => Box::new(Ty::Void),
+            },
+        };
+
+        self.syms.insert(id.clone(), SymTy::Fn(fty));
+
+        Ok(())
+    }
+
+    pub(crate) fn build_and_store_native_fn(
+        &mut self,
+        id: &AbsId,
+        f: &NativeFnDefContent,
+    ) -> TyResult<()> {
+        let fty = FnTy {
+            args: f.args.iter().map(|a| Ty::from(a.clone())).collect(),
             ret: match &f.rtype {
                 Some(typ) => Box::new(self.build_ty(typ)?),
                 None => Box::new(Ty::Void),

@@ -2,8 +2,8 @@ use biwac_base::Span;
 use biwac_lexer::token::{TkKind, TkVal};
 
 use crate::{
-    Exprs, Ident, ParseError, QualifiedId, Stmt, TypRepr, VarDecl, parser::TokenStream,
-    symbols::ExprOrStmt,
+    CompilerFlag, Exprs, Ident, ParseError, QualifiedId, Stmt, TypRepr, VarDecl,
+    parser::TokenStream, symbols::ExprOrStmt,
 };
 
 #[derive(Debug, Clone)]
@@ -18,6 +18,7 @@ pub enum Globals {
     FnDef(FnDef),
     VarDecl(VarDecl),
     TypeDef(TypeDef),
+    NativeFnDef(NativeFnDef),
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,18 @@ pub struct FnDef {
     pub expr: Option<Exprs>,
     pub rtype: Option<TypRepr>, // None means void
     pub span: Span,
+    pub flags: Vec<CompilerFlag>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeFnDef {
+    pub id: Ident,
+    pub args: Vec<ArgDecl>,
+    pub rtype: Option<TypRepr>, // None means void
+    pub native: String,
+    pub native_span: Span,
+    pub span: Span,
+    pub flags: Vec<CompilerFlag>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +65,8 @@ pub enum TypeDef {
 
 impl<'t> TokenStream<'t> {
     pub(super) fn opt_consume_global_symbol(&mut self) -> Result<Option<Globals>, ParseError> {
+        let flags = self.consume_compiler_flags()?;
+
         if let Some(t) = self.peek() {
             match t.kind {
                 TkKind::Import => {
@@ -63,10 +78,10 @@ impl<'t> TokenStream<'t> {
                     // ";"
                     let end = self.must_consume_semicolon()?.span.clone();
 
-                    return Ok(Some(Globals::Import(ImportDecl {
+                    Ok(Some(Globals::Import(ImportDecl {
                         qualid,
                         span: Span::merge(&begin, &end),
-                    })));
+                    })))
                 }
                 TkKind::Fn => {
                     let begin = t.span.clone();
@@ -81,27 +96,52 @@ impl<'t> TokenStream<'t> {
                         None
                     };
 
-                    let (stmts, expr, end) = match self.consume_block_expression_or_statement()? {
-                        ExprOrStmt::Expr(block_expr) => {
-                            (block_expr.stmts, Some(*block_expr.expr), block_expr.span)
+                    if flags.iter().any(|f| &f.flag.id == "native") {
+                        if let Some(t) = self.next() {
+                            if TkKind::DslLiteral == t.kind {
+                                Ok(Some(Globals::NativeFnDef(NativeFnDef {
+                                    id,
+                                    args,
+                                    native: t.unwrap_string_value(),
+                                    rtype,
+                                    span: Span::merge(&begin, &t.span),
+                                    native_span: t.span.clone(),
+                                    flags,
+                                })))
+                            } else {
+                                Err(ParseError::InvalidToken(
+                                    vec![TkKind::DslLiteral],
+                                    t.clone(),
+                                ))
+                            }
+                        } else {
+                            Err(ParseError::InvalidEOF(vec![TkKind::DslLiteral]))
                         }
-                        ExprOrStmt::Stmt(block_stmt) => (block_stmt.stmts, None, block_stmt.span),
-                    };
+                    } else {
+                        let (stmts, expr, end) =
+                            match self.consume_block_expression_or_statement()? {
+                                ExprOrStmt::Expr(block_expr) => {
+                                    (block_expr.stmts, Some(*block_expr.expr), block_expr.span)
+                                }
+                                ExprOrStmt::Stmt(block_stmt) => {
+                                    (block_stmt.stmts, None, block_stmt.span)
+                                }
+                            };
 
-                    return Ok(Some(Globals::FnDef(FnDef {
-                        id,
-                        args,
-                        stmts,
-                        expr,
-                        rtype,
-                        span: Span::merge(&begin, &end),
-                    })));
+                        Ok(Some(Globals::FnDef(FnDef {
+                            id,
+                            args,
+                            stmts,
+                            expr,
+                            rtype,
+                            span: Span::merge(&begin, &end),
+                            flags,
+                        })))
+                    }
                 }
-                TkKind::Let => {
-                    return Ok(Some(Globals::VarDecl(
-                        self.consume_variable_declaration_statment()?,
-                    )));
-                }
+                TkKind::Let => Ok(Some(Globals::VarDecl(
+                    self.consume_variable_declaration_statment()?,
+                ))),
                 TkKind::Struct => {
                     self.next();
 
@@ -159,16 +199,14 @@ impl<'t> TokenStream<'t> {
                         }
                     }
                 }
-                _ => {
-                    return Err(ParseError::InvalidToken(
-                        vec![TkKind::Fn, TkKind::Let, TkKind::Struct],
-                        t.to_owned().clone(),
-                    ));
-                }
+                _ => Err(ParseError::InvalidToken(
+                    vec![TkKind::Fn, TkKind::Let, TkKind::Struct],
+                    t.to_owned().clone(),
+                )),
             }
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
     pub(crate) fn consume_argsdec(&mut self) -> Result<Vec<ArgDecl>, ParseError> {
         self.must_consume_next(vec![TkKind::LPare])?;

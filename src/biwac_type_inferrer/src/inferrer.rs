@@ -10,7 +10,7 @@ use biwac_name_resolver::{
 use biwac_parser::{BinOperator, Ident, UnOperator};
 
 use crate::{
-    FnDefContent, Sym, TyError, TyInfo, TyResult, TypedPkg,
+    FnDefContent, NativeFnDefContent, Sym, TyError, TyInfo, TyResult, TypedPkg,
     inferrer::{
         context::{PkgTyCtx, SymTy, TyCtx},
         types::{FnTy, Ty, TyVar},
@@ -554,7 +554,7 @@ pub fn infer(pkg: PkgSymMap) -> TyResult<TypedPkg> {
                 } else {
                     Ty::Void
                 };
-                let mut fctx = TyCtx::new(&pctx, rty);
+                let mut fctx = TyCtx::new(&pctx, rty.clone());
 
                 // 引数を決定済みの型として文脈に記録
                 for arg in &f.args {
@@ -578,14 +578,14 @@ pub fn infer(pkg: PkgSymMap) -> TyResult<TypedPkg> {
                 }
 
                 // 最後の式があれば検査
-                let rty = if let Some(expr) = &f.expr {
+                let ret_ty = if let Some(expr) = &f.expr {
                     fctx.infer_expr(expr)?
                 } else {
                     stmt_last_ty
                 };
 
                 // 戻り値の型の一致を検査
-                fctx.unify(rty, fctx.rty.clone())?;
+                fctx.unify(ret_ty, fctx.rty.clone())?;
 
                 // ---- 以降は結果の組み立て ----
                 let mut vars = HashMap::new();
@@ -620,9 +620,24 @@ pub fn infer(pkg: PkgSymMap) -> TyResult<TypedPkg> {
                         args: f.args,
                         stmts: f.stmts,
                         expr: f.expr,
-                        rtype: f.rtype.map(|typ| typ.into()),
+                        rty,
                         vars: f.vars,
                         ty_info: TyInfo { vars, exprs },
+                    }),
+                );
+            }
+            ModSym::NativeFnDef(f) => {
+                syms.insert(
+                    id,
+                    Sym::NativeFnDef(NativeFnDefContent {
+                        args: f.args.into_iter().map(|typ| typ.into()).collect(),
+                        rty: match f.rtype {
+                            Some(typ) => typ.into(),
+                            None => Ty::Void,
+                        },
+                        native: f.native,
+                        native_span: f.native_span,
+                        span: f.span,
                     }),
                 );
             }

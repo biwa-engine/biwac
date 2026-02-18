@@ -74,6 +74,20 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                         .to_string(),
                 )),
             },
+            PreTkKind::Dsl => Token {
+                kind: TkKind::DslLiteral,
+                span: p.span.clone(),
+                val: Some(TkVal::String(
+                    // 開始行と終了行は少なくとも別の行
+                    [
+                        lines.get(p.span.begin().line()).unwrap()[p.span.begin().idx()..]
+                            .to_string(),
+                        lines[p.span.begin().line() + 1..p.span.end().line()].join("\n"),
+                        lines.get(p.span.end().line()).unwrap()[..p.span.end().idx()].to_string(),
+                    ]
+                    .join("\n"),
+                )),
+            },
         })
         .collect();
 

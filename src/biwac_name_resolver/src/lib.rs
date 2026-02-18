@@ -20,7 +20,10 @@ pub use crate::{
             BlockExpr, Callee, Expr, ExprVal, FnCall, Literal, MemberAccess, Primary,
             StructLiteral, Variable,
         },
-        globals::{DecledArg, FnDefContent, GlobalVarDecl, StructDefContent, TypeDefContent},
+        globals::{
+            DecledArg, FnDefContent, GlobalVarDecl, NativeFnDefContent, StructDefContent,
+            TypeDefContent,
+        },
         statements::{
             AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,
         },
@@ -111,6 +114,15 @@ impl PkgSymMap {
                         syms.insert(
                             id,
                             ModSym::VarDecl(GlobalVarDecl::try_resolve_in_module(v, &mctx)?),
+                        );
+                    }
+                    biwac_parser::Globals::NativeFnDef(f) => {
+                        let id = AbsId::from_modpath(&modpath, f.id.id.clone());
+                        syms.insert(
+                            id,
+                            ModSym::NativeFnDef(NativeFnDefContent::try_resolve_in_module(
+                                f, &mctx,
+                            )?),
                         );
                     }
                 }

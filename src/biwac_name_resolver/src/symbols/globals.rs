@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use biwac_base::Span;
 use biwac_parser::{Ident, VarDecl};
 
 use crate::{
@@ -21,6 +22,15 @@ pub struct FnDefContent {
     pub expr: Option<Expr>,
     pub rtype: Option<Typ>, // None means void
     pub vars: HashMap<LocVarId, DecledVar>,
+}
+
+#[derive(Debug)]
+pub struct NativeFnDefContent {
+    pub args: Vec<Typ>,
+    pub rtype: Option<Typ>, // None means void
+    pub native: String,
+    pub native_span: Span,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +86,28 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
                 .map(|typ| Typ::try_resolve_in_module(typ, mctx))
                 .transpose()?,
             vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
+        })
+    }
+}
+
+impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
+    fn try_resolve_in_module<'pctx>(
+        value: biwac_parser::NativeFnDef,
+        mctx: &ModLvlRslvCtx<'pctx>,
+    ) -> RsvResult<Self> {
+        Ok(Self {
+            args: value
+                .args
+                .into_iter()
+                .map(|arg| Typ::try_resolve_in_module(arg.typ, mctx))
+                .collect::<RsvResult<_>>()?,
+            rtype: value
+                .rtype
+                .map(|typ| Typ::try_resolve_in_module(typ, mctx))
+                .transpose()?,
+            native: value.native,
+            native_span: value.native_span,
+            span: value.span,
         })
     }
 }
