@@ -9,7 +9,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
-use biwac_parser::{Ident, ImportDecl, QualifiedId, TypeDef};
+use biwac_parser::{Ident, ImportDecl, PrimTyp, QualifiedId, TypReprVal, TypeDef};
 
 use crate::context::{FnLvlRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx};
 pub use crate::{
@@ -21,8 +21,8 @@ pub use crate::{
             StructLiteral, Variable,
         },
         globals::{
-            DecledArg, FnDefContent, GlobalVarDecl, NativeFnArgDecl, NativeFnDefContent,
-            StructDefContent, TypeDefContent,
+            DecledArg, FnDefContent, GlobalVarDecl, MethodDefContent, NativeFnArgDecl,
+            NativeFnDefContent, StructDefContent, TypeDefContent,
         },
         statements::{
             AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,
@@ -82,7 +82,7 @@ pub struct PkgSymMap {
 
 impl PkgSymMap {
     pub fn try_resolve_symbol(pkg: Pkg) -> RsvResult<Self> {
-        let pctx = PkgLvlRslvCtx::new(&pkg);
+        let pctx = PkgLvlRslvCtx::new(&pkg)?;
         let mut syms = HashMap::new();
 
         for (modpath, modu) in pkg.modules {
@@ -125,6 +125,24 @@ impl PkgSymMap {
                             )?),
                         );
                     }
+                    biwac_parser::Globals::MethodDef(m) => {
+                        let typ = match &m.self_typ.val {
+                            TypReprVal::Primitive(p) => match p {
+                                PrimTyp::Int => Typ::Int,
+                                PrimTyp::Uint => Typ::Int,
+                                PrimTyp::Bool => Typ::Bool,
+                            },
+                            TypReprVal::Defined(deftyp) => {
+                                Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?)
+                            }
+                        };
+                        let id = AbsId::new_type_impl(&typ, m.id.id.clone());
+
+                        syms.insert(
+                            id,
+                            ModSym::MethodDef(MethodDefContent::try_resolve_in_module(m, &mctx)?),
+                        );
+                    }
                 }
             }
         }
@@ -154,6 +172,25 @@ impl AbsId {
             },
             id,
         }
+    }
+
+    pub(crate) fn new_type_impl(typ: &Typ, id: String) -> Self {
+        let quals = match typ {
+            Typ::Int => vec!["Int".to_string()],
+            Typ::Float => vec!["Float".to_string()],
+            Typ::Bool => vec!["Bool".to_string()],
+            Typ::Defined(absid) => {
+                let mut quals = absid.quals.clone();
+                quals.push(absid.id.clone());
+
+                quals
+            }
+            Typ::Fn(_) => {
+                panic!("compiler bug: function type cannot be implemented related functions")
+            }
+        };
+
+        Self { quals, id }
     }
 }
 

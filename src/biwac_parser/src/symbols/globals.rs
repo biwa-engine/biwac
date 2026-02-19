@@ -63,6 +63,7 @@ pub struct ArgDecl {
 #[derive(Debug, Clone)]
 pub struct MethodDef {
     pub self_typ: TypRepr,
+    pub self_ident: Ident,
     pub id: Ident,
     pub args: Vec<ArgDecl>, // 第一引数がselfであるのは自明なので含まない
     pub stmts: Vec<Stmt>,
@@ -109,10 +110,10 @@ impl<'t> TokenStream<'t> {
         let id = self.consume_identifier()?;
 
         // 実装対象の型typがSomeならメソッドである可能性がある
-        let (args, is_method) = if self_typ.is_some() {
+        let (args, self_ident) = if self_typ.is_some() {
             self.consume_method_argsdec(&self_typ)?
         } else {
-            (self.consume_argsdec(&self_typ)?, false)
+            (self.consume_argsdec(&self_typ)?, None)
         };
 
         let rtype = if self.consume_next_if_match(vec![TkKind::Arrow]).is_some() {
@@ -146,7 +147,7 @@ impl<'t> TokenStream<'t> {
             // Self型を表すtypをコンテキストとして渡してパースする
             let ctx = FnParseCtx {
                 self_typ: self_typ.clone(),
-                is_method,
+                is_method: self_ident.is_some(),
             };
             let (stmts, expr, end) = match self.consume_block_expression_or_statement(&ctx)? {
                 ExprOrStmt::Expr(block_expr) => {
@@ -155,10 +156,11 @@ impl<'t> TokenStream<'t> {
                 ExprOrStmt::Stmt(block_stmt) => (block_stmt.stmts, None, block_stmt.span),
             };
 
-            if is_method {
+            if let Some(self_ident) = self_ident {
                 Ok(Globals::MethodDef(MethodDef {
-                    // SAFETY: is_method trueになるのはSomeのときだけ
+                    // SAFETY: self_ident Someになるのはself_typ Someのときだけ
                     self_typ: self_typ.expect("compiler bug: not a method"),
+                    self_ident,
                     id,
                     args,
                     stmts,
@@ -356,8 +358,8 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn consume_method_argsdec(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<(Vec<ArgDecl>, bool), ParseError> {
-        // (args, is_method)
+    ) -> Result<(Vec<ArgDecl>, Option<Ident>), ParseError> {
+        // (args, self_ident)
         self.must_consume_next(vec![TkKind::LPare])?;
 
         let mut args = vec![];
@@ -369,18 +371,22 @@ impl<'t> TokenStream<'t> {
             TkKind::SelfVar,
         ]))?;
 
-        let is_method = match t.kind {
+        let self_ident = match t.kind {
             TkKind::RPare => {
                 self.next();
 
-                return Ok((args, false));
+                return Ok((args, None));
             }
             TkKind::SelfVar => {
+                let span = t.span.clone();
                 self.next();
 
-                true
+                Some(Ident {
+                    id: "self".to_string(),
+                    span,
+                })
             }
-            _ => false,
+            _ => None,
         };
 
         loop {
@@ -390,7 +396,7 @@ impl<'t> TokenStream<'t> {
                 .clone();
 
             if let TkKind::RPare = t.kind {
-                return Ok((args, is_method));
+                return Ok((args, self_ident));
             } else if let TkKind::Ident = &t.kind
                 && let Some(TkVal::String(arg)) = &t.val
             {

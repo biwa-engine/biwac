@@ -16,7 +16,7 @@ pub use symbols::{
         MethodCall, Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr, block::BlockExpr,
         if_expr::IfExpr,
     },
-    globals::{ArgDecl, FnDef, Globals, ImportDecl, NativeFnDef, StructDef, TypeDef},
+    globals::{ArgDecl, FnDef, Globals, ImportDecl, MethodDef, NativeFnDef, StructDef, TypeDef},
     statements::{
         AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt,
         vardecl::VarDecl, while_stmt::WhileStmt,

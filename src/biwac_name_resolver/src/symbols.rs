@@ -1,4 +1,4 @@
-use crate::{FnDefContent, GlobalVarDecl, NativeFnDefContent, TypeDefContent};
+use crate::{FnDefContent, GlobalVarDecl, MethodDefContent, NativeFnDefContent, TypeDefContent};
 
 pub(crate) mod expressions;
 pub(crate) mod globals;
@@ -10,4 +10,5 @@ pub enum ModSym {
     VarDecl(GlobalVarDecl),
     TypeDef(TypeDefContent),
     NativeFnDef(NativeFnDefContent),
+    MethodDef(MethodDefContent),
 }

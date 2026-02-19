@@ -33,7 +33,8 @@ pub enum Primary {
     FnCall(FnCall),
     MemberAccess(MemberAccess),
     IfExpr(IfExpr),
-    Block(BlockExpr), // MethodCall(MethodCall),
+    Block(BlockExpr),
+    MethodCall(MethodCall),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +68,7 @@ impl Primary {
             Self::MemberAccess(m) => m.span.clone(),
             Self::IfExpr(i) => i.span.clone(),
             Self::Block(b) => b.span.clone(),
+            Self::MethodCall(m) => m.span.clone(),
         }
     }
 }
@@ -118,12 +120,13 @@ pub struct MemberAccess {
     pub span: Span,
 }
 
-// #[derive(Debug, Clone)]
-// pub struct MethodCall {
-//     pub left: Box<Expr>,
-//     pub method: String,
-//     pub args: Vec<Expr>,
-// }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCall {
+    pub left: Box<Expr>,
+    pub method: Ident,
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryExpr {
@@ -159,6 +162,9 @@ impl TryResolve<biwac_parser::Primary> for Primary {
             biwac_parser::Primary::FnCall(f) => Ok(Self::FnCall(FnCall::try_resolve(f, fctx)?)),
             biwac_parser::Primary::MemberAccess(m) => {
                 Ok(Self::MemberAccess(MemberAccess::try_resolve(m, fctx)?))
+            }
+            biwac_parser::Primary::MethodCall(m) => {
+                Ok(Self::MethodCall(MethodCall::try_resolve(m, fctx)?))
             }
             biwac_parser::Primary::IfExpr(i) => Ok(Self::IfExpr(IfExpr::try_resolve(i, fctx)?)),
             biwac_parser::Primary::Block(b) => Ok(Self::Block(BlockExpr::try_resolve(b, fctx)?)),
@@ -226,6 +232,24 @@ impl TryResolve<biwac_parser::MemberAccess> for MemberAccess {
             span: value.span(),
             left: Box::new(Expr::try_resolve(*value.left, fctx)?),
             member: value.member,
+        })
+    }
+}
+
+impl TryResolve<biwac_parser::MethodCall> for MethodCall {
+    fn try_resolve<'mctx>(
+        value: biwac_parser::MethodCall,
+        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
+    ) -> crate::RsvResult<Self> {
+        Ok(Self {
+            span: value.span.clone(),
+            left: Box::new(Expr::try_resolve(*value.left, fctx)?),
+            method: value.method,
+            args: value
+                .args
+                .into_iter()
+                .map(|a| Expr::try_resolve(a, fctx))
+                .collect::<RsvResult<_>>()?,
         })
     }
 }

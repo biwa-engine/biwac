@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biwac_base::Span;
-use biwac_parser::{Ident, VarDecl};
+use biwac_parser::{Ident, PrimTyp, TypReprVal, VarDecl};
 
 use crate::{
     DecledVar, Expr, LocVarId, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve,
@@ -43,6 +43,15 @@ pub struct NativeFnArgDecl {
 #[derive(Debug, Clone)]
 pub struct DecledArg {
     pub id: LocVarId,
+}
+
+#[derive(Debug)]
+pub struct MethodDefContent {
+    pub args: Vec<DecledArg>,
+    pub stmts: Vec<Stmt>,
+    pub expr: Option<Expr>,
+    pub rtype: Option<Typ>, // None means void
+    pub vars: HashMap<LocVarId, DecledVar>,
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +130,57 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
             native: value.native,
             native_span: value.native_span,
             span: value.span,
+        })
+    }
+}
+
+impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
+    fn try_resolve_in_module<'pctx>(
+        value: biwac_parser::MethodDef,
+        mctx: &ModLvlRslvCtx<'pctx>,
+    ) -> RsvResult<Self> {
+        // 関数のベースのスコープも初期化される
+        let mut fctx = FnLvlRslvCtx::new(mctx);
+
+        // 変数selfの初期化
+        let self_typ = match &value.self_typ.val {
+            TypReprVal::Primitive(p) => match p {
+                PrimTyp::Int => Typ::Int,
+                PrimTyp::Uint => Typ::Int,
+                PrimTyp::Bool => Typ::Bool,
+            },
+            TypReprVal::Defined(deftyp) => Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?),
+        };
+        fctx.declare_variable(&value.self_ident, Some(self_typ))?;
+
+        Ok(Self {
+            args: value
+                .args
+                .into_iter()
+                .map(|arg| match Typ::try_resolve_in_module(arg.typ, mctx) {
+                    Ok(typ) => {
+                        // 引数も変数の宣言として記録
+                        let id = fctx.declare_variable(&arg.id, Some(typ))?;
+
+                        Ok(DecledArg { id })
+                    }
+                    Err(e) => Err(e),
+                })
+                .collect::<RsvResult<_>>()?,
+            stmts: value
+                .stmts
+                .into_iter()
+                .map(|stmt| Stmt::try_resolve(stmt, &mut fctx))
+                .collect::<Result<Vec<Stmt>, ResolveError>>()?,
+            expr: value
+                .expr
+                .map(|expr| Expr::try_resolve(expr, &mut fctx))
+                .transpose()?,
+            rtype: value
+                .rtype
+                .map(|typ| Typ::try_resolve_in_module(typ, mctx))
+                .transpose()?,
+            vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
         })
     }
 }

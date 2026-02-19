@@ -1,3 +1,5 @@
+mod builder;
+
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use biwac_base::ModPath;
@@ -52,15 +54,33 @@ pub struct DecledVar {
 }
 
 impl PkgLvlRslvCtx {
-    pub fn new(pkg: &Pkg) -> Self {
+    pub fn new(pkg: &Pkg) -> RsvResult<Self> {
         let mut syms = HashSet::new();
+        let pre_pctx = builder::PrePkgLvlRslvCtx::new(pkg);
 
         for (modpath, modu) in &pkg.modules {
+            let pre_mctx = builder::PreModLvlRslvCtx::new(&pre_pctx, modpath.clone(), modu)?;
+
             for g in &modu.globals {
                 match g {
                     Globals::Import(_) => {}
                     Globals::FnDef(f) => {
-                        syms.insert(AbsId::from_modpath(modpath, f.id.id.clone()));
+                        if let Some(self_typ) = &f.self_typ {
+                            let typ = match &self_typ.val {
+                                TypReprVal::Primitive(p) => match p {
+                                    PrimTyp::Int => Typ::Int,
+                                    PrimTyp::Uint => Typ::Int,
+                                    PrimTyp::Bool => Typ::Bool,
+                                },
+                                TypReprVal::Defined(deftyp) => {
+                                    Typ::Defined(pre_mctx.try_resolve_deftyp(&deftyp.qualid)?)
+                                }
+                            };
+
+                            syms.insert(AbsId::new_type_impl(&typ, f.id.id.clone()));
+                        } else {
+                            syms.insert(AbsId::from_modpath(modpath, f.id.id.clone()));
+                        }
                     }
                     Globals::NativeFnDef(f) => {
                         syms.insert(AbsId::from_modpath(modpath, f.id.id.clone()));
@@ -73,11 +93,14 @@ impl PkgLvlRslvCtx {
                     Globals::VarDecl(v) => {
                         syms.insert(AbsId::from_modpath(modpath, v.id.id.clone()));
                     }
+                    Globals::MethodDef(_) => {
+                        // メソッドはAbsIdでアクセスされるわけではないため、記録しない
+                    }
                 }
             }
         }
 
-        Self { syms }
+        Ok(Self { syms })
     }
 }
 
@@ -137,6 +160,9 @@ impl<'pctx> ModLvlRslvCtx<'pctx> {
                     },
                 },
                 Globals::VarDecl(_) => todo!(),
+                Globals::MethodDef(_) => {
+                    // nothing to do
+                }
             }
         }
 
