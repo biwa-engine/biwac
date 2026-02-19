@@ -4,18 +4,24 @@ use biwac_lexer::TkKind;
 use crate::{
     ParseError,
     parser::TokenStream,
-    symbols::expressions::{Exprs, UnOperator, UnaryExpr},
+    symbols::{
+        expressions::{Exprs, UnOperator, UnaryExpr},
+        globals::FnParseCtx,
+    },
 };
 
 impl<'t> TokenStream<'t> {
-    pub(super) fn consume_unary_expression(&mut self) -> Result<Exprs, ParseError> {
+    pub(super) fn consume_unary_expression(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<Exprs, ParseError> {
         if let Some(t) = self.peek() {
             match t.kind {
                 TkKind::Minus => {
                     let begin = t.span.clone();
                     self.next();
 
-                    let expr = self.consume_unary_expression()?;
+                    let expr = self.consume_unary_expression(ctx)?;
                     let span = Span::merge(&begin, &expr.span());
 
                     Ok(Exprs::Unary(UnaryExpr {
@@ -24,7 +30,7 @@ impl<'t> TokenStream<'t> {
                         span,
                     }))
                 }
-                _ => self.consume_postfix_expression(),
+                _ => self.consume_postfix_expression(ctx),
             }
         } else {
             Err(ParseError::InvalidEOF(vec![TkKind::Ident, TkKind::Minus]))

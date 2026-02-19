@@ -4,7 +4,7 @@ use biwac_lexer::{TkKind, Token};
 use crate::{
     BlockExpr, BlockStmt, BoolLiteral, CompilerFlag, CompilerFlagArg, CompilerFlagLiteral, DefTyp,
     IntegerLiteral, ParseError, PrimTyp, Stmt, StringLiteral, TypRepr, TypReprVal,
-    symbols::{ExprOrStmt, Ident, QualifiedId},
+    symbols::{ExprOrStmt, Ident, QualifiedId, globals::FnParseCtx},
 };
 
 #[derive(Debug)]
@@ -74,7 +74,10 @@ impl<'t> TokenStream<'t> {
         }
     }
 
-    pub(crate) fn must_consume_type_annotation(&mut self) -> Result<TypRepr, ParseError> {
+    pub(crate) fn must_consume_type_annotation(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<TypRepr, ParseError> {
         let t = self
             .peek()
             .ok_or(ParseError::InvalidEOF(vec![TkKind::Colon]))?
@@ -83,13 +86,16 @@ impl<'t> TokenStream<'t> {
         if let TkKind::Colon = t.kind {
             self.next();
 
-            Ok(self.consume_type_representaion()?)
+            Ok(self.consume_type_representaion(self_typ)?)
         } else {
             Err(ParseError::InvalidToken(vec![TkKind::Colon], t.clone()))
         }
     }
 
-    pub(crate) fn opt_consume_type_annotation(&mut self) -> Result<Option<TypRepr>, ParseError> {
+    pub(crate) fn opt_consume_type_annotation(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<Option<TypRepr>, ParseError> {
         let t = self
             .peek()
             .ok_or(ParseError::InvalidEOF(vec![TkKind::Colon]))?
@@ -98,13 +104,16 @@ impl<'t> TokenStream<'t> {
         if let TkKind::Colon = t.kind {
             self.next();
 
-            Ok(Some(self.consume_type_representaion()?))
+            Ok(Some(self.consume_type_representaion(self_typ)?))
         } else {
             Ok(None)
         }
     }
 
-    pub(crate) fn consume_type_representaion(&mut self) -> Result<TypRepr, ParseError> {
+    pub(crate) fn consume_type_representaion(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<TypRepr, ParseError> {
         if let Some(t) = self.peek() {
             if let TkKind::Uint = t.kind {
                 let span = t.span.clone();
@@ -130,7 +139,7 @@ impl<'t> TokenStream<'t> {
             } else if let TkKind::Ident = t.kind {
                 // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
                 let qualid = self.consume_qualified_identifier()?;
-                let genargs = self.opt_consume_generic_args()?;
+                let genargs = self.opt_consume_generic_args(self_typ)?;
 
                 Ok(TypRepr {
                     span: qualid.span.clone(),
@@ -138,12 +147,18 @@ impl<'t> TokenStream<'t> {
                 })
             } else if let TkKind::Package = t.kind {
                 let qualid = self.consume_qualified_identifier()?;
-                let genargs = self.opt_consume_generic_args()?;
+                let genargs = self.opt_consume_generic_args(self_typ)?;
 
                 Ok(TypRepr {
                     span: qualid.span.clone(),
                     val: TypReprVal::Defined(DefTyp { qualid, genargs }),
                 })
+            } else if let TkKind::SelfTyp = t.kind
+                && let Some(self_typ) = self_typ
+            {
+                // Self型がある場合のみSelfは有効
+                self.next();
+                Ok(self_typ.clone())
             } else {
                 Err(ParseError::InvalidToken(
                     vec![TkKind::Uint, TkKind::Int, TkKind::Bool, TkKind::Ident],
@@ -166,7 +181,10 @@ impl<'t> TokenStream<'t> {
     /// let a: foo::bar[Int] = ...
     ///                ^
     ///                |
-    pub(crate) fn opt_consume_generic_args(&mut self) -> Result<Vec<TypRepr>, ParseError> {
+    pub(crate) fn opt_consume_generic_args(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<Vec<TypRepr>, ParseError> {
         let mut genargs = vec![];
         if let Some(t) = self.peek()
             && matches!(t.kind, TkKind::LBracket)
@@ -184,7 +202,7 @@ impl<'t> TokenStream<'t> {
 
                 return Ok(genargs);
             } else {
-                genargs.push(self.consume_type_representaion()?);
+                genargs.push(self.consume_type_representaion(self_typ)?);
 
                 if let Some(t) = self.next() {
                     if let TkKind::RBracket = t.kind {
@@ -268,6 +286,7 @@ impl<'t> TokenStream<'t> {
 
     pub(crate) fn consume_block_expression_or_statement(
         &mut self,
+        ctx: &FnParseCtx,
     ) -> Result<ExprOrStmt<BlockExpr, BlockStmt>, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
 
@@ -284,7 +303,7 @@ impl<'t> TokenStream<'t> {
                     span: Span::merge(&begin, &t.span),
                 }));
             } else {
-                match self.consume_expression_or_statement()? {
+                match self.consume_expression_or_statement(ctx)? {
                     ExprOrStmt::Expr(expr) => {
                         let end = self.must_consume_next(vec![TkKind::RBrace])?.span.clone();
 

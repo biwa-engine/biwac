@@ -1,7 +1,7 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{BlockStmt, Exprs, ParseError, parser::TokenStream};
+use crate::{BlockStmt, Exprs, ParseError, parser::TokenStream, symbols::globals::FnParseCtx};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhileStmt {
@@ -12,10 +12,10 @@ pub struct WhileStmt {
 
 impl<'t> TokenStream<'t> {
     // "while" <expression> <block-statement>
-    pub fn consume_while_statement(&mut self) -> Result<WhileStmt, ParseError> {
+    pub fn consume_while_statement(&mut self, ctx: &FnParseCtx) -> Result<WhileStmt, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::While])?.span.clone();
-        let cond = self.consume_expression()?;
-        let stmts = self.consume_block_statement()?;
+        let cond = self.consume_expression(ctx)?;
+        let stmts = self.consume_block_statement(ctx)?;
 
         Ok(WhileStmt {
             span: Span::merge(&begin, &stmts.span),

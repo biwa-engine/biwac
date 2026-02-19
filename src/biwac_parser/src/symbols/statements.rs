@@ -8,7 +8,10 @@ use biwac_lexer::token::TkKind;
 use if_stmt::IfStmt;
 use while_stmt::WhileStmt;
 
-use crate::{BlockStmt, ExprOrStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream};
+use crate::{
+    BlockStmt, ExprOrStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream,
+    symbols::globals::FnParseCtx,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
@@ -45,24 +48,25 @@ impl<'t> TokenStream<'t> {
     // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
     pub(crate) fn consume_expression_or_statement(
         &mut self,
+        ctx: &FnParseCtx,
     ) -> Result<ExprOrStmt<Exprs, Stmt>, ParseError> {
         if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::If => match self.consume_if_expression_or_statement()? {
+                TkKind::If => match self.consume_if_expression_or_statement(ctx)? {
                     ExprOrStmt::Expr(if_expr) => {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::IfExpr(if_expr))))
                     }
                     ExprOrStmt::Stmt(if_stmt) => Ok(ExprOrStmt::Stmt(Stmt::If(if_stmt))),
                 },
                 TkKind::While => Ok(ExprOrStmt::Stmt(Stmt::While(
-                    self.consume_while_statement()?,
+                    self.consume_while_statement(ctx)?,
                 ))),
                 TkKind::Return => {
                     // "return" <expression> ";"
                     self.next();
 
                     // <expression>
-                    let expr = self.consume_expression()?;
+                    let expr = self.consume_expression(ctx)?;
 
                     // ";"
                     let end = self.must_consume_semicolon()?.span.clone();
@@ -72,17 +76,17 @@ impl<'t> TokenStream<'t> {
                         span: Span::merge(&t.span, &end),
                     })))
                 }
-                TkKind::LBrace => match self.consume_block_expression_or_statement()? {
+                TkKind::LBrace => match self.consume_block_expression_or_statement(ctx)? {
                     ExprOrStmt::Expr(block_expr) => {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::Block(block_expr))))
                     }
                     ExprOrStmt::Stmt(block_stmt) => Ok(ExprOrStmt::Stmt(Stmt::Block(block_stmt))),
                 },
                 TkKind::Let => Ok(ExprOrStmt::Stmt(Stmt::VarDecl(
-                    self.consume_variable_declaration_statment()?,
+                    self.consume_variable_declaration_statment(Some(ctx))?,
                 ))),
                 _ => {
-                    let expr = self.consume_expression()?;
+                    let expr = self.consume_expression(ctx)?;
 
                     if let Some(t) = self.peek().copied()
                         && let TkKind::Assign = t.kind
@@ -92,7 +96,7 @@ impl<'t> TokenStream<'t> {
 
                         if let Exprs::Primary(dst) = expr {
                             // <expression>
-                            let src = self.consume_expression()?;
+                            let src = self.consume_expression(ctx)?;
 
                             // ";"
                             let end = self.must_consume_semicolon()?.span.clone();

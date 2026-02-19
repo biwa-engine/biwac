@@ -50,6 +50,9 @@ pub enum TkKind {
     Int,              // Int (reserved word of type)
     Bool,             // Bool (reserved word of type)
     Struct,           // struct (reserved word of type)
+    Impl,             // impl (reserved word of implementation for type)
+    SelfTyp,          // Self (reserved word of type)
+    SelfVar,          // self (reserved word of method value)
     LPare,            // (
     RPare,            // )
     LBrace,           // {
@@ -100,6 +103,9 @@ impl TkKind {
             Self::Int => "Int".to_string(),
             Self::Bool => "Bool".to_string(),
             Self::Struct => "struct".to_string(),
+            Self::Impl => "impl".to_string(),
+            Self::SelfTyp => "Self".to_string(),
+            Self::SelfVar => "self".to_string(),
             Self::LPare => "(".to_string(),
             Self::RPare => ")".to_string(),
             Self::LBrace => "{".to_string(),

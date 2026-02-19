@@ -1,7 +1,11 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{BlockStmt, Exprs, IfExpr, ParseError, parser::TokenStream, symbols::ExprOrStmt};
+use crate::{
+    BlockStmt, Exprs, IfExpr, ParseError,
+    parser::TokenStream,
+    symbols::{ExprOrStmt, globals::FnParseCtx},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IfStmt {
@@ -15,16 +19,17 @@ impl<'t> TokenStream<'t> {
     // "if" <expression> <block-statement> ("else" <block-statement>)?
     pub(super) fn consume_if_expression_or_statement(
         &mut self,
+        ctx: &FnParseCtx,
     ) -> Result<ExprOrStmt<IfExpr, IfStmt>, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::If])?.span.clone();
 
-        let cond = self.consume_expression()?;
+        let cond = self.consume_expression(ctx)?;
 
-        match self.consume_block_expression_or_statement()? {
+        match self.consume_block_expression_or_statement(ctx)? {
             ExprOrStmt::Expr(then) => {
                 self.must_consume_next(vec![TkKind::Else])?;
 
-                let els = self.consume_block_expression()?;
+                let els = self.consume_block_expression(ctx)?;
 
                 Ok(ExprOrStmt::Expr(IfExpr {
                     span: Span::merge(&begin, &els.span),
@@ -39,7 +44,7 @@ impl<'t> TokenStream<'t> {
                 {
                     self.next();
 
-                    let els = self.consume_block_statement()?;
+                    let els = self.consume_block_statement(ctx)?;
 
                     Ok(ExprOrStmt::Stmt(IfStmt {
                         span: Span::merge(&begin, &els.span),
@@ -60,19 +65,19 @@ impl<'t> TokenStream<'t> {
     }
 
     // "if" <expression> <block-statement> ("else" <block-statement>)?
-    pub(super) fn consume_if_statement(&mut self) -> Result<IfStmt, ParseError> {
+    pub(super) fn consume_if_statement(&mut self, ctx: &FnParseCtx) -> Result<IfStmt, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::If])?.span.clone();
 
-        let cond = self.consume_expression()?;
+        let cond = self.consume_expression(ctx)?;
 
-        let then = self.consume_block_statement()?;
+        let then = self.consume_block_statement(ctx)?;
 
         if let Some(t) = self.peek()
             && let TkKind::Else = t.kind
         {
             self.next();
 
-            let els = self.consume_block_statement()?;
+            let els = self.consume_block_statement(ctx)?;
 
             Ok(IfStmt {
                 span: Span::merge(&begin, &els.span),

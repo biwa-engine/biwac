@@ -10,7 +10,11 @@ pub mod unary;
 
 use biwac_base::Span;
 
-use crate::{BlockExpr, Ident, IfExpr, ParseError, parser::TokenStream, symbols::QualifiedId};
+use crate::{
+    BlockExpr, Ident, IfExpr, ParseError,
+    parser::TokenStream,
+    symbols::{QualifiedId, globals::FnParseCtx},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primary {
@@ -19,7 +23,8 @@ pub enum Primary {
     FnCall(FnCall),
     MemberAccess(MemberAccess),
     IfExpr(IfExpr),
-    Block(BlockExpr), // MethodCall(MethodCall),
+    Block(BlockExpr),
+    MethodCall(MethodCall),
 }
 
 impl Primary {
@@ -31,6 +36,7 @@ impl Primary {
             Self::MemberAccess(m) => m.span(),
             Self::IfExpr(i) => i.span.clone(),
             Self::Block(b) => b.span.clone(),
+            Self::MethodCall(m) => m.span.clone(),
         }
     }
 }
@@ -55,12 +61,13 @@ impl MemberAccess {
     }
 }
 
-// #[derive(Debug, Clone)]
-// pub struct MethodCall {
-//     pub left: Box<Exprs>,
-//     pub method: String,
-//     pub args: Vec<Exprs>,
-// }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCall {
+    pub left: Box<Exprs>,
+    pub method: Ident,
+    pub args: Vec<Exprs>,
+    pub span: Span,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
@@ -166,7 +173,7 @@ pub struct UnaryExpr {
 }
 
 impl<'t> TokenStream<'t> {
-    pub(crate) fn consume_expression(&mut self) -> Result<Exprs, ParseError> {
-        self.consume_equality_expression()
+    pub(crate) fn consume_expression(&mut self, ctx: &FnParseCtx) -> Result<Exprs, ParseError> {
+        self.consume_equality_expression(ctx)
     }
 }

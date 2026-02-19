@@ -3,12 +3,18 @@ use biwac_lexer::TkKind;
 use crate::{
     ParseError,
     parser::TokenStream,
-    symbols::expressions::{Exprs, MemberAccess, Primary},
+    symbols::{
+        expressions::{Exprs, MemberAccess, Primary},
+        globals::FnParseCtx,
+    },
 };
 
 impl<'t> TokenStream<'t> {
-    pub(super) fn consume_postfix_expression(&mut self) -> Result<Exprs, ParseError> {
-        let expr = self.consume_primary_expression()?;
+    pub(super) fn consume_postfix_expression(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<Exprs, ParseError> {
+        let expr = self.consume_primary_expression(ctx)?;
 
         self.consume_postfix_after_expression(expr)
     }

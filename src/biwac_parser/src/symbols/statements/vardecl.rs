@@ -1,7 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{Exprs, Ident, ParseError, parser::TokenStream, types::TypDecl};
+use crate::{
+    Exprs, Ident, ParseError, parser::TokenStream, symbols::globals::FnParseCtx, types::TypDecl,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarDecl {
@@ -13,14 +15,19 @@ pub struct VarDecl {
 
 impl<'t> TokenStream<'t> {
     // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"
-    pub(crate) fn consume_variable_declaration_statment(&mut self) -> Result<VarDecl, ParseError> {
+    // グローバル変数の初期化はctx None
+    // グローバル変数に束縛できる値は限られる。リテラルだけでconstのみ許容でも良い
+    pub(crate) fn consume_variable_declaration_statment(
+        &mut self,
+        ctx: Option<&FnParseCtx>,
+    ) -> Result<VarDecl, ParseError> {
         // "let"
         let begin = self.must_consume_next(vec![TkKind::Let])?.span.clone();
         // <identifier>
         let id = self.consume_identifier()?;
 
         // (":" <type-representation>)?
-        let typ = if let Some(t) = self.opt_consume_type_annotation()? {
+        let typ = if let Some(t) = self.opt_consume_type_annotation(&None)? {
             TypDecl::Typ(t)
         } else {
             TypDecl::Any
@@ -32,7 +39,8 @@ impl<'t> TokenStream<'t> {
         let _ = self.must_consume_next(vec![TkKind::Assign])?;
 
         // <expression>
-        let init = self.consume_expression()?;
+        let init =
+            self.consume_expression(ctx.expect("global variable parse not supported yet"))?;
 
         // ";"
         let end = self.must_consume_semicolon()?.span.clone();

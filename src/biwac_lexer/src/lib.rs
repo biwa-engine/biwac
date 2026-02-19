@@ -43,6 +43,9 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                     "Int" => (TkKind::Int, None),
                     "Bool" => (TkKind::Bool, None),
                     "struct" => (TkKind::Struct, None),
+                    "impl" => (TkKind::Impl, None),
+                    "Self" => (TkKind::SelfTyp, None),
+                    "self" => (TkKind::SelfVar, None),
                     _ => {
                         if let Some(i) = try_get_dec_integer(w) {
                             (TkKind::IntegerLiteral, Some(TkVal::Integer(i)))

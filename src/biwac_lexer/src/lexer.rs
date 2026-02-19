@@ -170,8 +170,8 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                     };
                     while idx < line.len() {
                         // two characters reserved mark
-                        if idx + 1 < line.len() {
-                            if let Some(kind) = match &line[idx..idx + 2] {
+                        if idx + 1 < line.len()
+                            && let Some(kind) = match &line[idx..idx + 2] {
                                 "<=" => Some(TkKind::LesEq),
                                 ">=" => Some(TkKind::GrtEq),
                                 "==" => Some(TkKind::Equal),
@@ -179,31 +179,31 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                                 "->" => Some(TkKind::Arrow),
                                 "::" => Some(TkKind::DoubleColon),
                                 _ => None,
-                            } {
-                                if last_idx < idx {
-                                    pretokens.push(PreToken {
-                                        kind: PreTkKind::Word,
-                                        span: Span::new(
-                                            modu.clone(),
-                                            Pos::new(lidx, last_idx),
-                                            Pos::new(lidx, idx),
-                                        ),
-                                    });
-                                }
-
+                            }
+                        {
+                            if last_idx < idx {
                                 pretokens.push(PreToken {
-                                    kind: PreTkKind::Mark(kind),
+                                    kind: PreTkKind::Word,
                                     span: Span::new(
                                         modu.clone(),
+                                        Pos::new(lidx, last_idx),
                                         Pos::new(lidx, idx),
-                                        Pos::new(lidx, idx + 2),
                                     ),
                                 });
-
-                                idx += 2;
-                                last_idx = idx;
-                                continue;
                             }
+
+                            pretokens.push(PreToken {
+                                kind: PreTkKind::Mark(kind),
+                                span: Span::new(
+                                    modu.clone(),
+                                    Pos::new(lidx, idx),
+                                    Pos::new(lidx, idx + 2),
+                                ),
+                            });
+
+                            idx += 2;
+                            last_idx = idx;
+                            continue;
                         }
 
                         // single character reserved mark

@@ -1,10 +1,15 @@
 use biwac_lexer::TkKind;
 
-use crate::{BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream};
+use crate::{
+    BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream, symbols::globals::FnParseCtx,
+};
 
 impl<'t> TokenStream<'t> {
-    pub(super) fn consume_relational_expression(&mut self) -> Result<Exprs, ParseError> {
-        let left = self.consume_arithmetic_expression()?;
+    pub(super) fn consume_relational_expression(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<Exprs, ParseError> {
+        let left = self.consume_arithmetic_expression(ctx)?;
 
         if let Some(t) = self.peek() {
             match t.kind {
@@ -18,7 +23,7 @@ impl<'t> TokenStream<'t> {
                     // つまり、戻り値と引数の型が一致しないため、
                     // 再帰的に適用され得ない
                     // したがって、構文木レベルで再帰適用を弾いて良い
-                    let right = self.consume_arithmetic_expression()?;
+                    let right = self.consume_arithmetic_expression(ctx)?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Lt,
@@ -29,7 +34,7 @@ impl<'t> TokenStream<'t> {
                 TkKind::Greater => {
                     self.next();
 
-                    let right = self.consume_arithmetic_expression()?;
+                    let right = self.consume_arithmetic_expression(ctx)?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Gt,
@@ -40,7 +45,7 @@ impl<'t> TokenStream<'t> {
                 TkKind::LesEq => {
                     self.next();
 
-                    let right = self.consume_arithmetic_expression()?;
+                    let right = self.consume_arithmetic_expression(ctx)?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Le,
@@ -51,7 +56,7 @@ impl<'t> TokenStream<'t> {
                 TkKind::GrtEq => {
                     self.next();
 
-                    let right = self.consume_arithmetic_expression()?;
+                    let right = self.consume_arithmetic_expression(ctx)?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Ge,

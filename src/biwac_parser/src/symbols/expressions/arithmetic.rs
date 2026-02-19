@@ -1,10 +1,15 @@
 use biwac_lexer::TkKind;
 
-use crate::{BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream};
+use crate::{
+    BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream, symbols::globals::FnParseCtx,
+};
 
 impl<'t> TokenStream<'t> {
-    pub(super) fn consume_arithmetic_expression(&mut self) -> Result<Exprs, ParseError> {
-        let left = self.consume_multiplication_expression()?;
+    pub(super) fn consume_arithmetic_expression(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<Exprs, ParseError> {
+        let left = self.consume_multiplication_expression(ctx)?;
 
         if let Some(t) = self.peek() {
             match t.kind {
@@ -17,7 +22,7 @@ impl<'t> TokenStream<'t> {
                     // (Number, Number) -> Number
                     // つまり、戻り値と引数の型が一致しているため、
                     // 再帰的に適用され得る
-                    let right = self.consume_arithmetic_expression()?;
+                    let right = self.consume_arithmetic_expression(ctx)?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Add,
@@ -28,7 +33,7 @@ impl<'t> TokenStream<'t> {
                 TkKind::Minus => {
                     self.next();
 
-                    let right = self.consume_arithmetic_expression()?;
+                    let right = self.consume_arithmetic_expression(ctx)?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Sub,

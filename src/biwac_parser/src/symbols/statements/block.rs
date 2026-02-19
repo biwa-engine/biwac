@@ -1,7 +1,10 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{AssignStmt, ExprStmt, Exprs, ParseError, ReturnStmt, Stmt, parser::TokenStream};
+use crate::{
+    AssignStmt, ExprStmt, Exprs, ParseError, ReturnStmt, Stmt, parser::TokenStream,
+    symbols::globals::FnParseCtx,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStmt {
@@ -10,7 +13,10 @@ pub struct BlockStmt {
 }
 
 impl<'t> TokenStream<'t> {
-    pub(crate) fn consume_block_statement(&mut self) -> Result<BlockStmt, ParseError> {
+    pub(crate) fn consume_block_statement(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<BlockStmt, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
 
         let mut stmts: Vec<Stmt> = vec![];
@@ -25,7 +31,7 @@ impl<'t> TokenStream<'t> {
                         span: Span::merge(&begin, &end),
                     });
                 } else {
-                    let stmt = self.consume_statement()?;
+                    let stmt = self.consume_statement(ctx)?;
 
                     stmts.push(stmt);
                 }
@@ -35,17 +41,17 @@ impl<'t> TokenStream<'t> {
         }
     }
 
-    pub(crate) fn consume_statement(&mut self) -> Result<Stmt, ParseError> {
+    pub(crate) fn consume_statement(&mut self, ctx: &FnParseCtx) -> Result<Stmt, ParseError> {
         if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::If => Ok(Stmt::If(self.consume_if_statement()?)),
-                TkKind::While => Ok(Stmt::While(self.consume_while_statement()?)),
+                TkKind::If => Ok(Stmt::If(self.consume_if_statement(ctx)?)),
+                TkKind::While => Ok(Stmt::While(self.consume_while_statement(ctx)?)),
                 TkKind::Return => {
                     // "return" <expression> ";"
                     self.next();
 
                     // <expression>
-                    let expr = self.consume_expression()?;
+                    let expr = self.consume_expression(ctx)?;
 
                     // ";"
                     let end = self.must_consume_semicolon()?.span.clone();
@@ -55,10 +61,12 @@ impl<'t> TokenStream<'t> {
                         span: Span::merge(&t.span, &end),
                     }))
                 }
-                TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement()?)),
-                TkKind::Let => Ok(Stmt::VarDecl(self.consume_variable_declaration_statment()?)),
+                TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement(ctx)?)),
+                TkKind::Let => Ok(Stmt::VarDecl(
+                    self.consume_variable_declaration_statment(Some(ctx))?,
+                )),
                 _ => {
-                    let expr = self.consume_expression()?;
+                    let expr = self.consume_expression(ctx)?;
 
                     if let Some(t) = self.peek().copied()
                         && let TkKind::Assign = t.kind
@@ -68,7 +76,7 @@ impl<'t> TokenStream<'t> {
 
                         if let Exprs::Primary(dst) = expr {
                             // <expression>
-                            let src = self.consume_expression()?;
+                            let src = self.consume_expression(ctx)?;
 
                             // ";"
                             let end = self.must_consume_semicolon()?.span.clone();

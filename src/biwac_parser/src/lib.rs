@@ -13,7 +13,7 @@ pub use symbols::{
     ExprOrStmt, Ident, ModAst, QualifiedId,
     expressions::{
         BinOperator, BinaryExpr, BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, MemberAccess,
-        Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr, block::BlockExpr,
+        MethodCall, Primary, StringLiteral, StructLiteral, UnOperator, UnaryExpr, block::BlockExpr,
         if_expr::IfExpr,
     },
     globals::{ArgDecl, FnDef, Globals, ImportDecl, NativeFnDef, StructDef, TypeDef},

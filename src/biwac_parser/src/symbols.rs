@@ -5,7 +5,9 @@ pub mod statements;
 use biwac_base::Span;
 use biwac_lexer::Token;
 
-use crate::{ParseError, parser::TokenStream, symbols::globals::Globals};
+use crate::{
+    ParseError, PrimTyp, TypRepr, TypReprVal, parser::TokenStream, symbols::globals::Globals,
+};
 
 #[derive(Debug)]
 pub struct ModAst {
@@ -18,8 +20,13 @@ impl ModAst {
 
         let mut globals = vec![];
 
-        while let Some(global) = stream.opt_consume_global_symbol()? {
-            globals.push(global);
+        loop {
+            let gs = stream.opt_consume_global_symbols()?;
+            if gs.is_empty() {
+                break;
+            } else {
+                globals.extend(gs);
+            }
         }
 
         Ok(Self { globals })
@@ -32,6 +39,53 @@ pub struct QualifiedId {
     pub quals: Vec<String>,
     pub id: String,
     pub span: Span,
+}
+
+impl QualifiedId {
+    pub fn new_type_impl(typ: &TypRepr, id: String, span: Span) -> Self {
+        let (quals, is_from_root) = match &typ.val {
+            TypReprVal::Primitive(p) => match p {
+                PrimTyp::Int => (vec!["Int".to_string()], false),
+                PrimTyp::Uint => (vec!["Uint".to_string()], false),
+                PrimTyp::Bool => (vec!["Bool".to_string()], false),
+            },
+            TypReprVal::Defined(deftyp) => {
+                let mut quals = deftyp.qualid.quals.clone();
+                quals.push(deftyp.qualid.id.clone());
+
+                (quals, deftyp.qualid.is_from_root)
+            }
+        };
+
+        Self {
+            is_from_root,
+            quals,
+            id,
+            span,
+        }
+    }
+
+    pub fn from_type(typ: &TypRepr, span: Span) -> Self {
+        let (quals, id, is_from_root) = match &typ.val {
+            TypReprVal::Primitive(p) => match p {
+                PrimTyp::Int => (vec![], "Int".to_string(), false),
+                PrimTyp::Uint => (vec![], "Uint".to_string(), false),
+                PrimTyp::Bool => (vec![], "Bool".to_string(), false),
+            },
+            TypReprVal::Defined(deftyp) => (
+                deftyp.qualid.quals.clone(),
+                deftyp.qualid.id.clone(),
+                deftyp.qualid.is_from_root,
+            ),
+        };
+
+        Self {
+            is_from_root,
+            quals,
+            id,
+            span,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
