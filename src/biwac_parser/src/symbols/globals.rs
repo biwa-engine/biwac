@@ -105,7 +105,6 @@ impl<'t> TokenStream<'t> {
         self_typ: Option<TypRepr>,
     ) -> Result<Globals, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::Fn])?.span.clone();
-        self.next();
 
         let id = self.consume_identifier()?;
 

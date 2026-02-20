@@ -1,8 +1,8 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_name_resolver::{
-    AbsId, ExprId, FnDefContent, FnTyp, LocVarId, ModSym, NativeFnDefContent, PkgSymMap,
-    StructDefContent, Typ, TypeDefContent,
+    AbsId, ExprId, FnDefContent, FnTyp, LocVarId, MethodDefContent, ModSym, NativeFnDefContent,
+    PkgSymMap, StructDefContent, Typ, TypeDefContent,
 };
 use biwac_parser::Ident;
 
@@ -75,7 +75,7 @@ impl<'pctx> TyCtx<'pctx> {
 struct TyCtxBuilder<'ast> {
     pkg: &'ast PkgSymMap,
     syms: HashMap<AbsId, SymTy>,
-    method_impls: HashMap<Ty, HashMap<String, FnTy>>,
+    method_impls: HashMap<Ty, HashMap<String, (FnTy, Ident)>>, // Identを保持して重複実装発生時にエラー出力する
 }
 
 impl<'ast> TyCtxBuilder<'ast> {
@@ -106,12 +106,53 @@ impl<'ast> TyCtxBuilder<'ast> {
                     // グローバル変数は型アノテーションを必須とするくらいの制約を設けたほうが良い
                     todo!()
                 }
+                ModSym::MethodDef(m) => {
+                    // method_implsに記録
+                    let ty = Ty::from(
+                        m.vars
+                            .get(&m.self_id)
+                            .unwrap()
+                            .typ
+                            .as_ref()
+                            .unwrap()
+                            .clone(),
+                    );
+
+                    let fty = self.build_method(m)?;
+
+                    if let Some(methods) = self.method_impls.get_mut(&ty) {
+                        match methods.entry(m.ident.id.clone()) {
+                            Entry::Vacant(e) => {
+                                e.insert((fty, m.ident.clone()));
+                            }
+                            Entry::Occupied(e) => {
+                                return Err(TyError::MethodConfliced {
+                                    ty,
+                                    method1: Box::new(e.get().1.clone()),
+                                    method2: Box::new(m.ident.clone()),
+                                });
+                            }
+                        }
+                    } else {
+                        self.method_impls
+                            .insert(ty, [(m.ident.id.clone(), (fty, m.ident.clone()))].into());
+                    }
+                }
             }
         }
 
         Ok(PkgTyCtx {
             syms: self.syms,
-            method_impls: self.method_impls,
+            method_impls: self
+                .method_impls
+                .into_iter()
+                .map(|(ty, methods)| {
+                    (
+                        ty,
+                        methods.into_iter().map(|(m, (fty, _))| (m, fty)).collect(),
+                    )
+                })
+                .collect(),
         })
     }
 
@@ -131,6 +172,7 @@ impl<'ast> TyCtxBuilder<'ast> {
                     ModSym::TypeDef(t) => match t {
                         TypeDefContent::Struct(_) => Ok(Ty::Struct(id.clone())),
                     },
+                    ModSym::MethodDef(_) => Err(TyError::SymbolNotAType { id: id.clone() }),
                 }
             }
         }
@@ -181,6 +223,24 @@ impl<'ast> TyCtxBuilder<'ast> {
         self.syms.insert(id.clone(), SymTy::Fn(fty));
 
         Ok(())
+    }
+
+    // メソッドの第一引数selfは記録されない。
+    // selfの型をキーとしてFnTyを取得するため、必要ない
+    pub(crate) fn build_method(&mut self, m: &MethodDefContent) -> TyResult<FnTy> {
+        let fty = FnTy {
+            args: m
+                .args
+                .iter()
+                .map(|a| self.build_ty(m.vars.get(&a.id).as_ref().unwrap().typ.as_ref().unwrap()))
+                .collect::<TyResult<_>>()?,
+            ret: match &m.rtype {
+                Some(typ) => Box::new(self.build_ty(typ)?),
+                None => Box::new(Ty::Void),
+            },
+        };
+
+        Ok(fty)
     }
 
     pub(crate) fn build_and_store_struct_ty(

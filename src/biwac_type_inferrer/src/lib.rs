@@ -41,6 +41,10 @@ pub enum TyError {
         method1: Box<Ident>,
         method2: Box<Ident>,
     },
+    MethodNotImplemented {
+        ty: Ty,
+        method: Box<Ident>,
+    },
     SymbolNotAType {
         id: AbsId,
     },

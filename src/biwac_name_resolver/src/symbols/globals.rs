@@ -47,6 +47,8 @@ pub struct DecledArg {
 
 #[derive(Debug)]
 pub struct MethodDefContent {
+    pub ident: Ident,
+    pub self_id: LocVarId,
     pub args: Vec<DecledArg>,
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
@@ -151,9 +153,11 @@ impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
             },
             TypReprVal::Defined(deftyp) => Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?),
         };
-        fctx.declare_variable(&value.self_ident, Some(self_typ))?;
+        let self_id = fctx.declare_variable(&value.self_ident, Some(self_typ.clone()))?;
 
         Ok(Self {
+            ident: value.id,
+            self_id,
             args: value
                 .args
                 .into_iter()

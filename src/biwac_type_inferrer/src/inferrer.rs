@@ -4,7 +4,7 @@ mod context;
 pub(crate) mod types;
 
 use biwac_name_resolver::{
-    BlockExpr, BlockStmt, Callee, Expr, ExprVal, Literal, ModSym, PkgSymMap, Primary,
+    BlockExpr, BlockStmt, Callee, DecledArg, Expr, ExprVal, Literal, ModSym, PkgSymMap, Primary,
     ResolvedIdent, Stmt,
 };
 use biwac_parser::{BinOperator, Ident, UnOperator};
@@ -424,6 +424,36 @@ impl<'pctx> TyCtx<'pctx> {
                 self.unify(then_ty, els_ty)
             }
             Primary::Block(block) => self.infer_block_expr(block),
+            Primary::MethodCall(m) => {
+                let left = self.infer_expr(&m.left)?;
+
+                // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
+                if let Some(methods) = self.pctx.method_impls.get(&left)
+                    && let Some(method) = methods.get(&m.method.id)
+                {
+                    let args = m
+                        .args
+                        .iter()
+                        .map(|a| self.infer_expr(a))
+                        .collect::<TyResult<_>>()?;
+
+                    let ret = self.fresh();
+                    self.unify(
+                        Ty::Fn(method.clone()),
+                        Ty::Fn(FnTy {
+                            args,
+                            ret: Box::new(ret.clone()),
+                        }),
+                    )?;
+
+                    Ok(ret)
+                } else {
+                    Err(TyError::MethodNotImplemented {
+                        ty: left,
+                        method: Box::new(m.method.clone()),
+                    })
+                }
+            }
         }
     }
 
@@ -654,6 +684,95 @@ pub fn infer(pkg: PkgSymMap) -> TyResult<TypedPkg> {
             }
             ModSym::TypeDef(t) => {
                 syms.insert(id, Sym::TypeDef(t));
+            }
+            ModSym::MethodDef(f) => {
+                // 戻り値の型を文脈に記録
+                let rty = if let Some(typ) = &f.rtype {
+                    typ.clone().into()
+                } else {
+                    Ty::Void
+                };
+                let mut fctx = TyCtx::new(&pctx, rty.clone());
+
+                // selfを決定済みの型として文脈に記録
+                fctx.vars.insert(
+                    f.self_id,
+                    f.vars.get(&f.self_id).unwrap().typ.clone().unwrap().into(),
+                );
+
+                // 引数を決定済みの型として文脈に記録
+                for arg in &f.args {
+                    fctx.vars.insert(
+                        arg.id,
+                        f.vars.get(&arg.id).unwrap().typ.clone().unwrap().into(),
+                    );
+                }
+
+                // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
+                // 文のみの場合、最後の文のすべての分岐でreturn文があり、正しい型を返していることを検査する必要がある
+                // 文は
+                // - 基本的にVoidを返すものとし、
+                // - return文はその式の型、
+                // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                // これにより、最後の文の型の一致を検査可能になる
+                // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
+                let mut stmt_last_ty = Ty::Void;
+                for stmt in &f.stmts {
+                    stmt_last_ty = fctx.infer_stmt(stmt)?;
+                }
+
+                // 最後の式があれば検査
+                let ret_ty = if let Some(expr) = &f.expr {
+                    fctx.infer_expr(expr)?
+                } else {
+                    stmt_last_ty
+                };
+
+                // 戻り値の型の一致を検査
+                fctx.unify(ret_ty, fctx.rty.clone())?;
+
+                // ---- 以降は結果の組み立て ----
+                let mut vars = HashMap::new();
+                for (id, ty) in fctx.vars {
+                    let ty = match ty {
+                        Ty::Var(tv) => fctx
+                            .substitutions
+                            .get(&tv)
+                            .expect("not found, error!!!!!")
+                            .clone(),
+                        x => x,
+                    };
+                    vars.insert(id, ty);
+                }
+
+                let mut exprs = HashMap::new();
+                for (id, ty) in fctx.exprs {
+                    let ty = match ty {
+                        Ty::Var(tv) => fctx
+                            .substitutions
+                            .get(&tv)
+                            .expect("not found, error!!!!!")
+                            .clone(),
+                        x => x,
+                    };
+                    exprs.insert(id, ty);
+                }
+
+                // メソッドは第一引数がselfである関数に解決される
+                let mut args = vec![DecledArg { id: f.self_id }];
+                args.extend(f.args);
+
+                syms.insert(
+                    id,
+                    Sym::FnDef(FnDefContent {
+                        args,
+                        stmts: f.stmts,
+                        expr: f.expr,
+                        rty,
+                        vars: f.vars,
+                        ty_info: TyInfo { vars, exprs },
+                    }),
+                );
             }
         }
     }

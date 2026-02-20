@@ -241,6 +241,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 }
                 Primary::MemberAccess(_) => todo!(),
                 Primary::Block(block) => block.as_oxc(env, allocator),
+                Primary::MethodCall(_) => todo!(),
             },
             ExprVal::Unary(u) => {
                 oxc_ast::ast::Expression::UnaryExpression(oxc_allocator::Box::new_in(

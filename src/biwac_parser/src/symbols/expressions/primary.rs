@@ -259,7 +259,7 @@ impl<'t> TokenStream<'t> {
         &mut self,
         ctx: &FnParseCtx,
     ) -> Result<(Vec<(Ident, Box<Exprs>)>, Span), ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::LPare])?.span.clone();
+        let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
         let mut span = begin.clone();
 
         let mut members: Vec<(Ident, Box<Exprs>)> = vec![];
