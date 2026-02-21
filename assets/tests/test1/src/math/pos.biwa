@@ -3,6 +3,8 @@ struct Pos {
   y: Int,
 }
 
-fn pos_new(x: Int, y: Int) -> Pos {
-  return Pos { x = x, y = y };
+impl Pos {
+  fn new(x: Int, y: Int) -> Self {
+    Self { x = x, y = y }
+  }
 }

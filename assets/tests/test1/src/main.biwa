@@ -1,4 +1,5 @@
-import math::pos::pos_new;
+import math::pos::Pos;
+import math::pos::Pos::new;
 
 fn add(x: Int, y: Int) -> Int {
     return x + y;
@@ -8,8 +9,8 @@ fn main() {
   let x = add(3, 2);
   let y = math::fact(x);
   let l = math::line::Line{
-    begin = pos_new(0, x),
-    end = pos_new(11, y),
+    begin = Pos::new(0, x),
+    end = new(11, y),
   };
   let z = native_add(3, 2);
 }

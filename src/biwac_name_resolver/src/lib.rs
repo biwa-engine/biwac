@@ -92,7 +92,14 @@ impl PkgSymMap {
                 match g {
                     biwac_parser::Globals::Import(_) => {}
                     biwac_parser::Globals::FnDef(f) => {
-                        let id = AbsId::from_modpath(&modpath, f.id.id.clone());
+                        let id = if let Some(self_typ) = &f.self_typ {
+                            AbsId::new_type_impl(
+                                &Typ::try_resolve_in_module(self_typ.clone(), &mctx)?,
+                                f.id.id.clone(),
+                            )
+                        } else {
+                            AbsId::from_modpath(&modpath, f.id.id.clone())
+                        };
                         syms.insert(
                             id,
                             ModSym::FnDef(FnDefContent::try_resolve_in_module(f, &mctx)?),
