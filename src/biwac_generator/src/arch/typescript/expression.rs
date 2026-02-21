@@ -1,9 +1,10 @@
 use std::cell::Cell;
 
 use biwac_name_resolver::{
-    BlockExpr, Callee, Expr, ExprVal, Literal, LocVarId, Primary, ResolvedIdent,
+    AbsId, BlockExpr, Callee, Expr, ExprVal, Literal, LocVarId, Primary, ResolvedIdent,
 };
 use biwac_parser::{BinOperator, UnOperator};
+use biwac_type_inferrer::Ty;
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
@@ -239,9 +240,73 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         todo!()
                     }
                 }
-                Primary::MemberAccess(_) => todo!(),
+                Primary::MemberAccess(m) => {
+                    oxc_ast::ast::Expression::StaticMemberExpression(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::StaticMemberExpression {
+                            span: span(),
+                            object: m.left.as_oxc(env, allocator),
+                            property: oxc_ast::ast::IdentifierName {
+                                span: span(),
+                                name: oxc_span::Ident::new_const(allocator.alloc(&m.member.id)),
+                            },
+                            optional: false,
+                        },
+                        allocator,
+                    ))
+                }
                 Primary::Block(block) => block.as_oxc(env, allocator),
-                Primary::MethodCall(_) => todo!(),
+                Primary::MethodCall(m) => {
+                    let self_ty = env.ty_info.unwrap_type_of_expression(&m.left.id);
+
+                    let quals = match self_ty {
+                        Ty::Var(_) => panic!("compiler bug: failed to infer type of expression"),
+                        Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
+                        Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+                        Ty::Int => vec!["Int".to_string()],
+                        Ty::Float => vec!["Float".to_string()],
+                        Ty::Bool => vec!["Bool".to_string()],
+                        Ty::Struct(absid) => {
+                            let mut quals = absid.quals.clone();
+                            quals.push(absid.id.clone());
+
+                            quals
+                        }
+                    };
+
+                    let fid = AbsId::new(quals, m.method.id.clone());
+
+                    // selfは第一引数として与える
+                    let mut args =
+                        vec![oxc_ast::ast::Argument::from(m.left.as_oxc(env, allocator))];
+                    args.extend(
+                        m.args
+                            .iter()
+                            .map(|a| oxc_ast::ast::Argument::from(a.as_oxc(env, allocator))),
+                    );
+
+                    oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::CallExpression {
+                            span: span(),
+                            callee: oxc_ast::ast::Expression::Identifier(
+                                oxc_allocator::Box::new_in(
+                                    oxc_ast::ast::IdentifierReference {
+                                        span: span(),
+                                        name: oxc_span::Ident::new_const(
+                                            allocator.alloc_str(&fid.mangled()),
+                                        ),
+                                        reference_id: Cell::new(None),
+                                    },
+                                    allocator,
+                                ),
+                            ),
+                            type_arguments: None,
+                            arguments: oxc_allocator::Vec::from_iter_in(args, allocator),
+                            optional: false,
+                            pure: false,
+                        },
+                        allocator,
+                    ))
+                }
             },
             ExprVal::Unary(u) => {
                 oxc_ast::ast::Expression::UnaryExpression(oxc_allocator::Box::new_in(

@@ -137,6 +137,7 @@ impl PkgSymMap {
                             TypReprVal::Primitive(p) => match p {
                                 PrimTyp::Int => Typ::Int,
                                 PrimTyp::Uint => Typ::Int,
+                                PrimTyp::Float => Typ::Float,
                                 PrimTyp::Bool => Typ::Bool,
                             },
                             TypReprVal::Defined(deftyp) => {

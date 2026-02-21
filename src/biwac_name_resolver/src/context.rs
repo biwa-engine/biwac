@@ -70,6 +70,7 @@ impl PkgLvlRslvCtx {
                                 TypReprVal::Primitive(p) => match p {
                                     PrimTyp::Int => Typ::Int,
                                     PrimTyp::Uint => Typ::Int,
+                                    PrimTyp::Float => Typ::Float,
                                     PrimTyp::Bool => Typ::Bool,
                                 },
                                 TypReprVal::Defined(deftyp) => {
@@ -450,7 +451,8 @@ impl TryResolve<TypRepr> for Typ {
             TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => Ok(Typ::Int),
                 PrimTyp::Uint => Ok(Typ::Int),
-                PrimTyp::Bool => Ok(Typ::Int),
+                PrimTyp::Float => Ok(Typ::Float),
+                PrimTyp::Bool => Ok(Typ::Bool),
             },
             TypReprVal::Defined(deftyp) => Ok(Typ::Defined(
                 fctx.modctx.try_resolve_deftyp(&deftyp.qualid)?,

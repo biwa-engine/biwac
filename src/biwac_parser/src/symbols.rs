@@ -47,6 +47,7 @@ impl QualifiedId {
             TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => (vec!["Int".to_string()], false),
                 PrimTyp::Uint => (vec!["Uint".to_string()], false),
+                PrimTyp::Float => (vec!["Float".to_string()], false),
                 PrimTyp::Bool => (vec!["Bool".to_string()], false),
             },
             TypReprVal::Defined(deftyp) => {
@@ -70,6 +71,7 @@ impl QualifiedId {
             TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => (vec![], "Int".to_string(), false),
                 PrimTyp::Uint => (vec![], "Uint".to_string(), false),
+                PrimTyp::Float => (vec![], "Float".to_string(), false),
                 PrimTyp::Bool => (vec![], "Bool".to_string(), false),
             },
             TypReprVal::Defined(deftyp) => (

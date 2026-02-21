@@ -129,6 +129,13 @@ impl<'t> TokenStream<'t> {
                     val: TypReprVal::Primitive(PrimTyp::Int),
                     span,
                 })
+            } else if let TkKind::Float = t.kind {
+                let span = t.span.clone();
+                self.next();
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Float),
+                    span,
+                })
             } else if let TkKind::Bool = t.kind {
                 let span = t.span.clone();
                 self.next();

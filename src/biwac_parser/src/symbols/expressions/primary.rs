@@ -167,34 +167,13 @@ impl<'t> TokenStream<'t> {
                 let begin = t.span.clone();
 
                 if ctx.is_method {
-                    // "self" ( "." <identifier> "(" ... ")" )?
+                    // "self"
                     self.next();
-
-                    if let Some(t) = self.peek()
-                        && t.kind == TkKind::Dot
-                    {
-                        self.next();
-                        let method = self.consume_identifier()?;
-
-                        let (args, span) = self.consume_arguments(ctx)?;
-
-                        Ok(Exprs::Primary(Primary::MethodCall(MethodCall {
-                            span: Span::merge(&begin, &span),
-                            left: Box::new(Exprs::Primary(Primary::Variable(Ident {
-                                // WARN: really?
-                                id: "self".to_string(),
-                                span: begin,
-                            }))),
-                            method,
-                            args,
-                        })))
-                    } else {
-                        Ok(Exprs::Primary(Primary::Variable(Ident {
-                            // WARN: really?
-                            id: "self".to_string(),
-                            span: begin,
-                        })))
-                    }
+                    Ok(Exprs::Primary(Primary::Variable(Ident {
+                        // WARN: really?
+                        id: "self".to_string(),
+                        span: begin,
+                    })))
                 } else {
                     Err(ParseError::InvalidEOF(vec![
                         TkKind::Ident,
@@ -217,7 +196,10 @@ impl<'t> TokenStream<'t> {
         }
     }
 
-    fn consume_arguments(&mut self, ctx: &FnParseCtx) -> Result<(Vec<Exprs>, Span), ParseError> {
+    pub(super) fn consume_arguments(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<(Vec<Exprs>, Span), ParseError> {
         let begin = self.must_consume_next(vec![TkKind::LPare])?.span.clone();
         let mut span = begin.clone();
 

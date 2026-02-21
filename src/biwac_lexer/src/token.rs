@@ -48,6 +48,7 @@ pub enum TkKind {
     Return,           // return
     Uint,             // Uint (reserved word of type)
     Int,              // Int (reserved word of type)
+    Float,            // Float (reserved word of type)
     Bool,             // Bool (reserved word of type)
     Struct,           // struct (reserved word of type)
     Impl,             // impl (reserved word of implementation for type)
@@ -101,6 +102,7 @@ impl TkKind {
             Self::Return => "return".to_string(),
             Self::Uint => "Uint".to_string(),
             Self::Int => "Int".to_string(),
+            Self::Float => "Float".to_string(),
             Self::Bool => "Bool".to_string(),
             Self::Struct => "struct".to_string(),
             Self::Impl => "impl".to_string(),

@@ -5,3 +5,14 @@ fn fact(n: Int) -> Int {
     n * fact(n - 1)
   }
 }
+
+[[native(arch="typescript")]]
+fn native_sqrt(x: Int) -> Float {{
+  return Math.sqrt(x);
+}}
+
+impl Int {
+  fn sqrt(self) -> Float {
+    native_sqrt(self)
+  }
+}

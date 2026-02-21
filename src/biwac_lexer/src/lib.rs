@@ -41,6 +41,7 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                     "return" => (TkKind::Return, None),
                     "Uint" => (TkKind::Uint, None),
                     "Int" => (TkKind::Int, None),
+                    "Float" => (TkKind::Float, None),
                     "Bool" => (TkKind::Bool, None),
                     "struct" => (TkKind::Struct, None),
                     "impl" => (TkKind::Impl, None),

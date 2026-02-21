@@ -26,8 +26,9 @@ impl ModuleLevelTryResolve<TypRepr> for Typ {
         match value.val {
             TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => Ok(Typ::Int),
-                PrimTyp::Uint => Ok(Typ::Int),
-                PrimTyp::Bool => Ok(Typ::Int),
+                PrimTyp::Uint => Ok(Typ::Int), // TODO
+                PrimTyp::Float => Ok(Typ::Float),
+                PrimTyp::Bool => Ok(Typ::Bool),
             },
             TypReprVal::Defined(deftyp) => {
                 Ok(Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?))

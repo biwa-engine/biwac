@@ -149,6 +149,7 @@ impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
             TypReprVal::Primitive(p) => match p {
                 PrimTyp::Int => Typ::Int,
                 PrimTyp::Uint => Typ::Int,
+                PrimTyp::Float => Typ::Float,
                 PrimTyp::Bool => Typ::Bool,
             },
             TypReprVal::Defined(deftyp) => Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?),

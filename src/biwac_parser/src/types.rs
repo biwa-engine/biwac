@@ -49,7 +49,7 @@ pub enum TypReprVal {
 pub enum PrimTyp {
     Uint,
     Int,
-    // Float,
+    Float,
     Bool,
     // String,
 }
