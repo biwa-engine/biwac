@@ -80,7 +80,7 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
             args: value
                 .args
                 .into_iter()
-                .map(|arg| match Typ::try_resolve_in_module(arg.typ, mctx) {
+                .map(|arg| match Typ::try_resolve_in_module(&arg.typ, mctx) {
                     Ok(typ) => {
                         // 引数も変数の宣言として記録
                         let id = fctx.declare_variable(&arg.id, Some(typ))?;
@@ -101,7 +101,7 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
                 .transpose()?,
             rtype: value
                 .rtype
-                .map(|typ| Typ::try_resolve_in_module(typ, mctx))
+                .map(|typ| Typ::try_resolve_in_module(&typ, mctx))
                 .transpose()?,
             vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
         })
@@ -119,7 +119,7 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
                 .into_iter()
                 .map(|arg| {
                     Ok(NativeFnArgDecl {
-                        typ: Typ::try_resolve_in_module(arg.typ, mctx)?,
+                        typ: Typ::try_resolve_in_module(&arg.typ, mctx)?,
                         span: arg.span,
                         id: arg.id,
                     })
@@ -127,7 +127,7 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
                 .collect::<RsvResult<_>>()?,
             rtype: value
                 .rtype
-                .map(|typ| Typ::try_resolve_in_module(typ, mctx))
+                .map(|typ| Typ::try_resolve_in_module(&typ, mctx))
                 .transpose()?,
             native: value.native,
             native_span: value.native_span,
@@ -162,7 +162,7 @@ impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
             args: value
                 .args
                 .into_iter()
-                .map(|arg| match Typ::try_resolve_in_module(arg.typ, mctx) {
+                .map(|arg| match Typ::try_resolve_in_module(&arg.typ, mctx) {
                     Ok(typ) => {
                         // 引数も変数の宣言として記録
                         let id = fctx.declare_variable(&arg.id, Some(typ))?;
@@ -183,7 +183,7 @@ impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
                 .transpose()?,
             rtype: value
                 .rtype
-                .map(|typ| Typ::try_resolve_in_module(typ, mctx))
+                .map(|typ| Typ::try_resolve_in_module(&typ, mctx))
                 .transpose()?,
             vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
         })
@@ -199,7 +199,7 @@ impl ModuleLevelTryResolve<biwac_parser::StructDef> for StructDefContent {
             members: value
                 .members
                 .into_iter()
-                .map(|(id, typ)| Typ::try_resolve_in_module(typ, mctx).map(|typ| (id, typ)))
+                .map(|(id, typ)| Typ::try_resolve_in_module(&typ, mctx).map(|typ| (id, typ)))
                 .collect::<Result<Vec<_>, ResolveError>>()?,
         })
     }

@@ -5,11 +5,14 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    fmt::Display,
+};
 
 use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
-use biwac_parser::{Ident, ImportDecl, PrimTyp, QualifiedId, TypReprVal, TypeDef};
+use biwac_parser::{Ident, ImportDecl, QualifiedId, TypeDef};
 
 use crate::context::{FnLvlRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx};
 pub use crate::{
@@ -71,6 +74,11 @@ pub enum ResolveError {
         vid1: Box<Ident>,
         vid2: Box<Ident>,
     },
+    DuplicatedImplementationForType {
+        typ: Typ,
+        fid1: Box<Ident>,
+        fid2: Box<Ident>,
+    },
 }
 
 pub type RsvResult<T> = Result<T, ResolveError>;
@@ -85,6 +93,18 @@ impl PkgSymMap {
         let pctx = PkgLvlRslvCtx::new(&pkg)?;
         let mut syms = HashMap::new();
 
+        // 同じ型に対する同じ名前の関連関数, メソッドの重複を検出する
+        // ```hoge.biwa
+        // impl Fuga {
+        //   fn piyo() { ... }
+        //
+        //   fn piyo(self) { ... }
+        // }
+        // ```
+        // のいずれも
+        // hoge::Fuga::piyoという関数に解決されるため、重複検知が必要
+        let mut typ_impls = HashMap::<Typ, HashMap<String, Ident>>::new();
+
         for (modpath, modu) in pkg.modules {
             let mctx = ModLvlRslvCtx::new(&pctx, modpath.clone(), &modu)?;
 
@@ -93,10 +113,29 @@ impl PkgSymMap {
                     biwac_parser::Globals::Import(_) => {}
                     biwac_parser::Globals::FnDef(f) => {
                         let id = if let Some(self_typ) = &f.self_typ {
-                            AbsId::new_type_impl(
-                                &Typ::try_resolve_in_module(self_typ.clone(), &mctx)?,
-                                f.id.id.clone(),
-                            )
+                            let typ = Typ::try_resolve_in_module(self_typ, &mctx)?;
+
+                            if let Some(impls) = typ_impls.get_mut(&typ) {
+                                match impls.entry(f.id.id.clone()) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(f.id.clone());
+                                    }
+                                    Entry::Occupied(e) => {
+                                        return Err(
+                                            ResolveError::DuplicatedImplementationForType {
+                                                typ,
+                                                fid1: Box::new(e.get().clone()),
+                                                fid2: Box::new(f.id.clone()),
+                                            },
+                                        );
+                                    }
+                                }
+                            } else {
+                                typ_impls
+                                    .insert(typ.clone(), [(f.id.id.clone(), f.id.clone())].into());
+                            }
+
+                            AbsId::new_type_impl(&typ, f.id.id.clone())
                         } else {
                             AbsId::from_modpath(&modpath, f.id.id.clone())
                         };
@@ -133,17 +172,25 @@ impl PkgSymMap {
                         );
                     }
                     biwac_parser::Globals::MethodDef(m) => {
-                        let typ = match &m.self_typ.val {
-                            TypReprVal::Primitive(p) => match p {
-                                PrimTyp::Int => Typ::Int,
-                                PrimTyp::Uint => Typ::Int,
-                                PrimTyp::Float => Typ::Float,
-                                PrimTyp::Bool => Typ::Bool,
-                            },
-                            TypReprVal::Defined(deftyp) => {
-                                Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?)
+                        let typ = Typ::try_resolve_in_module(&m.self_typ, &mctx)?;
+
+                        if let Some(impls) = typ_impls.get_mut(&typ) {
+                            match impls.entry(m.id.id.clone()) {
+                                Entry::Vacant(e) => {
+                                    e.insert(m.id.clone());
+                                }
+                                Entry::Occupied(e) => {
+                                    return Err(ResolveError::DuplicatedImplementationForType {
+                                        typ,
+                                        fid1: Box::new(e.get().clone()),
+                                        fid2: Box::new(m.id.clone()),
+                                    });
+                                }
                             }
-                        };
+                        } else {
+                            typ_impls.insert(typ.clone(), [(m.id.id.clone(), m.id.clone())].into());
+                        }
+
                         let id = AbsId::new_type_impl(&typ, m.id.id.clone());
 
                         syms.insert(
