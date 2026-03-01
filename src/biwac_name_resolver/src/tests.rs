@@ -1,4 +1,4 @@
-use crate::PkgSymMap;
+use crate::ResolvedPkg;
 
 #[test]
 fn test1() {
@@ -7,5 +7,5 @@ fn test1() {
 
     let pkg = biwac_package_loader::Pkg::try_load("../../assets/tests/test1").unwrap();
 
-    let _pkg = PkgSymMap::try_resolve_symbol(pkg).unwrap();
+    let _pkg = ResolvedPkg::try_resolve(pkg).unwrap();
 }

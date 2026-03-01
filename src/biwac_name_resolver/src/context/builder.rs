@@ -2,17 +2,19 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
-use biwac_parser::{Globals, Ident, ImportDecl, ModAst, QualifiedId, TypeDef};
+use biwac_parser::{
+    Globals, Ident, ImportDecl, ModAst, PrimTyp, QualifiedId, TypRepr, TypReprVal, TypeDef,
+};
 
-use crate::{AbsId, ResolveError, RsvResult};
+use crate::{ResolveError, RsvResult, Typ, TypId, types::DefinedTyp};
 
 // PkgLvlRslvCtxを構築する際に
-// 関連関数はSelf型名をAbsIdに解決してから
-// AbsId :: related_function_name がAbsIdとなる
+// 関連関数はSelf型名をTypIdに解決してから
+// TypId :: <identifier> でアクセスされる
 // PrePkgLvlRslvCtx, PreModLvlRslvCtxはそのためのcontext
 #[derive(Debug)]
 pub(super) struct PrePkgLvlRslvCtx {
-    syms: HashSet<AbsId>,
+    pub(super) typs: HashMap<TypId, usize>, // genarg len
 }
 
 #[derive(Debug)]
@@ -25,23 +27,25 @@ pub(super) struct PreModLvlRslvCtx<'pctx> {
 
 impl PrePkgLvlRslvCtx {
     pub fn new(pkg: &Pkg) -> Self {
-        let mut syms = HashSet::new();
+        let mut typs = HashMap::new();
 
         // 型名のみ収集
         for (modpath, modu) in &pkg.modules {
             for g in &modu.globals {
-                match g {
-                    Globals::TypeDef(t) => match t {
+                if let Globals::TypeDef(t) = g {
+                    match t {
                         TypeDef::Struct(s) => {
-                            syms.insert(AbsId::from_modpath(modpath, s.id.id.clone()));
+                            typs.insert(
+                                TypId::from_modpath(modpath, s.id.id.clone()),
+                                s.genargs.len(),
+                            );
                         }
-                    },
-                    _ => {}
+                    }
                 }
             }
         }
 
-        Self { syms }
+        Self { typs }
     }
 }
 
@@ -97,23 +101,23 @@ impl<'pctx> PreModLvlRslvCtx<'pctx> {
 
     // try_resolve_deftyp
     // は型名を解決する
-    pub fn try_resolve_deftyp(&self, qualid: &QualifiedId) -> RsvResult<AbsId> {
-        let absid = if qualid.is_from_root {
+    pub fn try_resolve_deftyp(&self, qualid: &QualifiedId) -> RsvResult<TypId> {
+        let typid = if qualid.is_from_root {
             // `package::hoge::fuga` の場合、直ちにOk
-            Ok(AbsId::new(qualid.quals.clone(), qualid.id.clone()))
+            Ok(TypId::new(qualid.quals.clone(), qualid.id.clone()))
         } else if qualid.quals.is_empty() {
             // `hoge` の場合
             if self.types.contains(&qualid.id) {
-                Ok(AbsId::from_modpath(&self.modpath, qualid.id.clone()))
+                Ok(TypId::from_modpath(&self.modpath, qualid.id.clone()))
             } else if let Some(i) = self.imports.get(&qualid.id) {
                 // `import package::piyo::foo::hoge` の場合
                 if i.qualid.is_from_root {
-                    Ok(AbsId::new(i.qualid.quals.clone(), qualid.id.clone()))
+                    Ok(TypId::new(i.qualid.quals.clone(), qualid.id.clone()))
                 } else {
                     // `import piyo::foo::hoge` の場合
                     // TODO: 外部packageとの区別
 
-                    Ok(AbsId::new(
+                    Ok(TypId::new(
                         self.modpath.clone().extend(i.qualid.quals.clone()).into(),
                         qualid.id.clone(),
                     ))
@@ -121,7 +125,7 @@ impl<'pctx> PreModLvlRslvCtx<'pctx> {
             } else {
                 // 現在のモジュールからの相対パス
                 // TODO: 外部packageとの区別
-                Ok(AbsId::new(
+                Ok(TypId::new(
                     [self.modpath.clone().into(), qualid.quals.clone()].concat(),
                     qualid.id.clone(),
                 ))
@@ -133,7 +137,7 @@ impl<'pctx> PreModLvlRslvCtx<'pctx> {
                 // `import package::hoge::fuga; fuga::piyo::foo` の場合
                 let quals: Vec<String> = [i.qualid.quals.clone(), qualid.quals.clone()].concat();
 
-                Ok(AbsId::new(quals, qualid.id.clone()))
+                Ok(TypId::new(quals, qualid.id.clone()))
             } else {
                 // `import hoge::fuga; fuga::piyo::foo` の場合
                 let quals: Vec<String> = [
@@ -143,24 +147,46 @@ impl<'pctx> PreModLvlRslvCtx<'pctx> {
                 ]
                 .concat();
 
-                Ok(AbsId::new(quals, qualid.id.clone()))
+                Ok(TypId::new(quals, qualid.id.clone()))
             }
         } else {
             // 現在のモジュールからの相対パス
             // TODO: 外部packageとの区別
-            Ok(AbsId::new(
+            Ok(TypId::new(
                 [self.modpath.clone().into(), qualid.quals.clone()].concat(),
                 qualid.id.clone(),
             ))
         }?;
 
-        if self.pkgctx.syms.contains(&absid) {
-            Ok(absid)
+        // パッケージ内での存在確認
+        if self.pkgctx.typs.contains_key(&typid) {
+            Ok(typid)
         } else {
-            Err(ResolveError::PackageSymbolNotFound {
+            Err(ResolveError::TypeNotFound {
                 qualid: Box::new(qualid.clone()),
-                absid: Box::new(absid),
+                typid: Box::new(typid),
             })
         }
+    }
+
+    pub fn try_resolve_typ(&self, typ: &TypRepr) -> RsvResult<Typ> {
+        let typ = match &typ.val {
+            TypReprVal::Primitive(p) => match p {
+                PrimTyp::Int => Typ::Int,
+                PrimTyp::Uint => Typ::Int,
+                PrimTyp::Float => Typ::Float,
+                PrimTyp::Bool => Typ::Bool,
+            },
+            TypReprVal::Defined(deftyp) => Typ::Defined(DefinedTyp {
+                id: self.try_resolve_deftyp(&deftyp.qualid)?,
+                genargs: deftyp
+                    .genargs
+                    .iter()
+                    .map(|typ| self.try_resolve_typ(typ))
+                    .collect::<RsvResult<_>>()?,
+            }),
+        };
+
+        Ok(typ)
     }
 }

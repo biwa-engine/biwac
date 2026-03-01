@@ -159,7 +159,7 @@ impl TryResolve<biwac_parser::VarDecl> for VarDecl {
     ) -> crate::RsvResult<Self> {
         // 変数の宣言をcontextに登録
         let typ = match value.typ {
-            TypDecl::Typ(typ) => Some(Typ::try_resolve(typ, fctx)?),
+            TypDecl::Typ(typ) => Some(Typ::try_resolve(&typ, fctx)?),
             TypDecl::Any => None,
         };
         let id = fctx.declare_variable(&value.id, typ)?;

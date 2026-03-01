@@ -5,18 +5,15 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    collections::{HashMap, hash_map::Entry},
-    fmt::Display,
-};
+use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_base::ModPath;
 use biwac_package_loader::Pkg;
-use biwac_parser::{Ident, ImportDecl, QualifiedId, TypeDef};
+use biwac_parser::{Ident, ImportDecl, QualifiedId, TypRepr, TypeDef};
 
-use crate::context::{FnLvlRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx};
+use crate::context::{FnLvlRslvCtx, ImplLvlGenTypRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx};
 pub use crate::{
-    context::{DecledVar, ExprId, LocVarId, ResolvedIdent},
+    context::{AssocId, DecledVar, ExprId, LocVarId, ResolvedVar},
     symbols::{
         ModSym,
         expressions::{
@@ -31,7 +28,7 @@ pub use crate::{
             AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,
         },
     },
-    types::{FnTyp, Typ},
+    types::{FnTyp, GenTypId, Typ},
 };
 
 // このcrate biwac_name_resolver は、
@@ -50,9 +47,13 @@ pub use crate::{
 
 #[derive(Debug)]
 pub enum ResolveError {
-    PackageSymbolNotFound {
+    TypeNotFound {
         qualid: Box<QualifiedId>,
-        absid: Box<AbsId>,
+        typid: Box<TypId>,
+    },
+    FunctionNotFound {
+        qualid: Box<QualifiedId>,
+        fid: Box<FnId>,
     },
     IdentifierNotFound {
         qualid: QualifiedId,
@@ -79,20 +80,142 @@ pub enum ResolveError {
         fid1: Box<Ident>,
         fid2: Box<Ident>,
     },
+    DuplicatedGenericTypeDeclaration {
+        tid1: Box<Ident>,
+        tid2: Box<Ident>,
+    },
+    GenericArgLengthMismatched {
+        // TODO: エラーメッセージを正確に出しやすく
+        typ: Box<Typ>,
+        typ_impl_repr: Box<TypRepr>,
+        actual_len: usize,
+    },
+    CanNotBeImplementedForType {
+        typ: Typ,
+    },
 }
 
 pub type RsvResult<T> = Result<T, ResolveError>;
 
+// <----                           function id                                      ---->
+// <----                               type id                                      ---->
+// <package-name> :: <module-name>::<module-name>                         :: <identifier> :: [  ]
+//
+//
+// <self-type>                                                            :: <identifier> :: [  ]
+//
+// <package-name> :: <module-name>::<module-name> :: <identifier> :: [  ]
+// <----                      type id                       ---->
+//
+//
+
 #[derive(Debug)]
-pub struct PkgSymMap {
-    pub syms: HashMap<AbsId, ModSym>,
+pub struct ResolvedPkg {
+    fns: HashMap<FnId, FnContent>,
+    typs: HashMap<TypId, TypImpl>,
 }
 
-impl PkgSymMap {
-    pub fn try_resolve_symbol(pkg: Pkg) -> RsvResult<Self> {
-        let pctx = PkgLvlRslvCtx::new(&pkg)?;
-        let mut syms = HashMap::new();
+// グローバル変数のid
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VarId {
+    // pub pkg: enum Package { Internal, External(String)}
+    quals: Vec<String>,
+    id: String,
+}
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FnId {
+    // pub pkg: enum Package { Internal, External(String)}
+    quals: Vec<String>,
+    id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypId {
+    // pub pkg: enum Package { Internal, External(String)}
+    quals: Vec<String>,
+    id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypImpl {
+    typ: TypeDefContent,
+    methods: HashMap<String, TypMethodImpl>,
+    assocs: HashMap<AssocId, TypAssocImpl>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypAssocImpl {
+    target_genargs: Vec<Typ>,
+    f: FnDefContent,
+    //  impl[T] Foo[T, Int] {
+    //             ^^^^^^^^
+    //             | target_genargs
+    //      fn bar[U]() { ... }
+    //  }
+}
+
+#[derive(Debug, Clone)]
+pub struct TypMethodImpl {
+    genargs_map: HashMap<Vec<Typ>, MethodDefContent>,
+}
+
+#[derive(Debug, Clone)]
+pub enum FnContent {
+    Fn(FnDefContent),
+    Native(NativeFnDefContent),
+}
+
+//
+// - 関数:
+//  fnsからFnIdを引く。ジェネリクスの具体化表明は名前解決するものの、それ以上のチェックはせず、FnCall 側に記録
+//
+// - 関連関数:
+//  パース時には(Selfについてのジェネリクス具体表明がない限り)関数呼び出しと区別がつかない。
+//  if FnId.qualsをTypIdとしたときにその型がtypsに見つかる
+//      && いずれか1つ以上のジェネリクス引数列に対して、FnId.idの実装があれば:
+//          解決
+//  else:
+//      通常の関数呼び出しとして解決に移る
+//
+//  - メソッド:
+//   名前解決の時点では特にされることはない。
+//   pkgには記録され、次の型推論フェーズで解決される
+//   型推論フェーズでは、
+//   <expression> . <method-name> ( (<expression>,)* )
+//   1. 左辺値の推論をする
+//   2. if 左辺値が(ジェネリック型引数含め)具体の型である:
+//          if typsを引くと存在する:
+//              if ジェネリック型引数列で該当するものが一意に定まる:
+//                  解決
+//              else:
+//                  エラー
+//          else:
+//              エラー
+//      else:
+//          エラー
+
+// 重複エラーを検知するための一時的な型
+#[derive(Debug, Clone)]
+pub struct TmpTypImpl {
+    typ: TypeDefContent,
+    methods: HashMap<String, TmpTypMethodImpl>,
+    assocs: HashMap<AssocId, TypAssocImpl>,
+}
+
+// 重複エラーを検知するための一時的な型
+#[derive(Debug, Clone)]
+struct TmpTypMethodImpl {
+    genargs_map: HashMap<Vec<Typ>, (MethodDefContent, Ident)>,
+}
+
+impl ResolvedPkg {
+    pub fn try_resolve(pkg: Pkg) -> RsvResult<Self> {
+        let pctx = PkgLvlRslvCtx::new(&pkg)?;
+        let mut fns = HashMap::new();
+        let mut typs = HashMap::<TypId, TmpTypImpl>::new();
+
+        // TODO:
         // 同じ型に対する同じ名前の関連関数, メソッドの重複を検出する
         // ```hoge.biwa
         // impl Fuga {
@@ -103,7 +226,32 @@ impl PkgSymMap {
         // ```
         // のいずれも
         // hoge::Fuga::piyoという関数に解決されるため、重複検知が必要
-        let mut typ_impls = HashMap::<Typ, HashMap<String, Ident>>::new();
+        // let mut typ_impls = HashMap::<Typ, HashMap<String, Ident>>::new();
+
+        // 予め型を記録する
+        for (modpath, modu) in &pkg.modules {
+            let mctx = ModLvlRslvCtx::new(&pctx, modpath.clone(), modu)?;
+
+            for g in &modu.globals {
+                if let biwac_parser::Globals::TypeDef(t) = g {
+                    match t {
+                        TypeDef::Struct(s) => {
+                            let tid = TypId::from_modpath(modpath, s.id.id.clone());
+                            typs.insert(
+                                tid,
+                                TmpTypImpl {
+                                    typ: TypeDefContent::Struct(
+                                        StructDefContent::try_resolve_in_module(s.clone(), &mctx)?,
+                                    ),
+                                    methods: HashMap::new(),
+                                    assocs: HashMap::new(),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         for (modpath, modu) in pkg.modules {
             let mctx = ModLvlRslvCtx::new(&pctx, modpath.clone(), &modu)?;
@@ -112,109 +260,177 @@ impl PkgSymMap {
                 match g {
                     biwac_parser::Globals::Import(_) => {}
                     biwac_parser::Globals::FnDef(f) => {
-                        let id = if let Some(self_typ) = &f.self_typ {
-                            let typ = Typ::try_resolve_in_module(self_typ, &mctx)?;
+                        // 関連関数の場合
+                        if let Some(impl_ctx) = &f.impl_ctx {
+                            let ictx = ImplLvlGenTypRslvCtx::new(Some(&impl_ctx.genargs), &mctx)?;
 
-                            if let Some(impls) = typ_impls.get_mut(&typ) {
-                                match impls.entry(f.id.id.clone()) {
-                                    Entry::Vacant(e) => {
-                                        e.insert(f.id.clone());
-                                    }
-                                    Entry::Occupied(e) => {
-                                        return Err(
-                                            ResolveError::DuplicatedImplementationForType {
-                                                typ,
-                                                fid1: Box::new(e.get().clone()),
-                                                fid2: Box::new(f.id.clone()),
-                                            },
-                                        );
-                                    }
-                                }
-                            } else {
-                                typ_impls
-                                    .insert(typ.clone(), [(f.id.id.clone(), f.id.clone())].into());
-                            }
+                            let self_typ = Typ::try_resolve_in_impl(&impl_ctx.self_typ, &ictx)?;
+                            let self_typ_genargs = self_typ.get_genargs();
+                            let typid = TypId::try_from(self_typ)?;
 
-                            AbsId::new_type_impl(&typ, f.id.id.clone())
-                        } else {
-                            AbsId::from_modpath(&modpath, f.id.id.clone())
-                        };
-                        syms.insert(
-                            id,
-                            ModSym::FnDef(FnDefContent::try_resolve_in_module(f, &mctx)?),
-                        );
-                    }
-                    biwac_parser::Globals::TypeDef(t) => match t {
-                        TypeDef::Struct(s) => {
-                            let id = AbsId::from_modpath(&modpath, s.id.id.clone());
-                            syms.insert(
-                                id,
-                                ModSym::TypeDef(TypeDefContent::Struct(
-                                    StructDefContent::try_resolve_in_module(s, &mctx)?,
-                                )),
+                            // SAFETY: try_resolve_in_impl ですでに存在は確認済み
+                            let typ_impl =
+                                typs.get_mut(&typid).expect("compiler bug: type not found");
+                            // SAFETY: ctx 構成時に確認済み
+                            let associd = pctx
+                                .typs
+                                .get(&typid)
+                                .expect("compiler bug: type not found")
+                                .assocs
+                                .get(&f.id.id)
+                                .expect("compiler bug: associated function not found")
+                                .genargs_map
+                                .get(&self_typ_genargs)
+                                .expect("compiler bug: associated function for a generic argument not found")
+                                .0;
+
+                            typ_impl.assocs.insert(
+                                associd,
+                                TypAssocImpl {
+                                    target_genargs: self_typ_genargs,
+                                    f: FnDefContent::try_resolve_in_impl(f, &ictx)?,
+                                },
                             );
-                        }
-                    },
-                    biwac_parser::Globals::VarDecl(v) => {
-                        let id = AbsId::from_modpath(&modpath, v.id.id.clone());
-                        syms.insert(
-                            id,
-                            ModSym::VarDecl(GlobalVarDecl::try_resolve_in_module(v, &mctx)?),
-                        );
+                        } else {
+                            // 一般の関数の場合
+                            let fid = FnId::from_modpath(&modpath, f.id.id.clone());
+                            let ictx = ImplLvlGenTypRslvCtx::new_empty(&mctx); // 空のimpl文脈を生成
+                            fns.insert(
+                                fid,
+                                FnContent::Fn(FnDefContent::try_resolve_in_impl(f, &ictx)?),
+                            );
+                        };
                     }
                     biwac_parser::Globals::NativeFnDef(f) => {
-                        let id = AbsId::from_modpath(&modpath, f.id.id.clone());
-                        syms.insert(
-                            id,
-                            ModSym::NativeFnDef(NativeFnDefContent::try_resolve_in_module(
-                                f, &mctx,
-                            )?),
+                        let fid = FnId::from_modpath(&modpath, f.id.id.clone());
+                        fns.insert(
+                            fid,
+                            FnContent::Native(NativeFnDefContent::try_resolve_in_module(f, &mctx)?),
                         );
                     }
                     biwac_parser::Globals::MethodDef(m) => {
-                        let typ = Typ::try_resolve_in_module(&m.self_typ, &mctx)?;
+                        let ictx = ImplLvlGenTypRslvCtx::new(Some(&m.impl_genargs), &mctx)?;
 
-                        if let Some(impls) = typ_impls.get_mut(&typ) {
-                            match impls.entry(m.id.id.clone()) {
+                        let self_typ = Typ::try_resolve_in_impl(&m.self_typ, &ictx)?;
+                        let self_typ_genargs = self_typ.get_genargs();
+                        let typid = TypId::try_from(self_typ.clone())?;
+
+                        // SAFETY: try_resolve_in_impl ですでに存在は確認済み
+                        let typ_impl = typs.get_mut(&typid).expect("compiler bug: type not found");
+
+                        if let Some(typ_method_impl) = typ_impl.methods.get_mut(&m.id.id) {
+                            match typ_method_impl.genargs_map.entry(self_typ_genargs) {
                                 Entry::Vacant(e) => {
-                                    e.insert(m.id.clone());
+                                    let mid = m.id.clone();
+                                    e.insert((
+                                        MethodDefContent::try_resolve_in_impl(m, &ictx)?,
+                                        mid,
+                                    ));
                                 }
                                 Entry::Occupied(e) => {
                                     return Err(ResolveError::DuplicatedImplementationForType {
-                                        typ,
-                                        fid1: Box::new(e.get().clone()),
+                                        typ: self_typ,
+                                        fid1: Box::new(e.get().1.clone()),
                                         fid2: Box::new(m.id.clone()),
                                     });
                                 }
                             }
                         } else {
-                            typ_impls.insert(typ.clone(), [(m.id.id.clone(), m.id.clone())].into());
+                            let mid = m.id.clone();
+                            typ_impl.methods.insert(
+                                m.id.id.clone(),
+                                TmpTypMethodImpl {
+                                    genargs_map: [(
+                                        self_typ_genargs,
+                                        (MethodDefContent::try_resolve_in_impl(m, &ictx)?, mid),
+                                    )]
+                                    .into(),
+                                },
+                            );
                         }
-
-                        let id = AbsId::new_type_impl(&typ, m.id.id.clone());
-
-                        syms.insert(
-                            id,
-                            ModSym::MethodDef(MethodDefContent::try_resolve_in_module(m, &mctx)?),
-                        );
+                    }
+                    biwac_parser::Globals::VarDecl(_) => {
+                        todo!()
+                        // let id = AbsId::from_modpath(&modpath, v.id.id.clone(), Some(&vec![]));
+                        // syms.insert(
+                        //     id,
+                        //     ModSym::VarDecl(GlobalVarDecl::try_resolve_in_module(v, &mctx)?),
+                        // );
+                    }
+                    biwac_parser::Globals::TypeDef(_) => {
+                        // すでに記録済み
                     }
                 }
             }
         }
 
-        Ok(Self { syms })
+        Ok(Self {
+            fns,
+            typs: typs
+                .into_iter()
+                .map(|(typid, tmp_typ_impl)| {
+                    (
+                        typid,
+                        TypImpl {
+                            typ: tmp_typ_impl.typ,
+                            assocs: tmp_typ_impl.assocs,
+                            methods: tmp_typ_impl
+                                .methods
+                                .into_iter()
+                                .map(|(mid, tmp_typ_method_impl)| {
+                                    (
+                                        mid,
+                                        TypMethodImpl {
+                                            genargs_map: tmp_typ_method_impl
+                                                .genargs_map
+                                                .into_iter()
+                                                .map(|(genargs, (method, _))| (genargs, method))
+                                                .collect(),
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        })
+    }
+
+    #[inline]
+    pub fn get_fn(&self, fid: &FnId) -> Option<&FnContent> {
+        self.fns.get(fid)
+    }
+
+    #[inline]
+    pub fn get_typ(&self, tid: &TypId) -> Option<&TypeDefContent> {
+        self.typs.get(tid).map(|timpl| &timpl.typ)
+    }
+
+    // メソッドをジェネリック型引数列からの選択をしたうえで取得する
+    pub fn get_method(
+        &self,
+        tid: &TypId,
+        id: &String,
+        genargs: Option<&Vec<Typ>>,
+    ) -> Option<&FnTyp> {
+        todo!()
+        // self.typs.get(tid).map(|timpl| {
+        //     &timpl.impls.values().find(|impls| {
+        //         if let Some(f) = impls.get(id)
+        //             && let ImpledFn::Assoc(_) = f
+        //         {
+        //             true
+        //         } else {
+        //             false
+        //         }
+        //     })
+        // })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AbsId {
-    // pub package: enum Package { Internal, External(String)}
-    pub quals: Vec<String>,
-    pub id: String,
-}
-
-impl AbsId {
-    pub fn new(quals: Vec<String>, id: String) -> Self {
+impl FnId {
+    pub(crate) fn new(quals: Vec<String>, id: String) -> Self {
         Self { quals, id }
     }
 
@@ -228,24 +444,50 @@ impl AbsId {
             id,
         }
     }
+}
 
-    pub(crate) fn new_type_impl(typ: &Typ, id: String) -> Self {
-        let quals = match typ {
-            Typ::Int => vec!["Int".to_string()],
-            Typ::Float => vec!["Float".to_string()],
-            Typ::Bool => vec!["Bool".to_string()],
-            Typ::Defined(absid) => {
-                let mut quals = absid.quals.clone();
-                quals.push(absid.id.clone());
-
-                quals
-            }
-            Typ::Fn(_) => {
-                panic!("compiler bug: function type cannot be implemented related functions")
-            }
-        };
-
+impl TypId {
+    pub(crate) fn new(quals: Vec<String>, id: String) -> Self {
         Self { quals, id }
+    }
+
+    pub(crate) fn from_modpath(modpath: &ModPath, id: String) -> Self {
+        Self {
+            quals: match modpath {
+                ModPath::Main => vec![],
+                ModPath::Lib => vec![],
+                ModPath::Mod(m) => m.clone(),
+            },
+            id,
+        }
+    }
+}
+
+impl TryFrom<Typ> for TypId {
+    type Error = ResolveError;
+
+    fn try_from(value: Typ) -> Result<Self, Self::Error> {
+        match value {
+            Typ::Int => Ok(Self {
+                quals: vec![],
+                id: "Int".to_string(),
+            }),
+            Typ::Float => Ok(Self {
+                quals: vec![],
+                id: "Float".to_string(),
+            }),
+            Typ::Bool => Ok(Self {
+                quals: vec![],
+                id: "Bool".to_string(),
+            }),
+            Typ::Defined(deftyp) => Ok(deftyp.id.clone()),
+            // NOTE: とりあえずジェネリック型はstruct GenTypId(usize)のusizeをそのまま文字列とした
+            Typ::Gen(gid) => Ok(Self {
+                quals: vec![],
+                id: gid.value().to_string(),
+            }),
+            Typ::Fn(_) => Err(ResolveError::CanNotBeImplementedForType { typ: value }),
+        }
     }
 }
 
@@ -253,16 +495,10 @@ trait TryResolve<T>: Sized {
     fn try_resolve<'mctx>(value: T, fctx: &mut FnLvlRslvCtx<'mctx>) -> RsvResult<Self>;
 }
 
-trait ModuleLevelTryResolve<T>: Sized {
-    fn try_resolve_in_module<'pctx>(value: T, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self>;
+trait ImplLevelTryResolve<T>: Sized {
+    fn try_resolve_in_impl<'mctx>(value: T, ictx: &ImplLvlGenTypRslvCtx<'mctx>) -> RsvResult<Self>;
 }
 
-impl Display for AbsId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.quals.is_empty() {
-            write!(f, "{}", &self.id)
-        } else {
-            write!(f, "{}::{}", self.quals.join("::"), &self.id)
-        }
-    }
+trait ModuleLevelTryResolve<T>: Sized {
+    fn try_resolve_in_module<'pctx>(value: T, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self>;
 }

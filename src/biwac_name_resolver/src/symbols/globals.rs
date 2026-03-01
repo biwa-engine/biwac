@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use biwac_base::Span;
-use biwac_parser::{Ident, PrimTyp, TypReprVal, VarDecl};
+use biwac_parser::{Ident, VarDecl};
 
 use crate::{
-    DecledVar, Expr, LocVarId, ModuleLevelTryResolve, ResolveError, RsvResult, Stmt, TryResolve,
-    Typ,
-    context::{FnLvlRslvCtx, ModLvlRslvCtx},
+    DecledVar, Expr, ImplLevelTryResolve, LocVarId, ModuleLevelTryResolve, ResolveError, RsvResult,
+    Stmt, TryResolve, Typ,
+    context::{FnLvlRslvCtx, ImplLvlGenTypRslvCtx, ModLvlRslvCtx},
 };
 
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub struct GlobalVarDecl {
     pub init: Expr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FnDefContent {
     pub args: Vec<DecledArg>,
     pub stmts: Vec<Stmt>,
@@ -24,7 +24,7 @@ pub struct FnDefContent {
     pub vars: HashMap<LocVarId, DecledVar>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NativeFnDefContent {
     pub args: Vec<NativeFnArgDecl>,
     pub rtype: Option<Typ>, // None means void
@@ -45,7 +45,7 @@ pub struct DecledArg {
     pub id: LocVarId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MethodDefContent {
     pub ident: Ident,
     pub self_id: LocVarId,
@@ -68,19 +68,19 @@ pub struct StructDefContent {
     pub members: Vec<(Ident, Typ)>,
 }
 
-impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
-    fn try_resolve_in_module<'pctx>(
+impl ImplLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
+    fn try_resolve_in_impl<'mctx>(
         value: biwac_parser::FnDef,
-        mctx: &ModLvlRslvCtx<'pctx>,
+        ictx: &crate::context::ImplLvlGenTypRslvCtx<'mctx>,
     ) -> RsvResult<Self> {
         // 関数のベースのスコープも初期化される
-        let mut fctx = FnLvlRslvCtx::new(mctx);
+        let mut fctx = FnLvlRslvCtx::try_from_ictx(Some(&value.genargs), ictx)?;
 
         Ok(Self {
             args: value
                 .args
                 .into_iter()
-                .map(|arg| match Typ::try_resolve_in_module(&arg.typ, mctx) {
+                .map(|arg| match Typ::try_resolve(&arg.typ, &mut fctx) {
                     Ok(typ) => {
                         // 引数も変数の宣言として記録
                         let id = fctx.declare_variable(&arg.id, Some(typ))?;
@@ -101,7 +101,7 @@ impl ModuleLevelTryResolve<biwac_parser::FnDef> for FnDefContent {
                 .transpose()?,
             rtype: value
                 .rtype
-                .map(|typ| Typ::try_resolve_in_module(&typ, mctx))
+                .map(|typ| Typ::try_resolve(&typ, &mut fctx))
                 .transpose()?,
             vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
         })
@@ -113,13 +113,16 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
         value: biwac_parser::NativeFnDef,
         mctx: &ModLvlRslvCtx<'pctx>,
     ) -> RsvResult<Self> {
+        // 関数のベースのスコープも初期化される
+        let mut fctx = FnLvlRslvCtx::try_from_mctx(Some(&value.genargs), mctx)?;
+
         Ok(Self {
             args: value
                 .args
                 .into_iter()
                 .map(|arg| {
                     Ok(NativeFnArgDecl {
-                        typ: Typ::try_resolve_in_module(&arg.typ, mctx)?,
+                        typ: Typ::try_resolve(&arg.typ, &mut fctx)?,
                         span: arg.span,
                         id: arg.id,
                     })
@@ -127,7 +130,7 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
                 .collect::<RsvResult<_>>()?,
             rtype: value
                 .rtype
-                .map(|typ| Typ::try_resolve_in_module(&typ, mctx))
+                .map(|typ| Typ::try_resolve(&typ, &mut fctx))
                 .transpose()?,
             native: value.native,
             native_span: value.native_span,
@@ -136,24 +139,16 @@ impl ModuleLevelTryResolve<biwac_parser::NativeFnDef> for NativeFnDefContent {
     }
 }
 
-impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
-    fn try_resolve_in_module<'pctx>(
+impl ImplLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
+    fn try_resolve_in_impl<'mctx>(
         value: biwac_parser::MethodDef,
-        mctx: &ModLvlRslvCtx<'pctx>,
+        ictx: &crate::context::ImplLvlGenTypRslvCtx<'mctx>,
     ) -> RsvResult<Self> {
         // 関数のベースのスコープも初期化される
-        let mut fctx = FnLvlRslvCtx::new(mctx);
+        let mut fctx = FnLvlRslvCtx::try_from_ictx(Some(&value.genargs), ictx)?;
 
         // 変数selfの初期化
-        let self_typ = match &value.self_typ.val {
-            TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Typ::Int,
-                PrimTyp::Uint => Typ::Int,
-                PrimTyp::Float => Typ::Float,
-                PrimTyp::Bool => Typ::Bool,
-            },
-            TypReprVal::Defined(deftyp) => Typ::Defined(mctx.try_resolve_deftyp(&deftyp.qualid)?),
-        };
+        let self_typ = Typ::try_resolve_in_impl(&value.self_typ, ictx)?;
         let self_id = fctx.declare_variable(&value.self_ident, Some(self_typ.clone()))?;
 
         Ok(Self {
@@ -162,7 +157,7 @@ impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
             args: value
                 .args
                 .into_iter()
-                .map(|arg| match Typ::try_resolve_in_module(&arg.typ, mctx) {
+                .map(|arg| match Typ::try_resolve_in_impl(&arg.typ, ictx) {
                     Ok(typ) => {
                         // 引数も変数の宣言として記録
                         let id = fctx.declare_variable(&arg.id, Some(typ))?;
@@ -183,7 +178,7 @@ impl ModuleLevelTryResolve<biwac_parser::MethodDef> for MethodDefContent {
                 .transpose()?,
             rtype: value
                 .rtype
-                .map(|typ| Typ::try_resolve_in_module(&typ, mctx))
+                .map(|typ| Typ::try_resolve_in_impl(&typ, ictx))
                 .transpose()?,
             vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
         })
@@ -195,11 +190,23 @@ impl ModuleLevelTryResolve<biwac_parser::StructDef> for StructDefContent {
         value: biwac_parser::StructDef,
         mctx: &ModLvlRslvCtx<'pctx>,
     ) -> RsvResult<Self> {
+        // 構造体の定義は
+        //  struct Foo[T] {
+        //            ^^^
+        //      bar: T,
+        //      baz: Int,
+        //  }
+        //  ジェネリック型引数宣言を含む
+        //  メンバの型はこれを含めて解決する必要がある
+        //
+        // FIXME: ictx を流用することにする
+        let ictx = ImplLvlGenTypRslvCtx::new(Some(&value.genargs), mctx)?;
+
         Ok(Self {
             members: value
                 .members
                 .into_iter()
-                .map(|(id, typ)| Typ::try_resolve_in_module(&typ, mctx).map(|typ| (id, typ)))
+                .map(|(id, typ)| Typ::try_resolve_in_impl(&typ, &ictx).map(|typ| (id, typ)))
                 .collect::<Result<Vec<_>, ResolveError>>()?,
         })
     }

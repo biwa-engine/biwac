@@ -1,7 +1,10 @@
 use biwac_base::Span;
 use biwac_parser::{BinOperator, BoolLiteral, Ident, IntegerLiteral, StringLiteral, UnOperator};
 
-use crate::{AbsId, ExprId, LocVarId, RsvResult, Stmt, TryResolve, context::ResolvedIdent};
+use crate::{
+    AssocId, ExprId, FnId, LocVarId, ResolvedVar, RsvResult, Stmt, TryResolve, TypId,
+    context::ResolvedFn,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expr {
@@ -55,7 +58,7 @@ pub struct IfExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
-    pub id: ResolvedIdent,
+    pub id: ResolvedVar,
     pub span: Span,
 }
 
@@ -95,7 +98,7 @@ impl Literal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLiteral {
-    pub id: AbsId,
+    pub id: TypId,
     pub members: Vec<(Ident, Expr)>,
     pub span: Span,
 }
@@ -110,7 +113,8 @@ pub struct FnCall {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Callee {
     Var(LocVarId),
-    Abs(AbsId),
+    Fn(FnId),
+    Assoc(TypId, AssocId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,9 +213,11 @@ impl TryResolve<biwac_parser::FnCall> for FnCall {
         fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
     ) -> crate::RsvResult<Self> {
         Ok(Self {
-            callee: match fctx.try_resolve_qualid(&value.qualed_id)? {
-                ResolvedIdent::Var(v) => Callee::Var(v),
-                ResolvedIdent::Abs(id) => Callee::Abs(id),
+            // TODO: 関数呼び出し側にもジェネリック型注釈を導入
+            callee: match fctx.try_resolve_fn(&value.qualed_id)? {
+                ResolvedFn::Var(v) => Callee::Var(v),
+                ResolvedFn::Fn(id) => Callee::Fn(id),
+                ResolvedFn::Assoc(typid, associd) => Callee::Assoc(typid, associd),
             },
             args: value
                 .args
@@ -264,6 +270,7 @@ impl TryResolve<biwac_parser::Literal> for Literal {
             biwac_parser::Literal::String(s) => Ok(Self::String(s)),
             biwac_parser::Literal::Bool(b) => Ok(Self::Bool(b)),
             biwac_parser::Literal::Struct(s) => Ok(Self::Struct(StructLiteral {
+                // NOTE: struct リテラルにはジェネリック型注釈が必要か否か
                 id: fctx.try_resolve_deftyp(&s.qualid)?,
                 members: s
                     .members
