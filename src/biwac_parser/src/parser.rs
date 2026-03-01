@@ -183,11 +183,74 @@ impl<'t> TokenStream<'t> {
         }
     }
 
+    /// consume generic argument declaration
+    /// ```biwa
+    /// struct Hoge[T, U] { ... }
+    ///            ^^^^^^
+    ///
+    /// fn hoge[T, U](t: T, i: Int) -> U { ... }
+    ///        ^^^^^^
+    ///
+    /// impl[T, U] Hoge[T, U] { ... }
+    ///     ^^^^^^
+    /// ```
+    /// Generic argument declaration is declaration of generic type which appears for the first
+    /// time in the scope, so it only contains <identifier>.
+    /// It has diffinitly different meaning with generic argument assignment which makes generic
+    /// type argument concrete type.
+    ///
+    /// ジェネリック型引数宣言は、そのスコープで始めて現れるジェネリック型の宣言であり、
+    /// その引数列には<identifier>しか含まれない。
+    /// ジェネリック型を具体化するときのジェネリック型引数の代入列とは別の意味合いである。
+    pub(crate) fn opt_consume_generic_argument_declaration(
+        &mut self,
+    ) -> Result<Vec<Ident>, ParseError> {
+        let mut genargs = vec![];
+        if let Some(t) = self.peek()
+            && matches!(t.kind, TkKind::LBracket)
+        {
+            self.next();
+        } else {
+            return Ok(genargs);
+        }
+
+        loop {
+            if let Some(t) = self.peek()
+                && let TkKind::RBracket = t.kind
+            {
+                self.next();
+
+                return Ok(genargs);
+            } else {
+                genargs.push(self.consume_identifier()?);
+
+                if let Some(t) = self.next() {
+                    if let TkKind::RBracket = t.kind {
+                        return Ok(genargs);
+                    } else if let TkKind::Comma = t.kind {
+                        continue;
+                    } else {
+                        return Err(ParseError::InvalidToken(
+                            vec![TkKind::RBracket, TkKind::Comma],
+                            t.clone(),
+                        ));
+                    }
+                } else {
+                    return Err(ParseError::InvalidEOF(vec![
+                        TkKind::RBracket,
+                        TkKind::Comma,
+                    ]));
+                }
+            }
+        }
+    }
+
     /// Optionaly consumes tokens and parses to get generic arguments.
     /// We should use here:
     /// let a: foo::bar[Int] = ...
     ///                ^
     ///                |
+    // pub(crate) fn opt_consume_generic_argument_assignment(
     pub(crate) fn opt_consume_generic_args(
         &mut self,
         self_typ: &Option<TypRepr>,

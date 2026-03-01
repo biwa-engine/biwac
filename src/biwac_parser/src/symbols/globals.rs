@@ -10,6 +10,7 @@ use crate::{
 pub struct StructDef {
     pub id: Ident,
     pub members: Vec<(Ident, TypRepr)>,
+    pub genargs: Vec<Ident>,
 }
 
 #[derive(Debug)]
@@ -32,7 +33,7 @@ pub struct ImportDecl {
 // Selfは具体のTypReprによりパース時に解決される
 #[derive(Debug, Clone)]
 pub struct FnDef {
-    pub self_typ: Option<TypRepr>,
+    pub impl_ctx: Option<ImplCtx>,
     pub id: Ident,
     pub args: Vec<ArgDecl>,
     pub stmts: Vec<Stmt>,
@@ -40,10 +41,12 @@ pub struct FnDef {
     pub rtype: Option<TypRepr>, // None means void
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
+    pub genargs: Vec<Ident>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NativeFnDef {
+    pub impl_ctx: Option<ImplCtx>,
     pub id: Ident,
     pub args: Vec<ArgDecl>,
     pub rtype: Option<TypRepr>, // None means void
@@ -51,6 +54,7 @@ pub struct NativeFnDef {
     pub native_span: Span,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
+    pub genargs: Vec<Ident>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +66,7 @@ pub struct ArgDecl {
 
 #[derive(Debug, Clone)]
 pub struct MethodDef {
+    pub impl_genargs: Vec<Ident>,
     pub self_typ: TypRepr,
     pub self_ident: Ident,
     pub id: Ident,
@@ -71,12 +76,14 @@ pub struct MethodDef {
     pub rtype: Option<TypRepr>, // None means void
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
+    pub genargs: Vec<Ident>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
     pub typ_fns: Vec<FnDef>,
     pub methods: Vec<MethodDef>,
+    pub genargs: Vec<Ident>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,33 +105,45 @@ pub(crate) struct FnParseCtx {
     pub(crate) is_method: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImplCtx {
+    pub genargs: Vec<Ident>,
+    pub self_typ: TypRepr,
+}
+
 impl<'t> TokenStream<'t> {
     fn consume_function_or_method_definition(
         &mut self,
         flags: Vec<CompilerFlag>,
-        self_typ: Option<TypRepr>,
+        impl_ctx: Option<ImplCtx>,
     ) -> Result<Globals, ParseError> {
         let begin = self.must_consume_next(vec![TkKind::Fn])?.span.clone();
 
         let id = self.consume_identifier()?;
 
+        let genargs = self.opt_consume_generic_argument_declaration()?;
+
         // 実装対象の型typがSomeならメソッドである可能性がある
-        let (args, self_ident) = if self_typ.is_some() {
-            self.consume_method_argsdec(&self_typ)?
+        let (args, self_ident) = if let Some(impl_ctx) = &impl_ctx {
+            self.consume_method_argsdec(&Some(impl_ctx.self_typ.clone()))?
         } else {
-            (self.consume_argsdec(&self_typ)?, None)
+            (self.consume_argsdec(&None)?, None)
         };
 
-        let rtype = if self.consume_next_if_match(vec![TkKind::Arrow]).is_some() {
-            Some(self.consume_type_representaion(&self_typ)?)
-        } else {
-            None
-        };
+        let rtype =
+            if self.consume_next_if_match(vec![TkKind::Arrow]).is_some() {
+                Some(self.consume_type_representaion(
+                    &impl_ctx.as_ref().map(|ctx| ctx.self_typ.clone()),
+                )?)
+            } else {
+                None
+            };
 
         if flags.iter().any(|f| &f.flag.id == "native") {
             if let Some(t) = self.next() {
                 if TkKind::DslLiteral == t.kind {
                     Ok(Globals::NativeFnDef(NativeFnDef {
+                        impl_ctx: None, // TODO: native function も関連関数, メソッド化可能に
                         id,
                         args,
                         native: t.unwrap_string_value(),
@@ -132,6 +151,7 @@ impl<'t> TokenStream<'t> {
                         span: Span::merge(&begin, &t.span),
                         native_span: t.span.clone(),
                         flags,
+                        genargs,
                     }))
                 } else {
                     Err(ParseError::InvalidToken(
@@ -145,7 +165,7 @@ impl<'t> TokenStream<'t> {
         } else {
             // Self型を表すtypをコンテキストとして渡してパースする
             let ctx = FnParseCtx {
-                self_typ: self_typ.clone(),
+                self_typ: impl_ctx.as_ref().map(|ctx| ctx.self_typ.clone()),
                 is_method: self_ident.is_some(),
             };
             let (stmts, expr, end) = match self.consume_block_expression_or_statement(&ctx)? {
@@ -156,9 +176,12 @@ impl<'t> TokenStream<'t> {
             };
 
             if let Some(self_ident) = self_ident {
+                // SAFETY: self_ident Someになるのはimpl_ctx Someのときだけ
+                let impl_ctx = impl_ctx.expect("compiler bug: not a method");
+
                 Ok(Globals::MethodDef(MethodDef {
-                    // SAFETY: self_ident Someになるのはself_typ Someのときだけ
-                    self_typ: self_typ.expect("compiler bug: not a method"),
+                    impl_genargs: impl_ctx.genargs,
+                    self_typ: impl_ctx.self_typ,
                     self_ident,
                     id,
                     args,
@@ -167,10 +190,11 @@ impl<'t> TokenStream<'t> {
                     rtype,
                     span: Span::merge(&begin, &end),
                     flags,
+                    genargs,
                 }))
             } else {
                 Ok(Globals::FnDef(FnDef {
-                    self_typ,
+                    impl_ctx,
                     id,
                     args,
                     stmts,
@@ -178,6 +202,7 @@ impl<'t> TokenStream<'t> {
                     rtype,
                     span: Span::merge(&begin, &end),
                     flags,
+                    genargs,
                 }))
             }
         }
@@ -215,6 +240,8 @@ impl<'t> TokenStream<'t> {
 
                     let id = self.consume_identifier()?;
 
+                    let genargs = self.opt_consume_generic_argument_declaration()?;
+
                     let _ = self.must_consume_next(vec![TkKind::LBrace])?;
 
                     let mut members = vec![];
@@ -230,6 +257,7 @@ impl<'t> TokenStream<'t> {
                             return Ok(vec![Globals::TypeDef(TypeDef::Struct(StructDef {
                                 id,
                                 members,
+                                genargs,
                             }))]);
                         } else {
                             let t = self
@@ -256,7 +284,11 @@ impl<'t> TokenStream<'t> {
                                     continue;
                                 } else if let TkKind::RBrace = t.kind {
                                     return Ok(vec![Globals::TypeDef(TypeDef::Struct(
-                                        StructDef { id, members },
+                                        StructDef {
+                                            id,
+                                            members,
+                                            genargs,
+                                        },
                                     ))]);
                                 }
                             } else {
@@ -269,8 +301,10 @@ impl<'t> TokenStream<'t> {
                     }
                 }
                 TkKind::Impl => {
-                    // "impl" <type-representation> "{" ... "}"
+                    // "impl" ( <generic-argument-declaration> )? <type-representation> "{" ... "}"
                     self.next();
+
+                    let genargs = self.opt_consume_generic_argument_declaration()?;
 
                     let self_typ = self.consume_type_representaion(&None)?;
 
@@ -289,7 +323,10 @@ impl<'t> TokenStream<'t> {
                             let flags = self.consume_compiler_flags()?;
                             let f = self.consume_function_or_method_definition(
                                 flags,
-                                Some(self_typ.clone()),
+                                Some(ImplCtx {
+                                    genargs: genargs.clone(),
+                                    self_typ: self_typ.clone(),
+                                }),
                             )?;
 
                             type_impls.push(f);

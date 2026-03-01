@@ -88,6 +88,14 @@ impl QualifiedId {
             span,
         }
     }
+
+    pub fn only_id(&self) -> Option<&String> {
+        if !self.is_from_root && self.quals.is_empty() {
+            Some(&self.id)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
