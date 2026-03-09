@@ -9,6 +9,10 @@ use crate::{Expr, Primary, Ty};
 pub struct LocVarId(usize);
 
 impl LocVarId {
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
+
     pub fn value(&self) -> &usize {
         &self.0
     }

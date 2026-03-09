@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use biwac_base::Span;
-use biwac_parser::Ident;
+use biwac_base::{ModPath, Span};
+use biwac_parser::{FnDef, Ident, MethodDef, NativeFnDef};
 
 use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
 
@@ -78,7 +78,7 @@ pub struct FnDefContent {
 
     // body
     // needs type inferrence
-    pub body: Progressive<(), FnDefContentBody>,
+    pub body: Progressive<FnDef, FnDefContentBody>,
 
     // 関数内で宣言された変数のマップ
     // 一意なid: LocVarIdを割り当てる
@@ -152,7 +152,7 @@ pub struct MethodDefContent {
 
     // body
     // needs type inferrence
-    pub body: Progressive<(), FnDefContentBody>,
+    pub body: Progressive<MethodDef, FnDefContentBody>,
 
     // 関数内で宣言された変数のマップ
     // 一意なid: LocVarIdを割り当てる
@@ -176,5 +176,87 @@ pub struct StructDefContent {
     pub members: HashMap<String, (Ty, Span)>,
     pub genargs: Vec<GenTyId>,
     // TODO: その他各種情報
-    pub(crate) struct_name_ident: Ident,
+    pub struct_name_span: Span,
+}
+
+impl TyId {
+    pub fn new(quals: Vec<String>, id: String) -> Self {
+        Self { quals, id }
+    }
+
+    pub fn from_modpath(modpath: &ModPath, id: String) -> Self {
+        Self {
+            quals: match modpath {
+                ModPath::Main => vec![],
+                ModPath::Lib => vec![],
+                ModPath::Mod(m) => m.clone(),
+            },
+            id,
+        }
+    }
+}
+
+impl ValId {
+    pub fn new(quals: Vec<String>, id: String) -> Self {
+        Self { quals, id }
+    }
+
+    pub fn from_modpath(modpath: &ModPath, id: String) -> Self {
+        Self {
+            quals: match modpath {
+                ModPath::Main => vec![],
+                ModPath::Lib => vec![],
+                ModPath::Mod(m) => m.clone(),
+            },
+            id,
+        }
+    }
+}
+
+impl GenTyId {
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
+}
+
+impl LocGenTyId {
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
+}
+
+impl FnDefContent {
+    pub fn new(signature: FnDefContentSignature, fn_def: FnDef) -> Self {
+        Self {
+            fn_name_span: fn_def.id.span.clone(),
+            signature,
+            body: Progressive::NotYet(fn_def),
+            vars: HashMap::new(),
+            expr_tys: HashMap::new(),
+        }
+    }
+}
+
+impl MethodDefContent {
+    pub fn new(signature: FnDefContentSignature, method_def: MethodDef) -> Self {
+        Self {
+            fn_name_span: method_def.id.span.clone(),
+            signature,
+            body: Progressive::NotYet(method_def),
+            vars: HashMap::new(),
+            expr_tys: HashMap::new(),
+        }
+    }
+}
+
+impl NativeFnDefContent {
+    pub fn new(signature: FnDefContentSignature, fn_def: NativeFnDef) -> Self {
+        Self {
+            signature,
+            native_body: fn_def.native,
+            fn_name_span: fn_def.id.span,
+            native_span: fn_def.native_span,
+            span: fn_def.span,
+        }
+    }
 }

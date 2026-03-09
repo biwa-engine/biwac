@@ -113,3 +113,88 @@ pub struct FnTy {
 
     pub(crate) genargs: Vec<Ty>,
 }
+
+impl Ty {
+    // ジェネリック引数列の重複検査のための重複判定
+    //  ```
+    //  struct Foo[T, U] { ... }
+    //
+    //  impl[T, U] Foo[T, U] {
+    //                ^^^^^^
+    //      fn bar() { ... }
+    //         ^^^ 重複(1) Foo[T, Int] も Foo[T, U] に包含される
+    //  }
+    //
+    //  impl[T] Foo[T, Int] {
+    //             ^^^^^^^^
+    //      fn bar() { ... }
+    //         ^^^ 重複(1) Foo[T, Int] も Foo[T, U] に包含される
+    //
+    //      fn baz() { ... }
+    //         ^^^ 重複(2) Foo[Bool, Int] は Foo[T, Int] と Foo[Bool, T] のどちらにも包含される
+    //  }
+    //
+    //  impl[T] Foo[Bool, T] {
+    //      fn baz() { ... }
+    //         ^^^ 重複(2) Foo[Bool, Int] は Foo[T, Int] と Foo[Bool, T] のどちらにも包含される
+    //  }
+    //
+    //  impl Foo[Int, Float] {
+    //      fn qux() { ... }
+    //         ^^^ 重複なし
+    //  }
+    //
+    //  impl Foo[Bool, Float] {
+    //      fn qux() { ... }
+    //         ^^^ 重複なし
+    //  }
+    //  ```
+    pub(crate) fn is_duplicated_for_impl_genarg(&self, other: &Ty) -> bool {
+        match (self, other) {
+            (Self::Int, Self::Int) => true,
+            (Self::Float, Self::Float) => true,
+            (Self::Bool, Self::Bool) => true,
+            (Self::Void, Self::Void) => true,
+            (Self::Fn(f1), Self::Fn(f2)) => {
+                if f1.genargs.len() == f2.genargs.len() && f1.args.len() == f2.args.len() {
+                    f1.genargs
+                        .iter()
+                        .zip(f2.genargs.iter())
+                        .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                        && f1
+                            .args
+                            .iter()
+                            .zip(f2.args.iter())
+                            .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                        && f1.rty.is_duplicated_for_impl_genarg(&f2.rty)
+                } else {
+                    false
+                }
+            }
+            (Self::Defined(defined_ty), Self::Defined(defined_ty2)) => {
+                if defined_ty.tid == defined_ty2.tid {
+                    if defined_ty.genargs.len() == defined_ty2.genargs.len() {
+                        defined_ty
+                            .genargs
+                            .iter()
+                            .zip(defined_ty2.genargs.iter())
+                            .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                    } else {
+                        panic!(
+                            "compiler bug: generic arguments length mismatched for the same type"
+                        )
+                    }
+                } else {
+                    false
+                }
+            }
+            (Self::Gen(_), _) => true, // ジェネリック型がどちらかに含まれている時点で重複
+            (_, Self::Gen(_)) => true,
+            (Self::LocGen(_), _) => true,
+            (_, Self::LocGen(_)) => true,
+            (Self::Infer(_), _) => panic!("compiler bug: inferrence needed type cannot be impled"),
+            (_, Self::Infer(_)) => panic!("compiler bug: inferrence needed type cannot be impled"),
+            (_, _) => false,
+        }
+    }
+}

@@ -5,30 +5,25 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::HashMap;
 
 use biwac_base::ModPath;
+use biwac_hir::{
+    Hir, HirError, ImplValDefContentKind, StructDefContent, TyDefContentKind, TyExistence, TyId,
+    ValDefContentKind, ValId,
+};
 use biwac_package_loader::Pkg;
-use biwac_parser::{Ident, ImportDecl, QualifiedId, TypRepr, TypeDef};
+use biwac_parser::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
 
-use crate::context::{FnLvlRslvCtx, ImplLvlGenTypRslvCtx, ModLvlRslvCtx, PkgLvlRslvCtx};
-pub use crate::{
-    context::{AssocId, DecledVar, ExprId, LocVarId, ResolvedVar},
-    symbols::{
-        ModSym,
-        expressions::{
-            BlockExpr, Callee, Expr, ExprVal, FnCall, Literal, MemberAccess, Primary,
-            StructLiteral, Variable,
-        },
-        globals::{
-            DecledArg, FnDefContent, GlobalVarDecl, MethodDefContent, NativeFnArgDecl,
-            NativeFnDefContent, StructDefContent, TypeDefContent,
-        },
-        statements::{
-            AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,
-        },
+use crate::context::{
+    ty_phase::{
+        fn_level::FnLevelTyResolveCtx, impl_level::ImplLevelTyResolveCtx,
+        module_level::ModuleLevelTyResolveCtx,
     },
-    types::{FnTyp, GenTypId, Typ},
+    val_phase::{
+        fn_level::FnLevelResolveCtx, impl_level::ImplLevelResolveCtx,
+        module_level::ModuleLevelResolveCtx,
+    },
 };
 
 // このcrate biwac_name_resolver は、
@@ -47,13 +42,14 @@ pub use crate::{
 
 #[derive(Debug)]
 pub enum ResolveError {
+    HirError(HirError),
     TypeNotFound {
         qualid: Box<QualifiedId>,
-        typid: Box<TypId>,
+        tid: Box<TyId>,
     },
-    FunctionNotFound {
+    ValueNotFound {
         qualid: Box<QualifiedId>,
-        fid: Box<FnId>,
+        vid: Box<ValId>,
     },
     IdentifierNotFound {
         qualid: QualifiedId,
@@ -75,10 +71,9 @@ pub enum ResolveError {
         vid1: Box<Ident>,
         vid2: Box<Ident>,
     },
-    DuplicatedImplementationForType {
-        typ: Typ,
-        fid1: Box<Ident>,
-        fid2: Box<Ident>,
+    DuplicatedValueName {
+        tid1: Box<Ident>,
+        tid2: Box<Ident>,
     },
     DuplicatedGenericTypeDeclaration {
         tid1: Box<Ident>,
@@ -86,13 +81,13 @@ pub enum ResolveError {
     },
     GenericArgLengthMismatched {
         // TODO: エラーメッセージを正確に出しやすく
-        typ: Box<Typ>,
-        typ_impl_repr: Box<TypRepr>,
-        actual_len: usize,
+        deftyp: Box<DefTyp>,
+        tid: Box<TyId>,
+        ty_existence: Box<TyExistence>,
     },
-    CanNotBeImplementedForType {
-        typ: Typ,
-    },
+    // CanNotBeImplementedForType {
+    //     typ: Typ,
+    // },
 }
 
 pub type RsvResult<T> = Result<T, ResolveError>;
@@ -109,396 +104,341 @@ pub type RsvResult<T> = Result<T, ResolveError>;
 //
 //
 
-#[derive(Debug)]
-pub struct ResolvedPkg {
-    fns: HashMap<FnId, FnContent>,
-    typs: HashMap<TypId, TypImpl>,
+trait TryResolve<T>: Sized {
+    fn try_resolve<'mctx>(
+        value: T,
+        fctx: &mut FnLevelResolveCtx<'mctx>,
+        hir: &Hir,
+    ) -> RsvResult<Self>;
 }
 
-// グローバル変数のid
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VarId {
-    // pub pkg: enum Package { Internal, External(String)}
-    quals: Vec<String>,
-    id: String,
+// trait ImplLevelTryResolve<T>: Sized {
+//     fn try_resolve_in_impl<'mctx>(
+//         value: T,
+//         ictx: &ImplLevelResolveCtx<'mctx>,
+//         hir: &Hir,
+//     ) -> RsvResult<Self>;
+// }
+
+// trait ModuleLevelTryResolve<T>: Sized {
+//     fn try_resolve_in_module<'pctx>(
+//         value: T,
+//         mctx: &ModuleLevelResolveCtx,
+//         hir: &Hir,
+//     ) -> RsvResult<Self>;
+// }
+
+trait ModuleLevelTryResolveTy<T>: Sized {
+    fn try_resolve_in_module(
+        value: T,
+        mctx: &ModuleLevelTyResolveCtx,
+        hir: &Hir,
+    ) -> RsvResult<Self>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FnId {
-    // pub pkg: enum Package { Internal, External(String)}
-    quals: Vec<String>,
-    id: String,
+trait TryResolveTy<T>: Sized {
+    fn try_resolve<'mctx>(
+        value: T,
+        fctx: &FnLevelTyResolveCtx<'mctx>,
+        hir: &Hir,
+    ) -> RsvResult<Self>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypId {
-    // pub pkg: enum Package { Internal, External(String)}
-    quals: Vec<String>,
-    id: String,
+impl From<HirError> for ResolveError {
+    fn from(value: HirError) -> Self {
+        Self::HirError(value)
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct TypImpl {
-    typ: TypeDefContent,
-    methods: HashMap<String, TypMethodImpl>,
-    assocs: HashMap<AssocId, TypAssocImpl>,
+#[derive(Default)]
+pub struct ResolveCtx {
+    hir: Hir,
 }
 
-#[derive(Debug, Clone)]
-pub struct TypAssocImpl {
-    target_genargs: Vec<Typ>,
-    f: FnDefContent,
-    //  impl[T] Foo[T, Int] {
-    //             ^^^^^^^^
-    //             | target_genargs
-    //      fn bar[U]() { ... }
-    //  }
-}
+impl ResolveCtx {
+    pub fn new() -> Self {
+        Self { hir: Hir::new() }
+    }
 
-#[derive(Debug, Clone)]
-pub struct TypMethodImpl {
-    genargs_map: HashMap<Vec<Typ>, MethodDefContent>,
-}
-
-#[derive(Debug, Clone)]
-pub enum FnContent {
-    Fn(FnDefContent),
-    Native(NativeFnDefContent),
-}
-
-//
-// - 関数:
-//  fnsからFnIdを引く。ジェネリクスの具体化表明は名前解決するものの、それ以上のチェックはせず、FnCall 側に記録
-//
-// - 関連関数:
-//  パース時には(Selfについてのジェネリクス具体表明がない限り)関数呼び出しと区別がつかない。
-//  if FnId.qualsをTypIdとしたときにその型がtypsに見つかる
-//      && いずれか1つ以上のジェネリクス引数列に対して、FnId.idの実装があれば:
-//          解決
-//  else:
-//      通常の関数呼び出しとして解決に移る
-//
-//  - メソッド:
-//   名前解決の時点では特にされることはない。
-//   pkgには記録され、次の型推論フェーズで解決される
-//   型推論フェーズでは、
-//   <expression> . <method-name> ( (<expression>,)* )
-//   1. 左辺値の推論をする
-//   2. if 左辺値が(ジェネリック型引数含め)具体の型である:
-//          if typsを引くと存在する:
-//              if ジェネリック型引数列で該当するものが一意に定まる:
-//                  解決
-//              else:
-//                  エラー
-//          else:
-//              エラー
-//      else:
-//          エラー
-
-// 重複エラーを検知するための一時的な型
-#[derive(Debug, Clone)]
-pub struct TmpTypImpl {
-    typ: TypeDefContent,
-    methods: HashMap<String, TmpTypMethodImpl>,
-    assocs: HashMap<AssocId, TypAssocImpl>,
-}
-
-// 重複エラーを検知するための一時的な型
-#[derive(Debug, Clone)]
-struct TmpTypMethodImpl {
-    genargs_map: HashMap<Vec<Typ>, (MethodDefContent, Ident)>,
-}
-
-impl ResolvedPkg {
-    pub fn try_resolve(pkg: Pkg) -> RsvResult<Self> {
-        let pctx = PkgLvlRslvCtx::new(&pkg)?;
-        let mut fns = HashMap::new();
-        let mut typs = HashMap::<TypId, TmpTypImpl>::new();
-
-        // TODO:
-        // 同じ型に対する同じ名前の関連関数, メソッドの重複を検出する
-        // ```hoge.biwa
-        // impl Fuga {
-        //   fn piyo() { ... }
-        //
-        //   fn piyo(self) { ... }
-        // }
-        // ```
-        // のいずれも
-        // hoge::Fuga::piyoという関数に解決されるため、重複検知が必要
-        // let mut typ_impls = HashMap::<Typ, HashMap<String, Ident>>::new();
-
-        // 予め型を記録する
+    pub fn try_resolve(mut self, pkg: Pkg) -> RsvResult<Hir> {
+        // 型の存在を記録する
         for (modpath, modu) in &pkg.modules {
-            let mctx = ModLvlRslvCtx::new(&pctx, modpath.clone(), modu)?;
+            // モジュールの存在も記録
+            self.hir.register_module_existence(modpath.clone())?;
 
             for g in &modu.globals {
                 if let biwac_parser::Globals::TypeDef(t) = g {
                     match t {
-                        TypeDef::Struct(s) => {
-                            let tid = TypId::from_modpath(modpath, s.id.id.clone());
-                            typs.insert(
+                        TypeDef::Struct(struct_) => {
+                            let tid = TyId::from_modpath(modpath, struct_.id.id.clone());
+                            self.hir.register_type_existence(
                                 tid,
-                                TmpTypImpl {
-                                    typ: TypeDefContent::Struct(
-                                        StructDefContent::try_resolve_in_module(s.clone(), &mctx)?,
-                                    ),
-                                    methods: HashMap::new(),
-                                    assocs: HashMap::new(),
+                                TyExistence {
+                                    ty_name_span: struct_.id.span.clone(),
+                                    genarg_len: struct_.genargs.len(),
                                 },
-                            );
+                            )?;
                         }
                     }
                 }
             }
         }
+        // hir から型の存在とジェネリック引数の長さを取得できるようになる
+        // hir からモジュールの存在を取得できるようになる
 
-        for (modpath, modu) in pkg.modules {
-            let mctx = ModLvlRslvCtx::new(&pctx, modpath.clone(), &modu)?;
+        // 値(fn, const)の存在(シグニチャ)を記録する
+        let mut type_defs = vec![];
+        let mctxes = pkg
+            .modules
+            .into_iter()
+            .map(|(modpath, modu)| {
+                let mctx = ModuleLevelTyResolveCtx::new(modpath.clone(), &modu, &self.hir)?;
 
-            for g in modu.globals {
-                match g {
-                    biwac_parser::Globals::Import(_) => {}
-                    biwac_parser::Globals::FnDef(f) => {
-                        // 関連関数の場合
-                        if let Some(impl_ctx) = &f.impl_ctx {
-                            let ictx = ImplLvlGenTypRslvCtx::new(Some(&impl_ctx.genargs), &mctx)?;
+                for g in modu.globals {
+                    match g {
+                        biwac_parser::Globals::FnDef(fn_def) => {
+                            // 関連関数のとき
+                            if let Some(impl_ctx) = &fn_def.impl_ctx {
+                                let ictx = ImplLevelTyResolveCtx::new(&mctx, &impl_ctx.genargs)?;
+                                let self_ty = ictx.try_resolve_ty(&impl_ctx.self_typ, &self.hir)?;
 
-                            let self_typ = Typ::try_resolve_in_impl(&impl_ctx.self_typ, &ictx)?;
-                            let self_typ_genargs = self_typ.get_genargs();
-                            let typid = TypId::try_from(self_typ)?;
+                                let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
 
-                            // SAFETY: try_resolve_in_impl ですでに存在は確認済み
-                            let typ_impl =
-                                typs.get_mut(&typid).expect("compiler bug: type not found");
-                            // SAFETY: ctx 構成時に確認済み
-                            let associd = pctx
-                                .typs
-                                .get(&typid)
-                                .expect("compiler bug: type not found")
-                                .assocs
-                                .get(&f.id.id)
-                                .expect("compiler bug: associated function not found")
-                                .genargs_map
-                                .get(&self_typ_genargs)
-                                .expect("compiler bug: associated function for a generic argument not found")
-                                .0;
+                                let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                                    (&fn_def.args, &fn_def.rtype),
+                                    &fctx,
+                                    &self.hir,
+                                )?;
 
-                            typ_impl.assocs.insert(
-                                associd,
-                                TypAssocImpl {
-                                    target_genargs: self_typ_genargs,
-                                    f: FnDefContent::try_resolve_in_impl(f, &ictx)?,
-                                },
-                            );
-                        } else {
-                            // 一般の関数の場合
-                            let fid = FnId::from_modpath(&modpath, f.id.id.clone());
-                            let ictx = ImplLvlGenTypRslvCtx::new_empty(&mctx); // 空のimpl文脈を生成
-                            fns.insert(
-                                fid,
-                                FnContent::Fn(FnDefContent::try_resolve_in_impl(f, &ictx)?),
-                            );
-                        };
+                                self.hir.register_impl_value_existence(
+                                    self_ty,
+                                    ictx.impl_block_genargs,
+                                    &fn_def.id.clone(),
+                                    ImplValDefContentKind::Fn(Box::new(
+                                        biwac_hir::FnDefContent::new(signature, fn_def),
+                                    )),
+                                )?;
+                            } else {
+                                // 通常の関数のとき
+                                let vid = ValId::from_modpath(&modpath, fn_def.id.id.clone());
+                                let ictx = ImplLevelTyResolveCtx::new_empty(&mctx);
+                                let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+
+                                let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                                    (&fn_def.args, &fn_def.rtype),
+                                    &fctx,
+                                    &self.hir,
+                                )?;
+
+                                self.hir.register_value_existence(
+                                    vid,
+                                    ValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
+                                        signature, fn_def,
+                                    ))),
+                                )?;
+                            }
+                        }
+                        biwac_parser::Globals::NativeFnDef(fn_def) => {
+                            let vid = ValId::from_modpath(&modpath, fn_def.id.id.clone());
+                            let ictx = ImplLevelTyResolveCtx::new_empty(&mctx);
+                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+
+                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                                (&fn_def.args, &fn_def.rtype),
+                                &fctx,
+                                &self.hir,
+                            )?;
+
+                            self.hir.register_value_existence(
+                                vid,
+                                ValDefContentKind::Native(Box::new(
+                                    biwac_hir::NativeFnDefContent::new(signature, fn_def),
+                                )),
+                            )?;
+                        }
+                        biwac_parser::Globals::MethodDef(method_def) => {
+                            let ictx = ImplLevelTyResolveCtx::new(&mctx, &method_def.impl_genargs)?;
+                            let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
+
+                            let fctx = FnLevelTyResolveCtx::new(&ictx, &method_def.genargs)?;
+
+                            // 第一引数 self は含まない
+                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                                (&method_def.args, &method_def.rtype),
+                                &fctx,
+                                &self.hir,
+                            )?;
+
+                            // メソッドとして登録
+                            self.hir.register_impl_value_existence(
+                                self_ty,
+                                ictx.impl_block_genargs,
+                                &method_def.id.clone(),
+                                ImplValDefContentKind::Method(Box::new(
+                                    biwac_hir::MethodDefContent::new(signature, method_def),
+                                )),
+                            )?;
+                        }
+                        biwac_parser::Globals::VarDecl(_var_decl) => {
+                            todo!()
+                        }
+                        biwac_parser::Globals::Import(_) => {
+                            // nothing to do
+                        }
+                        biwac_parser::Globals::TypeDef(type_def) => {
+                            type_defs.push((modpath.clone(), type_def));
+                        }
                     }
-                    biwac_parser::Globals::NativeFnDef(f) => {
-                        let fid = FnId::from_modpath(&modpath, f.id.id.clone());
-                        fns.insert(
-                            fid,
-                            FnContent::Native(NativeFnDefContent::try_resolve_in_module(f, &mctx)?),
-                        );
+                }
+
+                Ok((modpath, mctx))
+            })
+            .collect::<RsvResult<HashMap<ModPath, ModuleLevelTyResolveCtx>>>()?;
+        // hir から値の存在(シグニチャ)を取得できるようになる
+
+        // 型の実体(シグニチャ)を記録する
+        for (modpath, type_def) in type_defs {
+            let mctx = mctxes.get(&modpath).unwrap();
+
+            match type_def {
+                TypeDef::Struct(struct_) => {
+                    let tid = TyId::from_modpath(&modpath, struct_.id.id.clone());
+
+                    self.hir.register_type_content(
+                        &tid,
+                        TyDefContentKind::Struct(Box::new(
+                            StructDefContent::try_resolve_in_module(&struct_, mctx, &self.hir)?,
+                        )),
+                    )?;
+                }
+            }
+        }
+        // hir から型の実体を取得できるようになる
+
+        // 関数内の名前解決を行う
+        let mctxes = mctxes
+            .into_iter()
+            .map(|(modpath, mctx)| Ok((modpath, ModuleLevelResolveCtx::new(mctx, &self.hir)?)))
+            .collect::<RsvResult<HashMap<ModPath, ModuleLevelResolveCtx>>>()?;
+
+        // 通常の関数に対し
+        // 解決を行う
+        let mut fn_bodies = vec![];
+        for (vid, val) in &self.hir.vals {
+            match val {
+                ValDefContentKind::Fn(f) => {
+                    match &f.body {
+                        biwac_hir::Progressive::NotYet(fn_def) => {
+                            let mctx = mctxes
+                                .get(fn_def.id.span.module())
+                                .expect("compiler bug: module not found");
+                            let ictx = ImplLevelResolveCtx::new_empty(mctx);
+                            let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
+
+                            let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+                                (fn_def, &f.signature),
+                                &mut fctx,
+                                &self.hir,
+                            )?;
+
+                            fn_bodies.push((vid.clone(), fn_body));
+                        }
+                        biwac_hir::Progressive::Completed(_) => {
+                            // nothing to do
+                        }
                     }
-                    biwac_parser::Globals::MethodDef(m) => {
-                        let ictx = ImplLvlGenTypRslvCtx::new(Some(&m.impl_genargs), &mctx)?;
+                }
+                ValDefContentKind::Native(_) => {
+                    // nothing to do
+                }
+            }
+        }
 
-                        let self_typ = Typ::try_resolve_in_impl(&m.self_typ, &ictx)?;
-                        let self_typ_genargs = self_typ.get_genargs();
-                        let typid = TypId::try_from(self_typ.clone())?;
+        // 解決済みの関数のボディ情報を登録する
+        for (vid, fn_body) in fn_bodies {
+            self.hir.register_value_definition(&vid, fn_body)?;
+        }
 
-                        // SAFETY: try_resolve_in_impl ですでに存在は確認済み
-                        let typ_impl = typs.get_mut(&typid).expect("compiler bug: type not found");
+        // 関連関数、メソッドに対し
+        // 解決を行う
+        let mut impl_fn_bodies = vec![];
+        for (tid, defined_ty_impl) in &self.hir.tys {
+            for (val_name, impl_list) in &defined_ty_impl.vals {
+                for (impl_vid, val) in &impl_list.vals {
+                    match &val.val_content {
+                        ImplValDefContentKind::Fn(f) => {
+                            match &f.body {
+                                biwac_hir::Progressive::NotYet(fn_body) => {
+                                    let mctx = mctxes
+                                        .get(f.fn_name_span.module())
+                                        .expect("compiler bug: module not found");
+                                    let ictx = ImplLevelResolveCtx::new(
+                                        mctx,
+                                        val.impl_block_genargs.clone(),
+                                    )?;
+                                    let mut fctx =
+                                        FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
 
-                        if let Some(typ_method_impl) = typ_impl.methods.get_mut(&m.id.id) {
-                            match typ_method_impl.genargs_map.entry(self_typ_genargs) {
-                                Entry::Vacant(e) => {
-                                    let mid = m.id.clone();
-                                    e.insert((
-                                        MethodDefContent::try_resolve_in_impl(m, &ictx)?,
-                                        mid,
+                                    let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+                                        (fn_body, &f.signature),
+                                        &mut fctx,
+                                        &self.hir,
+                                    )?;
+
+                                    impl_fn_bodies.push((
+                                        tid.clone(),
+                                        val_name.clone(),
+                                        *impl_vid,
+                                        fn_body,
                                     ));
                                 }
-                                Entry::Occupied(e) => {
-                                    return Err(ResolveError::DuplicatedImplementationForType {
-                                        typ: self_typ,
-                                        fid1: Box::new(e.get().1.clone()),
-                                        fid2: Box::new(m.id.clone()),
-                                    });
+                                biwac_hir::Progressive::Completed(_) => {
+                                    // nothing to do
                                 }
                             }
-                        } else {
-                            let mid = m.id.clone();
-                            typ_impl.methods.insert(
-                                m.id.id.clone(),
-                                TmpTypMethodImpl {
-                                    genargs_map: [(
-                                        self_typ_genargs,
-                                        (MethodDefContent::try_resolve_in_impl(m, &ictx)?, mid),
-                                    )]
-                                    .into(),
-                                },
-                            );
                         }
-                    }
-                    biwac_parser::Globals::VarDecl(_) => {
-                        todo!()
-                        // let id = AbsId::from_modpath(&modpath, v.id.id.clone(), Some(&vec![]));
-                        // syms.insert(
-                        //     id,
-                        //     ModSym::VarDecl(GlobalVarDecl::try_resolve_in_module(v, &mctx)?),
-                        // );
-                    }
-                    biwac_parser::Globals::TypeDef(_) => {
-                        // すでに記録済み
+                        ImplValDefContentKind::Method(m) => {
+                            match &m.body {
+                                biwac_hir::Progressive::NotYet(fn_body) => {
+                                    let mctx = mctxes
+                                        .get(m.fn_name_span.module())
+                                        .expect("compiler bug: module not found");
+                                    let ictx = ImplLevelResolveCtx::new(
+                                        mctx,
+                                        val.impl_block_genargs.clone(),
+                                    )?;
+                                    let mut fctx =
+                                        FnLevelResolveCtx::new(&ictx, &m.signature.genargs)?;
+
+                                    let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+                                        (fn_body, &m.signature),
+                                        &mut fctx,
+                                        &self.hir,
+                                    )?;
+
+                                    impl_fn_bodies.push((
+                                        tid.clone(),
+                                        val_name.clone(),
+                                        *impl_vid,
+                                        fn_body,
+                                    ));
+                                }
+                                biwac_hir::Progressive::Completed(_) => {
+                                    // nothing to do
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        Ok(Self {
-            fns,
-            typs: typs
-                .into_iter()
-                .map(|(typid, tmp_typ_impl)| {
-                    (
-                        typid,
-                        TypImpl {
-                            typ: tmp_typ_impl.typ,
-                            assocs: tmp_typ_impl.assocs,
-                            methods: tmp_typ_impl
-                                .methods
-                                .into_iter()
-                                .map(|(mid, tmp_typ_method_impl)| {
-                                    (
-                                        mid,
-                                        TypMethodImpl {
-                                            genargs_map: tmp_typ_method_impl
-                                                .genargs_map
-                                                .into_iter()
-                                                .map(|(genargs, (method, _))| (genargs, method))
-                                                .collect(),
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
-        })
-    }
-
-    #[inline]
-    pub fn get_fn(&self, fid: &FnId) -> Option<&FnContent> {
-        self.fns.get(fid)
-    }
-
-    #[inline]
-    pub fn get_typ(&self, tid: &TypId) -> Option<&TypeDefContent> {
-        self.typs.get(tid).map(|timpl| &timpl.typ)
-    }
-
-    // メソッドをジェネリック型引数列からの選択をしたうえで取得する
-    pub fn get_method(
-        &self,
-        tid: &TypId,
-        id: &String,
-        genargs: Option<&Vec<Typ>>,
-    ) -> Option<&FnTyp> {
-        todo!()
-        // self.typs.get(tid).map(|timpl| {
-        //     &timpl.impls.values().find(|impls| {
-        //         if let Some(f) = impls.get(id)
-        //             && let ImpledFn::Assoc(_) = f
-        //         {
-        //             true
-        //         } else {
-        //             false
-        //         }
-        //     })
-        // })
-    }
-}
-
-impl FnId {
-    pub(crate) fn new(quals: Vec<String>, id: String) -> Self {
-        Self { quals, id }
-    }
-
-    pub(crate) fn from_modpath(modpath: &ModPath, id: String) -> Self {
-        Self {
-            quals: match modpath {
-                ModPath::Main => vec![],
-                ModPath::Lib => vec![],
-                ModPath::Mod(m) => m.clone(),
-            },
-            id,
+        // 解決済みの関数のボディ情報を登録する
+        for (tid, val_name, impl_vid, fn_body) in impl_fn_bodies {
+            self.hir
+                .register_impl_value_definition(&tid, &val_name, &impl_vid, fn_body)?;
         }
+
+        Ok(self.hir)
     }
-}
-
-impl TypId {
-    pub(crate) fn new(quals: Vec<String>, id: String) -> Self {
-        Self { quals, id }
-    }
-
-    pub(crate) fn from_modpath(modpath: &ModPath, id: String) -> Self {
-        Self {
-            quals: match modpath {
-                ModPath::Main => vec![],
-                ModPath::Lib => vec![],
-                ModPath::Mod(m) => m.clone(),
-            },
-            id,
-        }
-    }
-}
-
-impl TryFrom<Typ> for TypId {
-    type Error = ResolveError;
-
-    fn try_from(value: Typ) -> Result<Self, Self::Error> {
-        match value {
-            Typ::Int => Ok(Self {
-                quals: vec![],
-                id: "Int".to_string(),
-            }),
-            Typ::Float => Ok(Self {
-                quals: vec![],
-                id: "Float".to_string(),
-            }),
-            Typ::Bool => Ok(Self {
-                quals: vec![],
-                id: "Bool".to_string(),
-            }),
-            Typ::Defined(deftyp) => Ok(deftyp.id.clone()),
-            // NOTE: とりあえずジェネリック型はstruct GenTypId(usize)のusizeをそのまま文字列とした
-            Typ::Gen(gid) => Ok(Self {
-                quals: vec![],
-                id: gid.value().to_string(),
-            }),
-            Typ::Fn(_) => Err(ResolveError::CanNotBeImplementedForType { typ: value }),
-        }
-    }
-}
-
-trait TryResolve<T>: Sized {
-    fn try_resolve<'mctx>(value: T, fctx: &mut FnLvlRslvCtx<'mctx>) -> RsvResult<Self>;
-}
-
-trait ImplLevelTryResolve<T>: Sized {
-    fn try_resolve_in_impl<'mctx>(value: T, ictx: &ImplLvlGenTypRslvCtx<'mctx>) -> RsvResult<Self>;
-}
-
-trait ModuleLevelTryResolve<T>: Sized {
-    fn try_resolve_in_module<'pctx>(value: T, mctx: &ModLvlRslvCtx<'pctx>) -> RsvResult<Self>;
 }

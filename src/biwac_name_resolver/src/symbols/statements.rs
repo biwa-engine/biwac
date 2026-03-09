@@ -1,130 +1,82 @@
-use biwac_base::Span;
+use biwac_hir::{
+    AssignStmt, BlockStmt, Expr, ExprStmt, IfStmt, InferTy, Primary, ReturnStmt, Stmt, Ty, VarDecl,
+    WhileStmt,
+};
 use biwac_parser::types::TypDecl;
 
-use crate::{Expr, LocVarId, Primary, RsvResult, TryResolve, Typ};
+use crate::{RsvResult, TryResolve};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockStmt {
-    pub stmts: Vec<Stmt>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IfStmt {
-    pub cond: Expr,
-    pub then: BlockStmt,
-    pub els: Option<BlockStmt>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WhileStmt {
-    pub cond: Expr,
-    pub stmts: BlockStmt,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VarDecl {
-    pub id: LocVarId,
-    pub init: Expr,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExprStmt {
-    pub expr: Expr,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReturnStmt {
-    pub expr: Expr,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignStmt {
-    pub dst: Primary,
-    pub src: Expr,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Stmt {
-    Block(BlockStmt),
-    Expr(ExprStmt),
-    Return(ReturnStmt),
-    If(IfStmt),
-    While(WhileStmt),
-    VarDecl(VarDecl),
-    Assign(AssignStmt),
-}
-
-impl TryResolve<biwac_parser::Stmt> for Stmt {
+impl TryResolve<&biwac_parser::Stmt> for Stmt {
     fn try_resolve<'mctx>(
-        value: biwac_parser::Stmt,
-        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
-    ) -> crate::RsvResult<Self> {
-        match value {
-            biwac_parser::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx)?)),
-            biwac_parser::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx)?)),
+        value: &biwac_parser::Stmt,
+        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
+        hir: &biwac_hir::Hir,
+    ) -> RsvResult<Self> {
+        match &value {
+            biwac_parser::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx, hir)?)),
+            biwac_parser::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx, hir)?)),
             biwac_parser::Stmt::Block(b) => {
                 // ブロック文はスコープを作る
                 fctx.enter_scope();
 
                 let stmts = b
                     .stmts
-                    .into_iter()
-                    .map(|stmt| Stmt::try_resolve(stmt, fctx))
+                    .iter()
+                    .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
                     .collect::<RsvResult<Vec<Stmt>>>()?;
 
                 fctx.exit_scope();
 
                 Ok(Self::Block(BlockStmt {
-                    span: b.span,
+                    span: b.span.clone(),
                     stmts,
                 }))
             }
             biwac_parser::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
-                span: expr.span,
-                expr: Expr::try_resolve(expr.expr, fctx)?,
+                span: expr.span.clone(),
+                expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
             })),
             biwac_parser::Stmt::Return(expr) => Ok(Self::Return(ReturnStmt {
-                span: expr.span,
-                expr: Expr::try_resolve(expr.expr, fctx)?,
+                span: expr.span.clone(),
+                expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
             })),
-            biwac_parser::Stmt::VarDecl(var) => Ok(Self::VarDecl(VarDecl::try_resolve(var, fctx)?)),
+            biwac_parser::Stmt::VarDecl(var) => {
+                Ok(Self::VarDecl(VarDecl::try_resolve(var, fctx, hir)?))
+            }
             biwac_parser::Stmt::Assign(assign) => Ok(Self::Assign(AssignStmt {
-                span: assign.span,
-                dst: Primary::try_resolve(assign.dst, fctx)?,
-                src: Expr::try_resolve(assign.src, fctx)?,
+                span: assign.span.clone(),
+                dst: Primary::try_resolve(&assign.dst, fctx, hir)?,
+                src: Expr::try_resolve(&assign.src, fctx, hir)?,
             })),
         }
     }
 }
 
-impl TryResolve<biwac_parser::IfStmt> for IfStmt {
+impl TryResolve<&biwac_parser::IfStmt> for IfStmt {
     fn try_resolve<'mctx>(
-        value: biwac_parser::IfStmt,
-        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
-    ) -> crate::RsvResult<Self> {
+        value: &biwac_parser::IfStmt,
+        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
+        hir: &biwac_hir::Hir,
+    ) -> RsvResult<Self> {
         Ok(Self {
-            cond: Expr::try_resolve(value.cond, fctx)?,
+            cond: Expr::try_resolve(&value.cond, fctx, hir)?,
             then: BlockStmt {
                 stmts: value
                     .then
                     .stmts
-                    .into_iter()
-                    .map(|stmt| Stmt::try_resolve(stmt, fctx))
+                    .iter()
+                    .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
                     .collect::<RsvResult<Vec<Stmt>>>()?,
-                span: value.then.span,
+                span: value.then.span.clone(),
             },
-            els: match value.els {
+            els: match &value.els {
                 Some(els) => Some(BlockStmt {
                     stmts: els
                         .stmts
-                        .into_iter()
-                        .map(|stmt| Stmt::try_resolve(stmt, fctx))
+                        .iter()
+                        .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
                         .collect::<RsvResult<_>>()?,
-                    span: els.span,
+                    span: els.span.clone(),
                 }),
                 None => None,
             },
@@ -132,41 +84,43 @@ impl TryResolve<biwac_parser::IfStmt> for IfStmt {
     }
 }
 
-impl TryResolve<biwac_parser::WhileStmt> for WhileStmt {
+impl TryResolve<&biwac_parser::WhileStmt> for WhileStmt {
     fn try_resolve<'mctx>(
-        value: biwac_parser::WhileStmt,
-        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
-    ) -> crate::RsvResult<Self> {
+        value: &biwac_parser::WhileStmt,
+        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
+        hir: &biwac_hir::Hir,
+    ) -> RsvResult<Self> {
         Ok(Self {
-            cond: Expr::try_resolve(value.cond, fctx)?,
+            cond: Expr::try_resolve(&value.cond, fctx, hir)?,
             stmts: BlockStmt {
                 stmts: value
                     .stmts
                     .stmts
-                    .into_iter()
-                    .map(|stmt| Stmt::try_resolve(stmt, fctx))
+                    .iter()
+                    .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
                     .collect::<RsvResult<Vec<Stmt>>>()?,
-                span: value.span,
+                span: value.span.clone(),
             },
         })
     }
 }
 
-impl TryResolve<biwac_parser::VarDecl> for VarDecl {
+impl TryResolve<&biwac_parser::VarDecl> for VarDecl {
     fn try_resolve<'mctx>(
-        value: biwac_parser::VarDecl,
-        fctx: &mut crate::context::FnLvlRslvCtx<'mctx>,
-    ) -> crate::RsvResult<Self> {
+        value: &biwac_parser::VarDecl,
+        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
+        hir: &biwac_hir::Hir,
+    ) -> RsvResult<Self> {
         // 変数の宣言をcontextに登録
-        let typ = match value.typ {
-            TypDecl::Typ(typ) => Some(Typ::try_resolve(&typ, fctx)?),
-            TypDecl::Any => None,
+        let ty = match &value.typ {
+            TypDecl::Typ(typ) => fctx.try_resolve_ty(typ, hir)?,
+            TypDecl::Any => Ty::Infer(InferTy::Unknown), // 型が不明で推論を要する
         };
-        let id = fctx.declare_variable(&value.id, typ)?;
+        let id = fctx.declare_variable(&value.id, ty)?;
 
         Ok(Self {
             id,
-            init: Expr::try_resolve(value.init, fctx)?,
+            init: Expr::try_resolve(&value.init, fctx, hir)?,
         })
     }
 }

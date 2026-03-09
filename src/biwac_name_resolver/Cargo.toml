@@ -8,3 +8,4 @@ biwac_base = { path = "../biwac_base"}
 biwac_parser = { path = "../biwac_parser"}
 biwac_lexer = { path = "../biwac_lexer"}
 biwac_package_loader = { path = "../biwac_package_loader"}
+biwac_hir = { path = "../biwac_hir"}

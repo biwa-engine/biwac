@@ -38,6 +38,10 @@ impl Span {
         }
     }
 
+    pub fn module(&self) -> &ModPath {
+        &self.modu
+    }
+
     pub fn begin(&self) -> &Pos {
         &self.begin
     }

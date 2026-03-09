@@ -66,8 +66,6 @@ name = "biwac_hir"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
- "biwac_name_resolver",
- "biwac_package_loader",
  "biwac_parser",
 ]
 
@@ -83,6 +81,7 @@ name = "biwac_name_resolver"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
+ "biwac_hir",
  "biwac_lexer",
  "biwac_package_loader",
  "biwac_parser",

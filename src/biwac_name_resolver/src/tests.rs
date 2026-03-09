@@ -1,4 +1,4 @@
-use crate::ResolvedPkg;
+use crate::ResolveCtx;
 
 #[test]
 fn test1() {
@@ -7,5 +7,6 @@ fn test1() {
 
     let pkg = biwac_package_loader::Pkg::try_load("../../assets/tests/test1").unwrap();
 
-    let _pkg = ResolvedPkg::try_resolve(pkg).unwrap();
+    let ctx = ResolveCtx::new();
+    let _hir = ctx.try_resolve(pkg).unwrap();
 }
