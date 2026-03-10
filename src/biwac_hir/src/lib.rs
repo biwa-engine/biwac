@@ -21,12 +21,12 @@ pub use crate::hir::{
             VarDecl, WhileStmt,
         },
     },
-    types::{DefinedTy, FnTy, InferTy, Ty},
+    types::{DefinedTy, FnTy, InferTy, Ty, TyVar},
 };
 
 pub type HirResult<T> = Result<T, HirError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HirError {
     DuplicatedValueName {
         vid: Box<ValId>,

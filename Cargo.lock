@@ -109,6 +109,7 @@ name = "biwac_type_inferrer"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
+ "biwac_hir",
  "biwac_name_resolver",
  "biwac_package_loader",
  "biwac_parser",

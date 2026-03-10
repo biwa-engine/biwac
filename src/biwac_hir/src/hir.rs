@@ -7,8 +7,8 @@ use biwac_base::{ModPath, Span};
 use biwac_parser::Ident;
 
 use crate::{
-    FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind, LocGenTyId, LocVarId, Ty,
-    TyDefContentKind, TyId, ValDefContentKind, ValId,
+    AssocCallee, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind, LocGenTyId,
+    LocVarId, Ty, TyDefContentKind, TyId, ValDefContentKind, ValId,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -48,7 +48,7 @@ pub enum Progressive<Y, C> {
 //  2. 各種関数類の関数内の型推論
 //      1. 関連関数、メソッドについて、実装対象の型についてimplの重複を検査する(変更は加えない)
 //      2. 各種関数、関連関数、メソッドについて、内部の型推論を行う
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Hir {
     // 値名前空間 value namespace 内の一意なシンボルの集合
     // - 関数
@@ -121,7 +121,7 @@ pub struct TyValImplGenargsContentPair {
     pub val_content: ImplValDefContentKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TyExistence {
     pub ty_name_span: Span,
     pub genarg_len: usize,
@@ -132,9 +132,6 @@ impl Hir {
     pub fn new() -> Self {
         Self::default()
     }
-
-    // TODO:
-    // - 関数、関連関数、メソッドについて、その中での型推論をすべて行う(型推論のエントリーポイント)
 
     // モジュールの存在を登録する
     pub fn register_module_existence(&mut self, module: ModPath) -> HirResult<()> {
@@ -480,7 +477,7 @@ impl Hir {
                                     .signature
                                     .genargs
                                     .iter()
-                                    .map(|(_, lgid)| Ty::LocGen(*lgid))
+                                    .map(|(_, lgid)| *lgid)
                                     .collect(),
                             }),
                         })
@@ -490,6 +487,48 @@ impl Hir {
                 }
             }
             _ => Ok(None),
+        }
+    }
+
+    // ある型に対する関連関数のシグニチャ(FnTy)を取得する
+    pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee) -> HirResult<FnTy> {
+        match &assoc_callee.ty {
+            Ty::Defined(defined_ty) => {
+                let defined_ty_impl = self
+                    .tys
+                    .get(&defined_ty.tid)
+                    .expect("compiler bug: type not found");
+
+                let impl_list = defined_ty_impl
+                    .vals
+                    .get(&assoc_callee.assoc)
+                    .expect("compiler bug: implemented value not found for this name");
+                let impl_ = impl_list
+                    .vals
+                    .get(&assoc_callee.impl_vid)
+                    .expect("compiler bug: implemented value not found");
+
+                match &impl_.val_content {
+                    ImplValDefContentKind::Fn(f) => Ok(FnTy::from(&f.signature)),
+                    // WARN: really?
+                    //
+                    // Ok(FnTy {
+                    //     args: f.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+                    //     rty: Box::new(f.signature.rty.clone()),
+                    //     genargs: f.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
+                    // }),
+                    ImplValDefContentKind::Method(_) => Err(todo!()),
+                }
+            }
+            _ => Ok(todo!()), // TODO:
+        }
+    }
+
+    // 型の実体を取得する
+    pub fn get_type_definition(&self, tid: &TyId) -> Option<&TyDefContentKind> {
+        match &self.tys.get(tid)?.ty_content {
+            Progressive::NotYet(_) => panic!("compiler bug: type definition not registered yet"),
+            Progressive::Completed(ty_content) => Some(ty_content),
         }
     }
 

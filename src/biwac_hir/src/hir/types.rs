@@ -1,4 +1,4 @@
-use crate::{GenTyId, LocGenTyId, TyId};
+use crate::{FnDefContentSignature, GenTyId, LocGenTyId, TyId};
 
 // Ty はAST以降各種の検査を行う上での 型 を表す
 //  1. 名前解決(biwac_name_resolver)によって、はじめてTyの形で現れる
@@ -101,17 +101,21 @@ pub struct DefinedTy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TyVar(pub(crate) usize);
+pub struct TyVar(usize);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FnTy {
-    pub(crate) args: Vec<Ty>,
+    pub args: Vec<Ty>,
 
     // if the function does not return value ( = void function),
     // Ty::Void
-    pub(crate) rty: Box<Ty>,
+    pub rty: Box<Ty>,
 
-    pub(crate) genargs: Vec<Ty>,
+    pub genargs: Vec<LocGenTyId>,
+    // グローバルなシンボル(関数、関連関数、メソッド)として定義済みの関数が、
+    // 引数や戻り値にジェネリック型が登場する(genargs内にそのLocGenTyIdがあれば関数自体が多相である)ことを表すためにある
+    // なお、ジェネリック引数宣言 genargs: Vec<LocGenTyId> に登場するLocGenTyIdが
+    // 関数の引数または戻り値に一度以上登場することは保証されなければならない
 }
 
 impl Ty {
@@ -157,15 +161,12 @@ impl Ty {
             (Self::Void, Self::Void) => true,
             (Self::Fn(f1), Self::Fn(f2)) => {
                 if f1.genargs.len() == f2.genargs.len() && f1.args.len() == f2.args.len() {
-                    f1.genargs
+                    // NOTE: 関数のジェネリック引数列はFnTyではVec<LocGenTyId>として保持しているにすぎず
+                    // これを比較することに意味はないので行わない
+                    f1.args
                         .iter()
-                        .zip(f2.genargs.iter())
+                        .zip(f2.args.iter())
                         .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
-                        && f1
-                            .args
-                            .iter()
-                            .zip(f2.args.iter())
-                            .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
                         && f1.rty.is_duplicated_for_impl_genarg(&f2.rty)
                 } else {
                     false
@@ -196,5 +197,21 @@ impl Ty {
             (_, Self::Infer(_)) => panic!("compiler bug: inferrence needed type cannot be impled"),
             (_, _) => false,
         }
+    }
+}
+
+impl From<&FnDefContentSignature> for FnTy {
+    fn from(value: &FnDefContentSignature) -> Self {
+        Self {
+            args: value.args.iter().map(|(_, ty)| ty.clone()).collect(),
+            rty: Box::new(value.rty.clone()),
+            genargs: value.genargs.iter().map(|(_, lgid)| *lgid).collect(),
+        }
+    }
+}
+
+impl TyVar {
+    pub fn new(id: usize) -> Self {
+        Self(id)
     }
 }

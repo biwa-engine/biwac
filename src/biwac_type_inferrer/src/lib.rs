@@ -3,33 +3,19 @@ mod inferrer;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
-
-use biwac_base::Span;
-use biwac_name_resolver::{
-    AbsId, AssignStmt, DecledArg, DecledVar, Expr, ExprId, GlobalVarDecl, LocVarId, MemberAccess,
-    Stmt, StructLiteral, TypeDefContent,
-};
+use biwac_hir::{AssignStmt, Expr, FnTy, HirError, MemberAccess, StructLiteral, Ty, TyId, TyVar};
 use biwac_parser::{BinOperator, Ident, UnOperator};
-pub use inferrer::{
-    infer,
-    types::{FnTy, Scheme, Ty, TyVar},
-};
 
-#[derive(Debug, Clone, PartialEq)]
+pub use crate::inferrer::context::TyCtx;
+
+#[derive(Debug, Clone)]
 pub enum TyError {
-    SymbolNotFound(AbsId),
-    StructMemberConfliced {
-        id: AbsId,
-        member1: Box<Ident>,
-        member2: Box<Ident>,
-    },
     StructLiteralMemberConfliced {
         member1: Box<Ident>,
         member2: Box<Ident>,
     },
     StructLiteralAssignToInexsistentMember {
-        id: AbsId,
+        tid: Box<TyId>,
         member: Box<Ident>,
     },
     StructLiteralMemberInsufficient {
@@ -45,23 +31,12 @@ pub enum TyError {
         ty: Ty,
         method: Box<Ident>,
     },
-    SymbolNotAType {
-        id: AbsId,
-    },
-    SymbolNotCallable {
-        id: AbsId,
-        caller: Span,
-    },
-    SymbolNotAStruct {
-        id: AbsId,
-        span: Span,
-    },
-    SymbolNotHasMember {
-        id: AbsId,
-        access: Box<MemberAccess>,
-    },
+    // SymbolNotCallable {
+    //     id: AbsId,
+    //     caller: Span,
+    // },
     StructNotHasMember {
-        id: AbsId,
+        tid: TyId,
         access: Box<MemberAccess>,
     },
     ExprNotHasMember {
@@ -83,67 +58,18 @@ pub enum TyError {
         // only variable and struct member access left hand side is assignable
     },
 
-    TypeVariableNotCallable(TyVar),
     FnArgLenMismatched(FnTy, FnTy),
     TypeConfliced(Ty, Ty),
     OccursCheckFailed(TyVar, Ty),
     InsufficientContext,
+
+    HirError(HirError),
 }
 
 pub type TyResult<T> = Result<T, TyError>;
 
-#[derive(Debug)]
-pub struct TypedPkg {
-    pub syms: HashMap<AbsId, Sym>,
-}
-
-#[derive(Debug)]
-pub enum Sym {
-    FnDef(FnDefContent),
-    VarDecl(GlobalVarDecl),
-    TypeDef(TypeDefContent),
-    NativeFnDef(NativeFnDefContent),
-}
-
-#[derive(Debug)]
-pub struct FnDefContent {
-    pub args: Vec<DecledArg>,
-    pub stmts: Vec<Stmt>,
-    pub expr: Option<Expr>,
-    pub rty: Ty, // None means void
-    pub vars: HashMap<LocVarId, DecledVar>,
-    // 推論結果
-    pub ty_info: TyInfo,
-}
-// 関数ローカルな型についての情報
-#[derive(Debug)]
-pub struct TyInfo {
-    pub(crate) vars: HashMap<LocVarId, Ty>,
-    pub(crate) exprs: HashMap<ExprId, Ty>,
-}
-
-impl TyInfo {
-    pub fn unwrap_type_of_expression(&self, expr: &ExprId) -> &Ty {
-        self.exprs.get(expr).unwrap()
+impl From<HirError> for TyError {
+    fn from(value: HirError) -> Self {
+        Self::HirError(value)
     }
-
-    pub fn unwrap_type_of_variable(&self, var: &LocVarId) -> &Ty {
-        self.vars.get(var).unwrap()
-    }
-}
-
-#[derive(Debug)]
-pub struct NativeFnDefContent {
-    pub args: Vec<NativeFnArg>,
-    pub rty: Ty,
-    pub native: String,
-    pub native_span: Span,
-    pub span: Span,
-}
-
-#[derive(Debug)]
-pub struct NativeFnArg {
-    pub ty: Ty,
-    pub id: Ident,
-    pub span: Span,
 }
