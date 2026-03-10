@@ -59,6 +59,7 @@ pub enum TyError {
     },
 
     FnArgLenMismatched(FnTy, FnTy),
+    FnGenArgLenMismatched(FnTy, FnTy),
     TypeConfliced(Ty, Ty),
     OccursCheckFailed(TyVar, Ty),
     InsufficientContext,

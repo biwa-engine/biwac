@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 pub(crate) mod context;
 
 use biwac_hir::{
-    BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, Hir, InferTy, Literal,
+    BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir, InferTy, Literal,
     LocGenTyId, Primary, Stmt, Ty, TyDefContentKind, TyVar, ValDefContentKind, VarIdKind,
 };
 use biwac_parser::{BinOperator, Ident, UnOperator};
@@ -13,8 +13,14 @@ use crate::{
     inferrer::context::{FnTyCtx, TyInfo},
 };
 
+#[derive(Default)]
 struct CallCtx {
     gen_assigns: HashMap<LocGenTyId, Ty>,
+}
+
+#[derive(Default)]
+struct DefinedTyCtx {
+    gen_assigns: HashMap<GenTyId, Ty>,
 }
 
 impl<'tctx> FnTyCtx<'tctx> {
@@ -65,46 +71,60 @@ impl<'tctx> FnTyCtx<'tctx> {
                     Ok(t)
                 }
             }
-            // NOTE: FnTy は
-            // t1 が callee
-            // t2 が caller
-            // とする
-            // callee_fty.genargs は 関数定義側でのVec<LocGenTyId>が記録されており、
-            // caller_fty.genargs は 空(vec![]) であるものとする
-            // また、caller に現れる LocGenTyId は impl block やその関数で宣言された
-            // ジェネリック型であり、
-            // callee に現れる LocGenTyId とは別であるので注意が必要
-            // 文脈に記録するべき
-            (Ty::Fn(callee_fty), Ty::Fn(caller_fty)) => {
-                if callee_fty.args.len() != caller_fty.args.len() {
-                    Err(TyError::FnArgLenMismatched(callee_fty, caller_fty))
+            //  NOTE: FnTy について
+            //  unify() では
+            //  ```
+            //  let f: (Int, Int -> Int) = (x, y) -> { x + y };
+            //  ```
+            //  など、単に型が等しい必要がある箇所について検査する
+            (Ty::Fn(fty1), Ty::Fn(fty2)) => {
+                if fty1.args.len() != fty2.args.len() {
+                    Err(TyError::FnArgLenMismatched(fty1, fty2))
+                } else if fty1.genargs.len() != fty2.genargs.len() {
+                    Err(TyError::FnGenArgLenMismatched(fty1, fty2))
                 } else {
-                    // LocGenTyId -> Ty の割り当てが計算できるため、
-                    // それによりできるだけ具体の型を計算して返す
-                    let mut cctx = CallCtx {
-                        gen_assigns: HashMap::<LocGenTyId, Ty>::new(),
-                    };
-                    let args = callee_fty
+                    let args = fty1
                         .args
                         .into_iter()
-                        .zip(caller_fty.args.into_iter())
-                        .map(|(a1, a2)| self.call_unify(a1, a2, &mut cctx))
+                        .zip(fty2.args.into_iter())
+                        .map(|(a1, a2)| self.unify(a1, a2))
                         .collect::<TyResult<_>>()?;
 
-                    let rty = self.call_unify(*callee_fty.rty, *caller_fty.rty, &mut cctx)?;
-                    // genargs に登場する LocGenTyId が必ず引数または戻り値に現れるという前提のもと、
-                    // この時点で gen_assigns にはすべての LocGenTyId に対する Ty
-                    // の割り当てが計算されている
-                    //
-                    // NOTE: FnTyに割り当てを記録しても良い
+                    let rty = self.unify(*fty1.rty, *fty2.rty)?;
 
                     Ok(Ty::Fn(FnTy {
                         args,
                         rty: Box::new(rty),
-                        genargs: caller_fty.genargs,
+                        genargs: fty2.genargs,
                         // genargs は caller の値をそのまま使用する
                     }))
                 }
+            }
+            (Ty::Defined(defined_ty1), Ty::Defined(defined_ty2)) => {
+                if defined_ty1.tid == defined_ty2.tid {
+                    if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
+                        let genargs = defined_ty1
+                            .genargs
+                            .into_iter()
+                            .zip(defined_ty2.genargs.into_iter())
+                            .map(|(g1, g2)| self.unify(g1, g2))
+                            .collect::<TyResult<_>>()?;
+
+                        Ok(Ty::Defined(DefinedTy {
+                            tid: defined_ty1.tid,
+                            genargs,
+                        }))
+                    } else {
+                        // それぞれ定義と検査済みであるため等しいはず
+                        panic!("compiler bug: generic argument length mismatched")
+                    }
+                } else {
+                    Err(TyError::TypeConfliced(t1, t2))
+                }
+            }
+            (Ty::Gen(_), _) | (_, Ty::Gen(_)) => {
+                // Ty::Gen(GenTyId) は型定義しにしか現れない
+                panic!("compiler bug: unresolved generic type found")
             }
             (x, y) => {
                 if x == y {
@@ -168,6 +188,28 @@ impl<'tctx> FnTyCtx<'tctx> {
                     }))
                 }
             }
+            (Ty::Defined(defined_ty1), Ty::Defined(defined_ty2)) => {
+                if defined_ty1.tid == defined_ty2.tid {
+                    if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
+                        let genargs = defined_ty1
+                            .genargs
+                            .into_iter()
+                            .zip(defined_ty2.genargs.into_iter())
+                            .map(|(g1, g2)| self.call_unify(g1, g2, ctx))
+                            .collect::<TyResult<_>>()?;
+
+                        Ok(Ty::Defined(DefinedTy {
+                            tid: defined_ty1.tid,
+                            genargs,
+                        }))
+                    } else {
+                        // それぞれ定義と検査済みであるため等しいはず
+                        panic!("compiler bug: generic argument length mismatched")
+                    }
+                } else {
+                    Err(TyError::TypeConfliced(callee_ty, caller_ty))
+                }
+            }
             (Ty::LocGen(lgid), caller_ty) => match ctx.gen_assigns.entry(lgid) {
                 Entry::Vacant(e) => {
                     e.insert(caller_ty.clone());
@@ -182,12 +224,118 @@ impl<'tctx> FnTyCtx<'tctx> {
                     Ok(t)
                 }
             },
+            (Ty::Gen(_), _) | (_, Ty::Gen(_)) => {
+                // Ty::Gen(GenTyId) は型定義しにしか現れない
+                panic!("compiler bug: unresolved generic type found")
+            }
             (x, y) => {
                 if x == y {
                     // WARN: really?
                     Ok(x)
                 } else {
                     Err(TyError::TypeConfliced(callee_ty, caller_ty))
+                }
+            }
+        }
+    }
+
+    // 型定義を使用する箇所(struct, enum リテラル)でのunify
+    // definition_ty: 型定義側
+    // user_ty: 型使用側
+    fn defined_ty_unify(
+        &mut self,
+        definition_ty: Ty,
+        user_ty: Ty,
+        ctx: &mut DefinedTyCtx,
+    ) -> TyResult<Ty> {
+        let definition_ty = self.apply(definition_ty);
+        let user_ty = self.apply(user_ty);
+
+        // FIXME: inefficient clone to return Err
+        match (definition_ty.clone(), user_ty.clone()) {
+            (Ty::Infer(i), t) | (t, Ty::Infer(i)) => {
+                let t = self.apply(t);
+                let v = self.ty_var_of_infer_ty(i); // 型変数を取得(なければ新規割り当て)
+                if t == Ty::Infer(InferTy::Var(v)) {
+                    Ok(t)
+                } else if occurs(&v, &t) {
+                    Err(TyError::OccursCheckFailed(v, t))
+                } else {
+                    self.substitutions.insert(v, t.clone());
+
+                    Ok(t)
+                }
+            }
+            //  NOTE: FnTy について
+            //  defined_ty_unify() では
+            //  ```
+            //  let f: (Int, Int -> Int) = (x, y) -> { x + y };
+            //  ```
+            //  など、単に型が等しい必要がある箇所について検査する
+            (Ty::Fn(fty1), Ty::Fn(fty2)) => {
+                if fty1.args.len() != fty2.args.len() {
+                    Err(TyError::FnArgLenMismatched(fty1, fty2))
+                } else if fty1.genargs.len() != fty2.genargs.len() {
+                    Err(TyError::FnGenArgLenMismatched(fty1, fty2))
+                } else {
+                    let args = fty1
+                        .args
+                        .into_iter()
+                        .zip(fty2.args.into_iter())
+                        .map(|(a1, a2)| self.defined_ty_unify(a1, a2, ctx))
+                        .collect::<TyResult<_>>()?;
+
+                    let rty = self.defined_ty_unify(*fty1.rty, *fty2.rty, ctx)?;
+
+                    Ok(Ty::Fn(FnTy {
+                        args,
+                        rty: Box::new(rty),
+                        genargs: fty2.genargs,
+                        // genargs は caller の値をそのまま使用する
+                    }))
+                }
+            }
+            (Ty::Defined(defined_ty1), Ty::Defined(defined_ty2)) => {
+                if defined_ty1.tid == defined_ty2.tid {
+                    if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
+                        let genargs = defined_ty1
+                            .genargs
+                            .into_iter()
+                            .zip(defined_ty2.genargs.into_iter())
+                            .map(|(g1, g2)| self.defined_ty_unify(g1, g2, ctx))
+                            .collect::<TyResult<_>>()?;
+
+                        Ok(Ty::Defined(DefinedTy {
+                            tid: defined_ty1.tid,
+                            genargs,
+                        }))
+                    } else {
+                        // それぞれ定義と検査済みであるため等しいはず
+                        panic!("compiler bug: generic argument length mismatched")
+                    }
+                } else {
+                    Err(TyError::TypeConfliced(definition_ty, user_ty))
+                }
+            }
+            (Ty::Gen(gid), user_ty) => match ctx.gen_assigns.entry(gid) {
+                Entry::Vacant(e) => {
+                    e.insert(user_ty.clone());
+
+                    Ok(user_ty)
+                }
+                Entry::Occupied(mut e) => {
+                    // 両方 user 由来の型であるため、unify() でよい
+                    let t = self.unify(e.get().clone(), user_ty)?;
+                    e.insert(t.clone());
+
+                    Ok(t)
+                }
+            },
+            (x, y) => {
+                if x == y {
+                    Ok(x)
+                } else {
+                    Err(TyError::TypeConfliced(definition_ty, user_ty))
                 }
             }
         }
@@ -401,12 +549,12 @@ impl<'tctx> FnTyCtx<'tctx> {
                                 .map(|m| m.as_str())
                                 .collect::<HashSet<&str>>();
 
+                            let mut dtctx = DefinedTyCtx::default();
                             for (id, (ident, expr)) in &members {
-                                if let Some((ty, _)) = struct_.members.get(*id).cloned() {
-                                    let expr_ty = self.infer_expr(expr)?;
-                                    // TODO: Ty::Gen(GenTyId)
-                                    // にTyが割り当てられるので、そこからgenargsを構築
-                                    self.unify(ty, expr_ty)?;
+                                if let Some((definition_ty, _)) = struct_.members.get(*id).cloned()
+                                {
+                                    let user_ty = self.infer_expr(expr)?;
+                                    self.defined_ty_unify(definition_ty, user_ty, &mut dtctx)?;
                                     // メンバを取り除いていく
                                     member_ids.remove(id);
                                 } else {
@@ -417,10 +565,20 @@ impl<'tctx> FnTyCtx<'tctx> {
                                 }
                             }
 
+                            // 定義型のジェネリック引数宣言に登場するジェネリック型が
+                            // そのメンバなどに必ず使用されることが保証されているなら、
+                            // dtctx.gen_assigns にはこの時点で必ず GenTyId -> Ty の割り当てがある
+                            // その割り当てを収集して返す
+                            let genargs = struct_
+                                .genargs
+                                .iter()
+                                .map(|gid| dtctx.gen_assigns.get(gid).unwrap().clone())
+                                .collect();
+
                             if member_ids.is_empty() {
                                 Ok(Ty::Defined(DefinedTy {
                                     tid: s.tid.clone(),
-                                    genargs: todo!(),
+                                    genargs,
                                 }))
                             } else {
                                 // メンバ名の集合に残されているものが、
@@ -465,13 +623,15 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
-                    self.unify(
+                    let mut cctx = CallCtx::default();
+                    self.call_unify(
                         Ty::Fn(callee_fty),
                         Ty::Fn(FnTy {
                             args,
                             rty: Box::new(rty),
                             genargs: vec![],
                         }),
+                        &mut cctx,
                     )?;
 
                     Ok(*callee_rty)
@@ -491,13 +651,15 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
-                    self.unify(
+                    let mut cctx = CallCtx::default();
+                    self.call_unify(
                         callee_fty,
                         Ty::Fn(FnTy {
                             args,
                             rty: Box::new(rty.clone()),
                             genargs: vec![],
                         }),
+                        &mut cctx,
                     )?;
 
                     Ok(rty)
@@ -516,13 +678,15 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
-                    self.unify(
+                    let mut cctx = CallCtx::default();
+                    self.call_unify(
                         Ty::Fn(callee_fty),
                         Ty::Fn(FnTy {
                             args,
                             rty: Box::new(rty),
                             genargs: vec![],
                         }),
+                        &mut cctx,
                     )?;
 
                     Ok(*callee_rty)
@@ -562,8 +726,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                                     if defined_ty.genargs.len() == struct_.genargs.len() {
                                         Ok(defined_ty.genargs.get(idx).unwrap().clone())
                                     } else {
-                                        // error
-                                        todo!()
+                                        panic!("compiler bug: generic argument length mismatched")
                                     }
                                 } else {
                                     Ok(ty)
@@ -613,13 +776,15 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
-                    self.unify(
+                    let mut cctx = CallCtx::default();
+                    self.call_unify(
                         Ty::Fn(callee_fty),
                         Ty::Fn(FnTy {
                             args,
                             rty: Box::new(rty.clone()),
                             genargs: vec![],
                         }),
+                        &mut cctx,
                     )?;
 
                     Ok(rty)
