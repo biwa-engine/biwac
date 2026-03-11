@@ -12,7 +12,7 @@ use crate::{
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progressive<Y, C> {
     NotYet(Y),
     Completed(C),
@@ -110,6 +110,10 @@ pub struct ImplValId(usize);
 impl ImplValId {
     fn new(id: usize) -> Self {
         Self(id)
+    }
+
+    pub fn value(&self) -> usize {
+        self.0
     }
 }
 
@@ -545,6 +549,17 @@ impl Hir {
                     // nothing to do
                 }
             }
+        }
+    }
+}
+
+impl<Y, C> Progressive<Y, C> {
+    pub fn expect_completed(&self) -> &C {
+        match self {
+            Self::NotYet(_) => {
+                panic!("compiler bug: progressive registration not yet")
+            }
+            Self::Completed(c) => c,
         }
     }
 }

@@ -86,6 +86,7 @@ pub struct FnDefContent {
 
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
+    pub var_tys: HashMap<LocVarId, Ty>,
 }
 
 // ```
@@ -113,6 +114,8 @@ pub struct FnDefContentSignature {
 pub struct FnDefContentBody {
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
+    pub arg_var_ids: Vec<LocVarId>,
+    pub vars: HashMap<LocVarId, DecledVar>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +197,14 @@ impl TyId {
             id,
         }
     }
+
+    pub fn quals(&self) -> &[String] {
+        &self.quals
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 impl ValId {
@@ -211,17 +222,33 @@ impl ValId {
             id,
         }
     }
+
+    pub fn quals(&self) -> &[String] {
+        &self.quals
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 impl GenTyId {
     pub fn new(id: usize) -> Self {
         Self(id)
     }
+
+    pub fn value(&self) -> usize {
+        self.0
+    }
 }
 
 impl LocGenTyId {
     pub fn new(id: usize) -> Self {
         Self(id)
+    }
+
+    pub fn value(&self) -> usize {
+        self.0
     }
 }
 
@@ -233,6 +260,7 @@ impl FnDefContent {
             body: Progressive::NotYet(fn_def),
             vars: HashMap::new(),
             expr_tys: HashMap::new(),
+            var_tys: HashMap::new(),
         }
     }
 }

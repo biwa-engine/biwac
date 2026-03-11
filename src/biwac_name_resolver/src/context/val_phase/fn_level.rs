@@ -164,11 +164,11 @@ impl<'ictx> FnLevelResolveCtx<'ictx> {
     }
 
     #[inline]
-    pub(crate) fn into_vars(self) -> HashMap<LocVarId, DecledVar> {
+    pub(crate) fn vars(&self) -> HashMap<LocVarId, DecledVar> {
         self.scopes
-            .into_iter()
-            .flat_map(|scope| scope.into_iter())
-            .map(|(_, (ident, var_id))| (var_id, ident))
+            .iter()
+            .flat_map(|scope| scope.iter())
+            .map(|(_, (ident, var_id))| (*var_id, ident.clone()))
             .collect()
     }
 }

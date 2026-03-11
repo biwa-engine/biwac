@@ -964,6 +964,7 @@ impl TyCtx {
                             vid.clone(),
                             TyInfo {
                                 expr_tys: fctx.exprs,
+                                var_tys: fctx.vars,
                             },
                         ));
                     }
@@ -983,6 +984,7 @@ impl TyCtx {
             match val {
                 ValDefContentKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
+                    f.var_tys = ty_info.var_tys;
                 }
                 ValDefContentKind::Native(_) => {
                     // nothing to do

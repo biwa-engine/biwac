@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use biwac_name_resolver::Stmt;
+use biwac_hir::{Hir, Stmt};
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
 
@@ -9,6 +9,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
         &'a self,
         env: &mut super::FnAstBuildEnv<'a>,
         allocator: &'a oxc_allocator::Allocator,
+        hir: &Hir,
     ) -> oxc_ast::ast::Statement<'a> {
         match &self {
             Stmt::VarDecl(var) => {
@@ -36,13 +37,14 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                     oxc_ast::ast::TSTypeAnnotation {
                                         span: span(),
                                         type_annotation: env
-                                            .ty_info
-                                            .unwrap_type_of_variable(&v.id)
-                                            .as_oxc(env, allocator),
+                                            .var_tys
+                                            .get(&v.id)
+                                            .unwrap()
+                                            .as_oxc(env, allocator, hir),
                                     },
                                     allocator,
                                 )),
-                                init: Some(v.init.as_oxc(env, allocator)),
+                                init: Some(v.init.as_oxc(env, allocator, hir)),
                                 definite: false,
                             }),
                             allocator,
@@ -56,7 +58,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                 oxc_ast::ast::Statement::ReturnStatement(oxc_allocator::Box::new_in(
                     oxc_ast::ast::ReturnStatement {
                         span: span(),
-                        argument: Some(ret.expr.as_oxc(env, allocator)),
+                        argument: Some(ret.expr.as_oxc(env, allocator, hir)),
                     },
                     allocator,
                 ))

@@ -1,5 +1,5 @@
-use biwac_type_inferrer::TypedPkg;
+use biwac_hir::Hir;
 
-pub fn generate(_pkg: &TypedPkg) {
+pub fn generate(_hir: &Hir) {
     todo!()
 }

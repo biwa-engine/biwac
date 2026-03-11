@@ -1,19 +1,18 @@
 use std::cell::Cell;
 
-use biwac_name_resolver::{
-    AbsId, BlockExpr, Callee, Expr, ExprVal, Literal, LocVarId, Primary, ResolvedIdent,
+use biwac_hir::{
+    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, Ty, VarIdKind,
 };
 use biwac_parser::{BinOperator, UnOperator};
-use biwac_type_inferrer::Ty;
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
 
-impl Mangled for ResolvedIdent {
+impl Mangled for VarIdKind {
     fn mangled(&self) -> String {
         match self {
-            Self::Abs(absid) => absid.mangled(),
-            Self::Var(var_id) => var_id.mangled(),
+            Self::Global(vid) => vid.mangled(),
+            Self::Local(var_id) => var_id.mangled(),
         }
     }
 }
@@ -24,15 +23,84 @@ impl Mangled for LocVarId {
     }
 }
 
+impl Mangled for (&Ty, &str, &ImplValId) {
+    fn mangled(&self) -> String {
+        match self.0 {
+            Ty::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
+            Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
+            Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+            Ty::Gen(_) => panic!(""),    // ローカルに出現し得ない
+            Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+            Ty::Int => format!(
+                "_ZN3Int{}{}{}{}E",
+                self.1.len(),
+                &self.1,
+                self.2.value().to_string().len(),
+                self.2.value()
+            ),
+            Ty::Float => format!(
+                "_ZN5Float{}{}{}{}E",
+                self.1.len(),
+                &self.1,
+                self.2.value().to_string().len(),
+                self.2.value()
+            ),
+            Ty::Bool => format!(
+                "_ZN4Bool{}{}{}{}E",
+                self.1.len(),
+                &self.1,
+                self.2.value().to_string().len(),
+                self.2.value()
+            ),
+            Ty::Defined(defined_ty) => {
+                let mut result = String::from("_ZN");
+
+                for q in defined_ty.tid.quals() {
+                    result.push_str(&format!("{}{}", q.len(), q));
+                }
+
+                result.push_str(&format!(
+                    "{}{}",
+                    defined_ty.tid.id().len(),
+                    defined_ty.tid.id()
+                ));
+
+                result.push_str(&format!("{}{}", self.1.len(), self.1));
+
+                result.push_str(&format!(
+                    "{}{}",
+                    self.2.value().to_string().len(),
+                    self.2.value()
+                ));
+
+                result.push('E');
+
+                result
+            }
+        }
+    }
+}
+
 impl<'a> AsOxc<'a, oxc_span::Ident<'a>> for Callee {
     fn as_oxc(
         &'a self,
         _env: &mut super::FnAstBuildEnv<'a>,
         allocator: &'a oxc_allocator::Allocator,
+        _hir: &Hir,
     ) -> oxc_span::Ident<'a> {
         match self {
             Self::Var(_) => todo!(),
-            Self::Abs(absid) => oxc_span::Ident::new_const(allocator.alloc_str(&absid.mangled())),
+            Self::Fn(vid) => oxc_span::Ident::new_const(allocator.alloc_str(&vid.mangled())),
+            Self::Assoc(assoc_callee) => oxc_span::Ident::new_const(
+                allocator.alloc_str(
+                    &(
+                        &assoc_callee.ty,
+                        assoc_callee.assoc.as_str(),
+                        &assoc_callee.impl_vid,
+                    )
+                        .mangled(),
+                ),
+            ),
         }
     }
 }
@@ -42,16 +110,17 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for BlockExpr {
         &'a self,
         env: &mut super::FnAstBuildEnv<'a>,
         allocator: &'a oxc_allocator::Allocator,
+        hir: &Hir,
     ) -> oxc_ast::ast::Expression<'a> {
         let oxc_stmts = self
             .stmts
             .iter()
-            .map(|stmt| stmt.as_oxc(env, allocator))
+            .map(|stmt| stmt.as_oxc(env, allocator, hir))
             .collect::<Vec<_>>();
 
         env.stmts.extend(oxc_stmts);
 
-        self.expr.as_oxc(env, allocator)
+        self.expr.as_oxc(env, allocator, hir)
     }
 }
 
@@ -60,6 +129,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::UnaryOperator> for UnOperator {
         &'a self,
         _env: &mut super::FnAstBuildEnv<'a>,
         _allocator: &'a oxc_allocator::Allocator,
+        _hir: &Hir,
     ) -> oxc_ast::ast::UnaryOperator {
         match self {
             Self::Neg => oxc_ast::ast::UnaryOperator::UnaryNegation,
@@ -72,6 +142,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::BinaryOperator> for BinOperator {
         &'a self,
         _env: &mut super::FnAstBuildEnv<'a>,
         _allocator: &'a oxc_allocator::Allocator,
+        _hir: &Hir,
     ) -> oxc_ast::ast::BinaryOperator {
         match self {
             Self::Add => oxc_ast::ast::BinaryOperator::Addition, // + TS: "+"
@@ -94,6 +165,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
         &'a self,
         env: &mut super::FnAstBuildEnv<'a>,
         allocator: &'a oxc_allocator::Allocator,
+        hir: &Hir,
     ) -> oxc_ast::ast::Expression<'a> {
         match &self.expr {
             ExprVal::Primary(p) => match p {
@@ -154,7 +226,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                                                 allocator,
                                                             ),
                                                         ),
-                                                    value: expr.as_oxc(env, allocator),
+                                                    value: expr.as_oxc(env, allocator, hir),
                                                     method: false,
                                                     shorthand: false,
                                                     computed: false,
@@ -189,7 +261,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                     oxc_ast::ast::IdentifierReference {
                                         span: span(),
                                         name: oxc_span::Ident::new_const(
-                                            allocator.alloc_str(&c.callee.as_oxc(env, allocator)),
+                                            allocator
+                                                .alloc_str(&c.callee.as_oxc(env, allocator, hir)),
                                         ),
                                         reference_id: Cell::new(None),
                                     },
@@ -199,7 +272,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                             type_arguments: None,
                             arguments: oxc_allocator::Vec::from_iter_in(
                                 c.args.iter().map(|a| {
-                                    oxc_ast::ast::Argument::from(a.as_oxc(env, allocator))
+                                    oxc_ast::ast::Argument::from(a.as_oxc(env, allocator, hir))
                                 }),
                                 allocator,
                             ),
@@ -216,9 +289,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         oxc_ast::ast::Expression::ConditionalExpression(oxc_allocator::Box::new_in(
                             oxc_ast::ast::ConditionalExpression {
                                 span: span(),
-                                test: if_expr.cond.as_oxc(env, allocator),
-                                consequent: if_expr.then.as_oxc(env, allocator),
-                                alternate: if_expr.els.as_oxc(env, allocator),
+                                test: if_expr.cond.as_oxc(env, allocator, hir),
+                                consequent: if_expr.then.as_oxc(env, allocator, hir),
+                                alternate: if_expr.els.as_oxc(env, allocator, hir),
                             },
                             allocator,
                         ))
@@ -244,7 +317,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                     oxc_ast::ast::Expression::StaticMemberExpression(oxc_allocator::Box::new_in(
                         oxc_ast::ast::StaticMemberExpression {
                             span: span(),
-                            object: m.left.as_oxc(env, allocator),
+                            object: m.left.as_oxc(env, allocator, hir),
                             property: oxc_ast::ast::IdentifierName {
                                 span: span(),
                                 name: oxc_span::Ident::new_const(allocator.alloc(&m.member.id)),
@@ -254,34 +327,23 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         allocator,
                     ))
                 }
-                Primary::Block(block) => block.as_oxc(env, allocator),
+                Primary::Block(block) => block.as_oxc(env, allocator, hir),
                 Primary::MethodCall(m) => {
-                    let self_ty = env.ty_info.unwrap_type_of_expression(&m.left.id);
+                    let self_ty = env.expr_tys.get(&m.left.id).unwrap();
 
-                    let quals = match self_ty {
-                        Ty::Var(_) => panic!("compiler bug: failed to infer type of expression"),
-                        Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
-                        Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
-                        Ty::Int => vec!["Int".to_string()],
-                        Ty::Float => vec!["Float".to_string()],
-                        Ty::Bool => vec!["Bool".to_string()],
-                        Ty::Struct(absid) => {
-                            let mut quals = absid.quals.clone();
-                            quals.push(absid.id.clone());
-
-                            quals
-                        }
-                    };
-
-                    let fid = AbsId::new(quals, m.method.id.clone());
+                    let impl_valid = hir
+                        .get_impl_value_id_of_type(self_ty, &m.method.id)
+                        .unwrap()
+                        .unwrap();
 
                     // selfは第一引数として与える
-                    let mut args =
-                        vec![oxc_ast::ast::Argument::from(m.left.as_oxc(env, allocator))];
+                    let mut args = vec![oxc_ast::ast::Argument::from(
+                        m.left.as_oxc(env, allocator, hir),
+                    )];
                     args.extend(
                         m.args
                             .iter()
-                            .map(|a| oxc_ast::ast::Argument::from(a.as_oxc(env, allocator))),
+                            .map(|a| oxc_ast::ast::Argument::from(a.as_oxc(env, allocator, hir))),
                     );
 
                     oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
@@ -291,9 +353,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 oxc_allocator::Box::new_in(
                                     oxc_ast::ast::IdentifierReference {
                                         span: span(),
-                                        name: oxc_span::Ident::new_const(
-                                            allocator.alloc_str(&fid.mangled()),
-                                        ),
+                                        name: oxc_span::Ident::new_const(allocator.alloc_str(
+                                            &(self_ty, m.method.id.as_str(), &impl_valid).mangled(),
+                                        )),
                                         reference_id: Cell::new(None),
                                     },
                                     allocator,
@@ -312,8 +374,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 oxc_ast::ast::Expression::UnaryExpression(oxc_allocator::Box::new_in(
                     oxc_ast::ast::UnaryExpression {
                         span: span(),
-                        operator: u.op.as_oxc(env, allocator),
-                        argument: u.right.as_oxc(env, allocator),
+                        operator: u.op.as_oxc(env, allocator, hir),
+                        argument: u.right.as_oxc(env, allocator, hir),
                     },
                     allocator,
                 ))
@@ -322,9 +384,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 oxc_ast::ast::Expression::BinaryExpression(oxc_allocator::Box::new_in(
                     oxc_ast::ast::BinaryExpression {
                         span: span(),
-                        operator: b.op.as_oxc(env, allocator),
-                        left: b.left.as_oxc(env, allocator),
-                        right: b.right.as_oxc(env, allocator),
+                        operator: b.op.as_oxc(env, allocator, hir),
+                        left: b.left.as_oxc(env, allocator, hir),
+                        right: b.right.as_oxc(env, allocator, hir),
                     },
                     allocator,
                 ))

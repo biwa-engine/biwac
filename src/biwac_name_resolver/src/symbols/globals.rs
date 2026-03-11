@@ -17,10 +17,12 @@ impl TryResolve<(&biwac_parser::FnDef, &biwac_hir::FnDefContentSignature)> for F
     ) -> RsvResult<Self> {
         // 関数のベースのスコープも初期化される
 
-        for (ident, ty) in &fn_signature.args {
-            // 引数も変数の宣言として記録
-            let _ = fctx.declare_variable(ident, ty.clone())?;
-        }
+        // 引数も変数の宣言として記録
+        let arg_var_ids = fn_signature
+            .args
+            .iter()
+            .map(|(ident, ty)| fctx.declare_variable(ident, ty.clone()))
+            .collect::<RsvResult<_>>()?;
 
         Ok(Self {
             stmts: fn_def
@@ -33,8 +35,8 @@ impl TryResolve<(&biwac_parser::FnDef, &biwac_hir::FnDefContentSignature)> for F
                 .as_ref()
                 .map(|expr| Expr::try_resolve(expr, fctx, hir))
                 .transpose()?,
-            // TODO:
-            // vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
+            arg_var_ids,
+            vars: fctx.vars(), // 関数内で収集した変数宣言を保存
         })
     }
 }
@@ -47,14 +49,18 @@ impl TryResolve<(&biwac_parser::MethodDef, &biwac_hir::FnDefContentSignature)>
         fctx: &mut FnLevelResolveCtx<'mctx>,
         hir: &Hir,
     ) -> RsvResult<Self> {
-        // 変数selfの初期化
+        // 変数self,
+        // selfは含まない残りの引数も変数の宣言として記録
         let self_ty = fctx.try_resolve_ty(&method_def.self_typ, hir)?;
-        let _ = fctx.declare_variable(&method_def.self_ident, self_ty)?;
-
-        for (ident, ty) in &fn_signature.args {
-            // 引数(selfは含まない)も変数の宣言として記録
-            let _ = fctx.declare_variable(ident, ty.clone())?;
-        }
+        let arg_var_ids = [
+            vec![fctx.declare_variable(&method_def.self_ident, self_ty)?],
+            fn_signature
+                .args
+                .iter()
+                .map(|(ident, ty)| fctx.declare_variable(ident, ty.clone()))
+                .collect::<RsvResult<_>>()?,
+        ]
+        .concat();
 
         Ok(Self {
             stmts: method_def
@@ -67,8 +73,8 @@ impl TryResolve<(&biwac_parser::MethodDef, &biwac_hir::FnDefContentSignature)>
                 .as_ref()
                 .map(|expr| Expr::try_resolve(expr, fctx, hir))
                 .transpose()?,
-            // TODO:
-            // vars: fctx.into_vars(), // 関数内で収集した変数宣言を保存
+            arg_var_ids,
+            vars: fctx.vars(), // 関数内で収集した変数宣言を保存
         })
     }
 }

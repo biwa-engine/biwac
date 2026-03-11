@@ -8,13 +8,15 @@ fn main() {
         let pkg = biwac_package_loader::Pkg::try_load(rootpath).unwrap();
         // println!("pkg: {pkg:#?}");
 
-        let pkg = biwac_name_resolver::PkgSymMap::try_resolve_symbol(pkg).unwrap();
+        let hir = biwac_name_resolver::ResolveCtx::new()
+            .try_resolve(pkg)
+            .unwrap();
         // println!("pkg: {pkg:#?}");
 
-        let pkg = biwac_type_inferrer::infer(pkg).unwrap();
+        let hir = biwac_type_inferrer::TyCtx::new(hir).infer().unwrap();
         // println!("pkg: {pkg:#?}");
 
-        let bin = biwac_generator::arch::typescript::generate(&pkg);
+        let bin = biwac_generator::arch::typescript::generate(&hir);
 
         biwac_driver::write_bin(rootpath, &bin).unwrap();
     } else {

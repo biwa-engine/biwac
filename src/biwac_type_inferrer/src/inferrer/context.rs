@@ -31,6 +31,7 @@ pub struct FnTyCtx<'tctx> {
 // ある関数に対して型推論をした結果得られる型情報
 pub(super) struct TyInfo {
     pub(super) expr_tys: HashMap<ExprId, Ty>,
+    pub(super) var_tys: HashMap<LocVarId, Ty>,
 }
 
 impl TyCtx {
