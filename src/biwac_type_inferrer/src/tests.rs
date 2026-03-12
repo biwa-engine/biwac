@@ -1,4 +1,4 @@
-use biwac_hir::{DefinedTy, Ty, TyId, ValDefContentKind, ValId};
+use biwac_hir::{DefinedTy, ImplValDefContentKind, Ty, TyId, ValDefContentKind, ValId};
 
 #[test]
 fn test1() {
@@ -43,13 +43,30 @@ fn test1() {
         panic!("not a function");
     };
 
-    let fn_math_pos_pos_new = if let ValDefContentKind::Fn(f) = hir
-        .vals
-        .get(&ValId::new(
-            vec!["math".to_string(), "pos".to_string()],
-            "pos_new".to_string(),
-        ))
+    let struct_math_pos_pos_tid = TyId::new(
+        vec!["math".to_string(), "pos".to_string()],
+        "Pos".to_string(),
+    );
+    let struct_math_pos_pos = Ty::Defined(DefinedTy {
+        tid: struct_math_pos_pos_tid.clone(),
+        genargs: vec![],
+    });
+    let fn_math_pos_pos_new_impl_valid = hir
+        .get_impl_value_id_of_type(&struct_math_pos_pos, &"new".to_string())
         .unwrap()
+        .unwrap();
+
+    let fn_math_pos_pos_new = if let ImplValDefContentKind::Fn(f) = &hir
+        .tys
+        .get(&struct_math_pos_pos_tid)
+        .unwrap()
+        .vals
+        .get("new")
+        .unwrap()
+        .vals
+        .get(&fn_math_pos_pos_new_impl_valid)
+        .unwrap()
+        .val_content
     {
         f
     } else {
