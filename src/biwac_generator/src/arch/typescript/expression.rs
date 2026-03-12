@@ -1,7 +1,8 @@
 use std::cell::Cell;
 
 use biwac_hir::{
-    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, Ty, VarIdKind,
+    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, Ty, TyId,
+    VarIdKind,
 };
 use biwac_parser::{BinOperator, UnOperator};
 use oxc_allocator::FromIn;
@@ -23,6 +24,30 @@ impl Mangled for LocVarId {
     }
 }
 
+impl Mangled for (&TyId, &str, &ImplValId) {
+    fn mangled(&self) -> String {
+        let mut result = String::from("_ZN");
+
+        for q in self.0.quals() {
+            result.push_str(&format!("{}{}", q.len(), q));
+        }
+
+        result.push_str(&format!("{}{}", self.0.id().len(), self.0.id()));
+
+        result.push_str(&format!("{}{}", self.1.len(), self.1));
+
+        result.push_str(&format!(
+            "{}G{}",
+            self.2.value().to_string().len() + 1,
+            self.2.value()
+        ));
+
+        result.push('E');
+
+        result
+    }
+}
+
 impl Mangled for (&Ty, &str, &ImplValId) {
     fn mangled(&self) -> String {
         match self.0 {
@@ -31,52 +56,8 @@ impl Mangled for (&Ty, &str, &ImplValId) {
             Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
             Ty::Gen(_) => panic!(""),    // ローカルに出現し得ない
             Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-            Ty::Int => format!(
-                "_ZN3Int{}{}{}{}E",
-                self.1.len(),
-                &self.1,
-                self.2.value().to_string().len(),
-                self.2.value()
-            ),
-            Ty::Float => format!(
-                "_ZN5Float{}{}{}{}E",
-                self.1.len(),
-                &self.1,
-                self.2.value().to_string().len(),
-                self.2.value()
-            ),
-            Ty::Bool => format!(
-                "_ZN4Bool{}{}{}{}E",
-                self.1.len(),
-                &self.1,
-                self.2.value().to_string().len(),
-                self.2.value()
-            ),
-            Ty::Defined(defined_ty) => {
-                let mut result = String::from("_ZN");
-
-                for q in defined_ty.tid.quals() {
-                    result.push_str(&format!("{}{}", q.len(), q));
-                }
-
-                result.push_str(&format!(
-                    "{}{}",
-                    defined_ty.tid.id().len(),
-                    defined_ty.tid.id()
-                ));
-
-                result.push_str(&format!("{}{}", self.1.len(), self.1));
-
-                result.push_str(&format!(
-                    "{}{}",
-                    self.2.value().to_string().len(),
-                    self.2.value()
-                ));
-
-                result.push('E');
-
-                result
-            }
+            Ty::Int | Ty::Float | Ty::Bool => (self.0, self.1).mangled(),
+            Ty::Defined(defined_ty) => (&defined_ty.tid, self.1, self.2).mangled(),
         }
     }
 }
@@ -331,10 +312,22 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 Primary::MethodCall(m) => {
                     let self_ty = env.expr_tys.get(&m.left.id).unwrap();
 
-                    let impl_valid = hir
-                        .get_impl_value_id_of_type(self_ty, &m.method.id)
-                        .unwrap()
-                        .unwrap();
+                    let callee_mangled_name = match self_ty {
+                        Ty::Defined(defined_ty) => {
+                            let impl_valid = hir
+                                .get_impl_value_id_of_type(self_ty, &m.method.id)
+                                .unwrap()
+                                .unwrap();
+
+                            (&defined_ty.tid, m.method.id.as_str(), &impl_valid).mangled()
+                        }
+                        Ty::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
+                        Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
+                        Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+                        Ty::Gen(_) => panic!(""), // ローカルに出現し得ない
+                        Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+                        Ty::Int | Ty::Float | Ty::Bool => (self_ty, m.method.id.as_str()).mangled(),
+                    };
 
                     // selfは第一引数として与える
                     let mut args = vec![oxc_ast::ast::Argument::from(
@@ -353,9 +346,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 oxc_allocator::Box::new_in(
                                     oxc_ast::ast::IdentifierReference {
                                         span: span(),
-                                        name: oxc_span::Ident::new_const(allocator.alloc_str(
-                                            &(self_ty, m.method.id.as_str(), &impl_valid).mangled(),
-                                        )),
+                                        name: oxc_span::Ident::new_const(
+                                            allocator.alloc_str(&callee_mangled_name),
+                                        ),
                                         reference_id: Cell::new(None),
                                     },
                                     allocator,

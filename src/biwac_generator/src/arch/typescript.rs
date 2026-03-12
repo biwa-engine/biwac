@@ -5,7 +5,10 @@ mod types;
 
 use std::{cell::Cell, collections::HashMap};
 
-use biwac_hir::{ExprId, Hir, LocVarId, Ty, TyDefContentKind, TyId, ValDefContentKind, ValId};
+use biwac_hir::{
+    ExprId, Hir, ImplValDefContentKind, LocVarId, Ty, TyDefContentKind, TyId, ValDefContentKind,
+    ValId,
+};
 
 pub fn generate(hir: &Hir) -> String {
     let allocator = oxc_allocator::Allocator::default();
@@ -14,27 +17,48 @@ pub fn generate(hir: &Hir) -> String {
         span: span(),
         source_type: oxc_ast::ast::SourceType::ts(), // TypeScript
         body: oxc_allocator::Vec::from_iter_in(
-            hir.vals
+            hir.tys
                 .iter()
-                .map(|(vid, val)| match val {
-                    ValDefContentKind::Fn(f) => f.as_oxc_global(vid, &allocator, hir),
-                    ValDefContentKind::Native(f) => f.as_oxc_global(vid, &allocator, hir),
-                })
-                .chain(hir.tys.iter().map(|(tid, ty_impl)| {
-                    match &ty_impl.ty_content.expect_completed() {
+                .map(
+                    |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
                         TyDefContentKind::Struct(struct_) => {
                             struct_.as_oxc_global(tid, &allocator, hir)
                         }
-                    }
+                    },
+                )
+                .chain(hir.tys.iter().flat_map(|(tid, ty_impl)| {
+                    ty_impl.vals.iter().flat_map(|(val_name, impl_list)| {
+                        impl_list
+                            .vals
+                            .iter()
+                            .map(|(impl_valid, impl_)| match &impl_.val_content {
+                                ImplValDefContentKind::Fn(f) => f.as_oxc_global(
+                                    &(&tid.clone(), val_name.as_str(), impl_valid),
+                                    &allocator,
+                                    hir,
+                                ),
+                                ImplValDefContentKind::Method(m) => m.as_oxc_global(
+                                    &(&tid.clone(), val_name.as_str(), impl_valid),
+                                    &allocator,
+                                    hir,
+                                ),
+                            })
+                    })
+                }))
+                .chain(hir.special_ty_impls.iter().flat_map(|(ty, ty_impl)| {
+                    ty_impl.vals.iter().map(|(val_name, val)| match val {
+                        ImplValDefContentKind::Fn(f) => {
+                            f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
+                        }
+                        ImplValDefContentKind::Method(m) => {
+                            m.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
+                        }
+                    })
+                }))
+                .chain(hir.vals.iter().map(|(vid, val)| match val {
+                    ValDefContentKind::Fn(f) => f.as_oxc_global(vid, &allocator, hir),
+                    ValDefContentKind::Native(f) => f.as_oxc_global(vid, &allocator, hir),
                 })),
-            // pkg.syms.iter().map(|(id, sym)| match sym {
-            //     Sym::FnDef(f) => f.as_oxc_global(id, &allocator),
-            //     Sym::NativeFnDef(f) => f.as_oxc_global(id, &allocator),
-            //     Sym::TypeDef(t) => match t {
-            //         TypeDefContent::Struct(s) => s.as_oxc_global(id, &allocator),
-            //     },
-            //     Sym::VarDecl(_) => todo!(),
-            // }),
             &allocator,
         ),
         directives: oxc_allocator::Vec::new_in(&allocator),
@@ -127,5 +151,23 @@ impl Mangled for ValId {
         }
 
         result
+    }
+}
+
+impl Mangled for (&Ty, &str) {
+    fn mangled(&self) -> String {
+        match self.0 {
+            Ty::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
+            Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
+            Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+            Ty::Gen(_) => panic!(""),    // ローカルに出現し得ない
+            Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+            Ty::Int => format!("_ZN3Int{}{}E", self.1.len(), &self.1,),
+            Ty::Float => format!("_ZN5Float{}{}E", self.1.len(), &self.1,),
+            Ty::Bool => format!("_ZN4Bool{}{}E", self.1.len(), &self.1,),
+            Ty::Defined(_) => {
+                panic!("compiler bug: must use (&TyId, &str, &ImplValId)")
+            }
+        }
     }
 }

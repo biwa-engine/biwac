@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 pub(crate) mod context;
 
 use biwac_hir::{
-    BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir, InferTy, Literal,
-    LocGenTyId, Primary, Stmt, Ty, TyDefContentKind, TyVar, ValDefContentKind, VarIdKind,
+    BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir,
+    ImplValDefContentKind, InferTy, Literal, LocGenTyId, LocVarId, Primary, Stmt, Ty,
+    TyDefContentKind, TyVar, ValDefContentKind, VarIdKind,
 };
 use biwac_parser::{BinOperator, Ident, UnOperator};
 
@@ -915,26 +916,219 @@ fn min_of_ty(t1: &Ty, t2: &Ty) -> TyResult<Ty> {
 
 impl TyCtx {
     pub fn infer(mut self) -> TyResult<Hir> {
+        // 普通の関数について
         // 型推論し、その結果を一時的に保持
         let mut fn_ty_infos = vec![];
         for (vid, val) in &self.hir.vals {
             match &val {
-                ValDefContentKind::Fn(f) => match &f.body {
-                    biwac_hir::Progressive::NotYet(_) => {
-                        panic!("compiler bug: name resolution not completed")
+                ValDefContentKind::Fn(f) => {
+                    let fn_body = f.body.expect_completed();
+                    let mut fctx = FnTyCtx::new(&self, f.signature.rty.clone());
+
+                    // 引数を決定済みの型として文脈に記録
+                    for var_id in &fn_body.arg_var_ids {
+                        fctx.vars
+                            .insert(*var_id, fn_body.vars.get(var_id).unwrap().ty.clone());
                     }
-                    biwac_hir::Progressive::Completed(fn_body) => {
+
+                    // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
+                    // 文のみの場合、最後の文のすべての分岐でreturn文があり、正しい型を返していることを検査する必要がある
+                    // 文は
+                    // - 基本的にVoidを返すものとし、
+                    // - return文はその式の型、
+                    // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                    // これにより、最後の文の型の一致を検査可能になる
+                    // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
+                    let mut stmt_last_ty = Ty::Void;
+                    for stmt in &fn_body.stmts {
+                        stmt_last_ty = fctx.infer_stmt(stmt)?;
+                    }
+
+                    // 最後の式があれば検査
+                    let rty = if let Some(expr) = &fn_body.expr {
+                        fctx.infer_expr(expr)?
+                    } else {
+                        stmt_last_ty
+                    };
+
+                    // 戻り値の型の一致を検査
+                    fctx.unify(rty, fctx.rty.clone())?;
+
+                    // 計算した型を記録
+                    fn_ty_infos.push((
+                        vid.clone(),
+                        TyInfo {
+                            expr_tys: fctx.exprs,
+                            var_tys: fctx.vars,
+                        },
+                    ));
+                }
+                ValDefContentKind::Native(_) => {
+                    // nothing to do
+                }
+            }
+        }
+
+        // 推論結果を hir に記録
+        for (vid, ty_info) in fn_ty_infos {
+            let val = self
+                .hir
+                .vals
+                .get_mut(&vid)
+                .expect("compiler bug: value not found");
+            match val {
+                ValDefContentKind::Fn(f) => {
+                    f.expr_tys = ty_info.expr_tys;
+                    f.var_tys = ty_info.var_tys;
+                }
+                ValDefContentKind::Native(_) => {
+                    // nothing to do
+                }
+            }
+        }
+
+        // ユーザ定義型に対する実装(関連関数、メソッド)について
+        // 型推論し、その結果を一時的に保持
+        let mut impl_fn_ty_infos = vec![];
+        for (tid, ty_impl) in &self.hir.tys {
+            for (val_name, impl_list) in &ty_impl.vals {
+                for (impl_valid, impl_) in &impl_list.vals {
+                    match &impl_.val_content {
+                        ImplValDefContentKind::Fn(f) => {
+                            let fn_body = f.body.expect_completed();
+                            let mut fctx = FnTyCtx::new(&self, f.signature.rty.clone());
+
+                            // 引数を決定済みの型として文脈に記録
+                            for var_id in &fn_body.arg_var_ids {
+                                fctx.vars
+                                    .insert(*var_id, fn_body.vars.get(var_id).unwrap().ty.clone());
+                            }
+
+                            // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
+                            // 文のみの場合、最後の文のすべての分岐でreturn文があり、正しい型を返していることを検査する必要がある
+                            // 文は
+                            // - 基本的にVoidを返すものとし、
+                            // - return文はその式の型、
+                            // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                            // これにより、最後の文の型の一致を検査可能になる
+                            // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
+                            let mut stmt_last_ty = Ty::Void;
+                            for stmt in &fn_body.stmts {
+                                stmt_last_ty = fctx.infer_stmt(stmt)?;
+                            }
+
+                            // 最後の式があれば検査
+                            let rty = if let Some(expr) = &fn_body.expr {
+                                fctx.infer_expr(expr)?
+                            } else {
+                                stmt_last_ty
+                            };
+
+                            // 戻り値の型の一致を検査
+                            fctx.unify(rty, fctx.rty.clone())?;
+
+                            // 計算した型を記録
+                            impl_fn_ty_infos.push((
+                                tid.clone(),
+                                val_name.clone(),
+                                *impl_valid,
+                                TyInfo {
+                                    expr_tys: fctx.exprs,
+                                    var_tys: fctx.vars,
+                                },
+                            ));
+                        }
+                        ImplValDefContentKind::Method(m) => {
+                            let fn_body = m.body.expect_completed();
+                            let mut fctx = FnTyCtx::new(&self, m.signature.rty.clone());
+
+                            // 引数(self含む)を決定済みの型として文脈に記録
+                            for var_id in &fn_body.arg_var_ids {
+                                fctx.vars
+                                    .insert(*var_id, fn_body.vars.get(var_id).unwrap().ty.clone());
+                            }
+
+                            // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
+                            // 文のみの場合、最後の文のすべての分岐でreturn文があり、正しい型を返していることを検査する必要がある
+                            // 文は
+                            // - 基本的にVoidを返すものとし、
+                            // - return文はその式の型、
+                            // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                            // これにより、最後の文の型の一致を検査可能になる
+                            // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
+                            let mut stmt_last_ty = Ty::Void;
+                            for stmt in &fn_body.stmts {
+                                stmt_last_ty = fctx.infer_stmt(stmt)?;
+                            }
+
+                            // 最後の式があれば検査
+                            let rty = if let Some(expr) = &fn_body.expr {
+                                fctx.infer_expr(expr)?
+                            } else {
+                                stmt_last_ty
+                            };
+
+                            // 戻り値の型の一致を検査
+                            fctx.unify(rty, fctx.rty.clone())?;
+
+                            // 計算した型を記録
+                            impl_fn_ty_infos.push((
+                                tid.clone(),
+                                val_name.clone(),
+                                *impl_valid,
+                                TyInfo {
+                                    expr_tys: fctx.exprs,
+                                    var_tys: fctx.vars,
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 推論結果を hir に記録
+        for (tid, val_name, impl_valid, ty_info) in impl_fn_ty_infos {
+            let ty_impl = self
+                .hir
+                .tys
+                .get_mut(&tid)
+                .expect("compiler bug: value not found");
+            match &mut ty_impl
+                .vals
+                .get_mut(&val_name)
+                .unwrap()
+                .vals
+                .get_mut(&impl_valid)
+                .unwrap()
+                .val_content
+            {
+                ImplValDefContentKind::Fn(f) => {
+                    f.expr_tys = ty_info.expr_tys;
+                    f.var_tys = ty_info.var_tys;
+                }
+                ImplValDefContentKind::Method(m) => {
+                    m.expr_tys = ty_info.expr_tys;
+                    m.var_tys = ty_info.var_tys;
+                }
+            }
+        }
+
+        // 特殊型(プリミティブ型など)に対する実装(関連関数、メソッド)について
+        // 型推論し、その結果を一時的に保持
+        let mut special_impl_fn_ty_infos = vec![];
+        for (ty, ty_impl) in &self.hir.special_ty_impls {
+            for (val_name, val) in &ty_impl.vals {
+                match &val {
+                    ImplValDefContentKind::Fn(f) => {
+                        let fn_body = f.body.expect_completed();
                         let mut fctx = FnTyCtx::new(&self, f.signature.rty.clone());
 
-                        // TODO: 引数を決定済みの型として文脈に記録
-                        // fn_body.vars から取得
-                        //
-                        // for arg in &f.signature.args {
-                        //     fctx.vars.insert(
-                        //         arg.id,
-                        //         f.vars.get(&arg.id).unwrap().typ.clone().unwrap().into(),
-                        //     );
-                        // }
+                        // 引数を決定済みの型として文脈に記録
+                        for var_id in &fn_body.arg_var_ids {
+                            fctx.vars
+                                .insert(*var_id, fn_body.vars.get(var_id).unwrap().ty.clone());
+                        }
 
                         // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
                         // 文のみの場合、最後の文のすべての分岐でreturn文があり、正しい型を返していることを検査する必要がある
@@ -960,39 +1154,82 @@ impl TyCtx {
                         fctx.unify(rty, fctx.rty.clone())?;
 
                         // 計算した型を記録
-                        fn_ty_infos.push((
-                            vid.clone(),
+                        special_impl_fn_ty_infos.push((
+                            ty.clone(),
+                            val_name.clone(),
                             TyInfo {
                                 expr_tys: fctx.exprs,
                                 var_tys: fctx.vars,
                             },
                         ));
                     }
-                },
-                ValDefContentKind::Native(_) => {
-                    // nothing to do
+                    ImplValDefContentKind::Method(m) => {
+                        let fn_body = m.body.expect_completed();
+                        let mut fctx = FnTyCtx::new(&self, m.signature.rty.clone());
+
+                        // 引数(self含む)を決定済みの型として文脈に記録
+                        for var_id in &fn_body.arg_var_ids {
+                            fctx.vars
+                                .insert(*var_id, fn_body.vars.get(var_id).unwrap().ty.clone());
+                        }
+
+                        // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
+                        // 文のみの場合、最後の文のすべての分岐でreturn文があり、正しい型を返していることを検査する必要がある
+                        // 文は
+                        // - 基本的にVoidを返すものとし、
+                        // - return文はその式の型、
+                        // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                        // これにより、最後の文の型の一致を検査可能になる
+                        // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
+                        let mut stmt_last_ty = Ty::Void;
+                        for stmt in &fn_body.stmts {
+                            stmt_last_ty = fctx.infer_stmt(stmt)?;
+                        }
+
+                        // 最後の式があれば検査
+                        let rty = if let Some(expr) = &fn_body.expr {
+                            fctx.infer_expr(expr)?
+                        } else {
+                            stmt_last_ty
+                        };
+
+                        // 戻り値の型の一致を検査
+                        fctx.unify(rty, fctx.rty.clone())?;
+
+                        // 計算した型を記録
+                        special_impl_fn_ty_infos.push((
+                            ty.clone(),
+                            val_name.clone(),
+                            TyInfo {
+                                expr_tys: fctx.exprs,
+                                var_tys: fctx.vars,
+                            },
+                        ));
+                    }
                 }
             }
         }
 
-        for (vid, ty_info) in fn_ty_infos {
-            let val = self
+        // 推論結果を hir に記録
+        for (ty, val_name, ty_info) in special_impl_fn_ty_infos {
+            let ty_impl = self
                 .hir
-                .vals
-                .get_mut(&vid)
+                .special_ty_impls
+                .get_mut(&ty)
                 .expect("compiler bug: value not found");
-            match val {
-                ValDefContentKind::Fn(f) => {
+            match &mut ty_impl.vals.get_mut(&val_name).unwrap() {
+                ImplValDefContentKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
                     f.var_tys = ty_info.var_tys;
                 }
-                ValDefContentKind::Native(_) => {
-                    // nothing to do
+                ImplValDefContentKind::Method(m) => {
+                    m.expr_tys = ty_info.expr_tys;
+                    m.var_tys = ty_info.var_tys;
                 }
             }
         }
 
-        todo!()
+        Ok(self.hir)
     }
 }
 

@@ -8,7 +8,7 @@ use biwac_parser::Ident;
 
 use crate::{
     AssocCallee, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind, LocGenTyId,
-    LocVarId, Ty, TyDefContentKind, TyId, ValDefContentKind, ValId,
+    Ty, TyDefContentKind, TyId, ValDefContentKind, ValId,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -60,20 +60,20 @@ pub struct Hir {
     // e.g.) struct, enum
     // ほとんど、型名前空間 type namespace 内の一意なシンボルの集合と言える
     pub tys: HashMap<TyId, DefinedTyImpl>,
+
+    // プリミティブ型やジェネリック型など
+    // 特殊な型に対する実装
+    // ```
+    //  impl Int {
+    //      fn foo(self) { ... }
+    //  }
     //
-    // // プリミティブ型やジェネリック型など
-    // // 特殊な型に対する実装
-    // // ```
-    // //  impl Int {
-    // //      fn foo(self) { ... }
-    // //  }
-    // //
-    // //  impl[T] T: Into[T] {
-    // //      [[inline]]
-    // //      fn into(self) { self }
-    // //  }
-    // // ```
-    // special_ty_impls: HashMap<Ty, SpecialTyImpl>,
+    //  impl[T] T: Into[T] {
+    //      [[inline]]
+    //      fn into(self) { self }
+    //  }
+    // ```
+    pub special_ty_impls: HashMap<Ty, SpecialTyImpl>,
 
     // パッケージ内に存在するモジュールの集合
     pub modules: HashSet<ModPath>,
@@ -359,7 +359,40 @@ impl Hir {
                     Ok(())
                 }
             }
-            _ => panic!("impl not supported for this type"),
+            Ty::Int | Ty::Float | Ty::Bool => {
+                if !impl_block_genargs.is_empty() {
+                    panic!("compiler bug: primitive type has no generic arguments")
+                }
+
+                if let Some(ty_impl) = self.special_ty_impls.get_mut(&ty) {
+                    match ty_impl.vals.entry(ident.id.clone()) {
+                        Entry::Vacant(e) => {
+                            e.insert(val_content);
+
+                            Ok(())
+                        }
+                        Entry::Occupied(e) => {
+                            Err(HirError::DuplicatedImplementationForSpecialType {
+                                ty: Box::new(ty),
+                                val_content1: Box::new(e.get().clone()),
+                                val_content2: Box::new(val_content),
+                            })
+                        }
+                    }
+                } else {
+                    self.special_ty_impls.insert(
+                        ty,
+                        SpecialTyImpl {
+                            vals: [(ident.id.clone(), val_content)].into(),
+                        },
+                    );
+
+                    Ok(())
+                }
+            }
+            Ty::LocGen(_) => todo!(),
+            Ty::Void | Ty::Fn(_) | Ty::Gen(_) => panic!("impl not supported for this type"),
+            Ty::Infer(_) => panic!("implementation target type must be absolute"),
         }
     }
 
@@ -382,6 +415,43 @@ impl Hir {
             .get_mut(impl_vid)
             .expect("compiler bug: implementation for type not found");
         match &mut impl_content.val_content {
+            ImplValDefContentKind::Fn(f) => match f.body {
+                Progressive::NotYet(_) => {
+                    f.body = Progressive::Completed(fn_body);
+                }
+                Progressive::Completed(_) => {
+                    panic!("compiler bug: already registered function body")
+                }
+            },
+            ImplValDefContentKind::Method(m) => match m.body {
+                Progressive::NotYet(_) => {
+                    m.body = Progressive::Completed(fn_body);
+                }
+                Progressive::Completed(_) => {
+                    panic!("compiler bug: already registered function body")
+                }
+            },
+        }
+
+        Ok(())
+    }
+
+    // プリミティブ型など特殊な型に対する
+    // 値(fn)の実装の実体(関数のボディ)を登録する
+    pub fn register_special_impl_value_definition(
+        &mut self,
+        ty: &Ty,
+        value_name: &str,
+        fn_body: FnDefContentBody,
+    ) -> HirResult<()> {
+        match self
+            .special_ty_impls
+            .get_mut(ty)
+            .expect("compiler bug: implementation not registered for this type")
+            .vals
+            .get_mut(value_name)
+            .expect("compiler bug: implementation not registered for this type")
+        {
             ImplValDefContentKind::Fn(f) => match f.body {
                 Progressive::NotYet(_) => {
                     f.body = Progressive::Completed(fn_body);
@@ -490,6 +560,28 @@ impl Hir {
                     Ok(None)
                 }
             }
+            Ty::Int | Ty::Float | Ty::Bool => {
+                if let Some(ty_impl) = self.special_ty_impls.get(ty)
+                    && let Some(val) = ty_impl.vals.get(&method.id)
+                {
+                    match val {
+                        ImplValDefContentKind::Fn(_) => {
+                            Err(HirError::ImplementedValueIsNotMethod {
+                                ty: Box::new(ty.clone()),
+                                method: Box::new(method.clone()),
+                                val_content: Box::new(val.clone()),
+                            })
+                        }
+                        ImplValDefContentKind::Method(m) => Ok(Some(FnTy {
+                            args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+                            rty: Box::new(m.signature.rty.clone()),
+                            genargs: m.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
+                        })),
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -533,22 +625,6 @@ impl Hir {
         match &self.tys.get(tid)?.ty_content {
             Progressive::NotYet(_) => panic!("compiler bug: type definition not registered yet"),
             Progressive::Completed(ty_content) => Some(ty_content),
-        }
-    }
-
-    // 関数内の変数の型を更新する
-    pub fn update_variable_ty(&mut self, fid: &ValId, var: &LocVarId, ty: Ty) {
-        if let Some(f) = self.vals.get_mut(fid) {
-            match f {
-                ValDefContentKind::Fn(f) => {
-                    if let Some(var) = f.vars.get_mut(var) {
-                        var.ty = ty;
-                    }
-                }
-                ValDefContentKind::Native(_) => {
-                    // nothing to do
-                }
-            }
         }
     }
 }

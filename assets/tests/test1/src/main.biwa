@@ -10,7 +10,7 @@ fn main() {
   let y = math::fact(x);
   let l = math::line::Line{
     begin = Pos::new(0, x),
-    end = new(11, y),
+    end = Pos::new(11, y),
   };
   let z = native_add(3, 2);
 }

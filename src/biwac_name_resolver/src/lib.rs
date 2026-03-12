@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use biwac_base::ModPath;
 use biwac_hir::{
-    Hir, HirError, ImplValDefContentKind, StructDefContent, TyDefContentKind, TyExistence, TyId,
-    ValDefContentKind, ValId,
+    Hir, HirError, ImplValDefContentKind, StructDefContent, Ty, TyDefContentKind, TyExistence,
+    TyId, ValDefContentKind, ValId,
 };
 use biwac_package_loader::Pkg;
 use biwac_parser::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
@@ -50,6 +50,10 @@ pub enum ResolveError {
     ValueNotFound {
         qualid: Box<QualifiedId>,
         vid: Box<ValId>,
+    },
+    ImplementedValueNotFound {
+        ty: Box<Ty>,
+        val: String,
     },
     IdentifierNotFound {
         qualid: QualifiedId,
@@ -359,7 +363,7 @@ impl ResolveCtx {
             self.hir.register_value_definition(&vid, fn_body)?;
         }
 
-        // 関連関数、メソッドに対し
+        // ユーザ定義型の関連関数、メソッドに対し
         // 解決を行う
         let mut impl_fn_bodies = vec![];
         for (tid, defined_ty_impl) in &self.hir.tys {
@@ -437,6 +441,76 @@ impl ResolveCtx {
         for (tid, val_name, impl_vid, fn_body) in impl_fn_bodies {
             self.hir
                 .register_impl_value_definition(&tid, &val_name, &impl_vid, fn_body)?;
+        }
+
+        // プリミティブ型などの関連関数、メソッドに対し
+        // 解決を行う
+        let mut special_impl_fn_bodies = vec![];
+        for (ty, special_ty_impl) in &self.hir.special_ty_impls {
+            for (val_name, val) in &special_ty_impl.vals {
+                match &val {
+                    ImplValDefContentKind::Fn(f) => {
+                        match &f.body {
+                            biwac_hir::Progressive::NotYet(fn_body) => {
+                                let mctx = mctxes
+                                    .get(f.fn_name_span.module())
+                                    .expect("compiler bug: module not found");
+                                // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
+                                let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
+                                let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
+
+                                let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+                                    (fn_body, &f.signature),
+                                    &mut fctx,
+                                    &self.hir,
+                                )?;
+
+                                special_impl_fn_bodies.push((
+                                    ty.clone(),
+                                    val_name.clone(),
+                                    fn_body,
+                                ));
+                            }
+                            biwac_hir::Progressive::Completed(_) => {
+                                // nothing to do
+                            }
+                        }
+                    }
+                    ImplValDefContentKind::Method(m) => {
+                        match &m.body {
+                            biwac_hir::Progressive::NotYet(fn_body) => {
+                                let mctx = mctxes
+                                    .get(m.fn_name_span.module())
+                                    .expect("compiler bug: module not found");
+                                // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
+                                let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
+                                let mut fctx = FnLevelResolveCtx::new(&ictx, &m.signature.genargs)?;
+
+                                let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+                                    (fn_body, &m.signature),
+                                    &mut fctx,
+                                    &self.hir,
+                                )?;
+
+                                special_impl_fn_bodies.push((
+                                    ty.clone(),
+                                    val_name.clone(),
+                                    fn_body,
+                                ));
+                            }
+                            biwac_hir::Progressive::Completed(_) => {
+                                // nothing to do
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 解決済みの関数のボディ情報を登録する
+        for (ty, val_name, fn_body) in special_impl_fn_bodies {
+            self.hir
+                .register_special_impl_value_definition(&ty, &val_name, fn_body)?;
         }
 
         Ok(self.hir)

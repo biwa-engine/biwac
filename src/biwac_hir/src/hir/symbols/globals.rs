@@ -80,10 +80,6 @@ pub struct FnDefContent {
     // needs type inferrence
     pub body: Progressive<FnDef, FnDefContentBody>,
 
-    // 関数内で宣言された変数のマップ
-    // 一意なid: LocVarIdを割り当てる
-    pub vars: HashMap<LocVarId, DecledVar>,
-
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<LocVarId, Ty>,
@@ -115,6 +111,9 @@ pub struct FnDefContentBody {
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
     pub arg_var_ids: Vec<LocVarId>,
+
+    // 関数内で宣言された変数のマップ
+    // 一意なid: LocVarIdを割り当てる
     pub vars: HashMap<LocVarId, DecledVar>,
 }
 
@@ -163,6 +162,7 @@ pub struct MethodDefContent {
 
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
+    pub var_tys: HashMap<LocVarId, Ty>,
 }
 
 // 各種の型の定義
@@ -258,7 +258,6 @@ impl FnDefContent {
             fn_name_span: fn_def.id.span.clone(),
             signature,
             body: Progressive::NotYet(fn_def),
-            vars: HashMap::new(),
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
         }
@@ -273,6 +272,7 @@ impl MethodDefContent {
             body: Progressive::NotYet(method_def),
             vars: HashMap::new(),
             expr_tys: HashMap::new(),
+            var_tys: HashMap::new(),
         }
     }
 }

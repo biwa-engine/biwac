@@ -73,12 +73,14 @@ impl ModuleLevelResolveCtx {
                         )
                     };
 
-                    if hir.vals.contains_key(&vid) {
-                        e.insert((import_decl.clone(), ImportedSym::Val(vid)));
-                    } else {
-                        // error
-                        todo!()
-                    }
+                    e.insert((import_decl.clone(), ImportedSym::Val(vid)));
+                    // if hir.vals.contains_key(&vid) {
+                    //     e.insert((import_decl.clone(), ImportedSym::Val(vid)));
+                    // } else {
+                    //     println!("vid: {vid:?}");
+                    //     // error
+                    //     todo!()
+                    // }
                 }
                 Entry::Occupied(e) => {
                     return Err(ResolveError::DuplicatedImportedName {
@@ -238,11 +240,29 @@ impl ModuleLevelResolveCtx {
 
                     Ok(ValId::new(quals, qualid.id.clone()))
                 }
-                ImportedSym::Ty(_) => {
+                ImportedSym::Ty(tid) => {
                     // `import hoge::fuga; fuga::piyo`
                     // hoge::fuga は型 の場合
                     if qualid.quals.len() == 1 {
                         // TODO: hoge::fuga の関連値piyoを解決
+                        let ty_existence = hir.get_type_existence(tid).unwrap();
+                        let ty = Ty::Defined(DefinedTy {
+                            tid: tid.clone(),
+                            genargs: vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len],
+                        });
+
+                        let impl_vid = hir.get_impl_value_id_of_type(&ty, &qualid.id)?.ok_or(
+                            ResolveError::ImplementedValueNotFound {
+                                ty: Box::new(ty.clone()),
+                                val: qualid.id.clone(),
+                            },
+                        )?;
+
+                        return Ok(ResolvedValue::Assoc(AssocCallee {
+                            ty,
+                            assoc: qualid.id.clone(),
+                            impl_vid,
+                        }));
                     }
                     // error
                     todo!()

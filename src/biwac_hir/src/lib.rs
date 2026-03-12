@@ -48,6 +48,11 @@ pub enum HirError {
         val_content1: Box<ImplValDefContentKind>,
         val_content2: Box<ImplValDefContentKind>,
     },
+    DuplicatedImplementationForSpecialType {
+        ty: Box<Ty>,
+        val_content1: Box<ImplValDefContentKind>,
+        val_content2: Box<ImplValDefContentKind>,
+    },
     ImplementedValueIsNotMethod {
         ty: Box<Ty>,
         method: Box<Ident>,                      // caller のspanを含む

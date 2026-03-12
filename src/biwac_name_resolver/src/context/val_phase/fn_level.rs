@@ -35,7 +35,7 @@ impl<'ictx> FnLevelResolveCtx<'ictx> {
                 .iter()
                 .map(|(ident, lgid)| (ident.id.clone(), *lgid))
                 .collect(),
-            scopes: vec![],
+            scopes: vec![HashMap::new()],
             next_var_id: 0,
             next_expr_id: 0,
         })
