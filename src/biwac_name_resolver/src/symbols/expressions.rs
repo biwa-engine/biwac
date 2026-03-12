@@ -143,7 +143,7 @@ impl TryResolve<&biwac_parser::Literal> for Literal {
                 tid: match fctx.try_resolve_defined_ty(
                     &biwac_parser::DefTyp {
                         qualid: s.qualid.clone(),
-                        genargs: vec![], // TODO:
+                        genargs: None, // ジェネリック引数列が明示されていない
                     },
                     hir,
                 )? {

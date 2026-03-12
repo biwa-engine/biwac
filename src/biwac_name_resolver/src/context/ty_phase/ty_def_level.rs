@@ -77,8 +77,7 @@ impl<'mctx> TyDefLevelTyResolveCtx<'mctx> {
                 //      z: Int,
                 //  }
                 //  ```
-                if deftyp.genargs.is_empty()
-                    && deftyp.genargs.is_empty()
+                if deftyp.genargs.is_none()
                     && let Some(id) = deftyp.qualid.only_id()
                     && let Some(gid) = self.ty_def_genargs.get(id)
                 {

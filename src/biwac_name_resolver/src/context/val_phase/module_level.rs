@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use biwac_base::ModPath;
-use biwac_hir::{AssocCallee, DefinedTy, Hir, InferTy, Ty, TyId, ValDefContentKind, ValId};
+use biwac_hir::{
+    AssocCallee, DefinedTy, Hir, InferTy, Ty, TyExistence, TyId, ValDefContentKind, ValId,
+};
 use biwac_parser::{DefTyp, ImportDecl, PrimTyp, QualifiedId, TypRepr, TypReprVal};
 
 use crate::{
@@ -112,7 +114,11 @@ impl ModuleLevelResolveCtx {
         }
     }
 
-    pub(crate) fn try_resolve_defined_tid(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<TyId> {
+    pub(crate) fn try_resolve_defined_tid(
+        &self,
+        deftyp: &DefTyp,
+        hir: &Hir,
+    ) -> RsvResult<(TyId, TyExistence)> {
         let tid = if deftyp.qualid.is_from_root {
             // `package::hoge::fuga` の場合、直ちにOk
             TyId::new(deftyp.qualid.quals.clone(), deftyp.qualid.id.clone())
@@ -171,8 +177,12 @@ impl ModuleLevelResolveCtx {
 
         if let Some(ty_existence) = hir.get_type_existence(&tid) {
             // ジェネリック引数の数が合うか検査
-            if deftyp.genargs.len() == ty_existence.genarg_len {
-                Ok(tid)
+            if let Some(genargs) = &deftyp.genargs
+                && genargs.len() == ty_existence.genarg_len
+            {
+                Ok((tid, ty_existence))
+            } else if deftyp.genargs.is_none() {
+                Ok((tid, ty_existence))
             } else {
                 Err(ResolveError::GenericArgLengthMismatched {
                     deftyp: Box::new(deftyp.clone()),
@@ -190,15 +200,18 @@ impl ModuleLevelResolveCtx {
 
     pub(crate) fn try_resolve_defined_ty(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<Ty> {
         // ジェネリック引数の数が合うか検査済み
-        let tid = self.try_resolve_defined_tid(deftyp, hir)?;
+        let (tid, ty_existence) = self.try_resolve_defined_tid(deftyp, hir)?;
 
         Ok(Ty::Defined(DefinedTy {
             tid,
-            genargs: deftyp
-                .genargs
-                .iter()
-                .map(|typ| self.try_resolve_ty(typ, hir))
-                .collect::<RsvResult<_>>()?,
+            genargs: if let Some(genargs) = &deftyp.genargs {
+                genargs
+                    .iter()
+                    .map(|typ| self.try_resolve_ty(typ, hir))
+                    .collect::<RsvResult<_>>()?
+            } else {
+                vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len]
+            },
         }))
     }
 

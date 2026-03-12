@@ -1,7 +1,7 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_base::Span;
-use biwac_hir::{DefinedTy, Hir, LocGenTyId, Ty};
+use biwac_hir::{DefinedTy, Hir, InferTy, LocGenTyId, Ty};
 use biwac_parser::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
 
 use crate::{ResolveError, RsvResult, context::ty_phase::module_level::ModuleLevelTyResolveCtx};
@@ -78,15 +78,18 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
             Ok(Ty::LocGen(*lgid))
         } else {
             // ジェネリック引数の数が合うか検査済み
-            let tid = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
+            let (tid, ty_existence) = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
 
             Ok(Ty::Defined(DefinedTy {
                 tid,
-                genargs: deftyp
-                    .genargs
-                    .iter()
-                    .map(|typ| self.try_resolve_ty(typ, hir))
-                    .collect::<RsvResult<_>>()?,
+                genargs: if let Some(genargs) = &deftyp.genargs {
+                    genargs
+                        .iter()
+                        .map(|typ| self.try_resolve_ty(typ, hir))
+                        .collect::<RsvResult<_>>()?
+                } else {
+                    vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len]
+                },
             }))
         }
     }

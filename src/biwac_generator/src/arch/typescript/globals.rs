@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use biwac_hir::{
-    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, StructDefContent, Ty, TyId, ValId,
+    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, StructDefContent, TyId, ValId,
 };
 
 use crate::arch::typescript::{AsOxc, AsOxcGlobal, FnAstBuildEnv, IntoOxc, Mangled, span};

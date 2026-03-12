@@ -4,6 +4,13 @@ struct Pair[T, U] {
 }
 
 impl[T, U] Pair[T, U] {
+  fn new(x: T, y: U) -> Self {
+    Self {
+      x = x,
+      y = y,
+    }
+  }
+  
   fn x(self) -> T {
     self.x
   }

@@ -1,5 +1,6 @@
 import math::pos::Pos;
 import math::pos::Pos::new;
+import collections::Pair;
 
 fn add(x: Int, y: Int) -> Int {
     return x + y;
@@ -13,6 +14,7 @@ fn main() {
     end = Pos::new(11, y),
   };
   let z = native_add(3, 2);
+  let pair = Pair::new(l, z);
 }
 
 [[native(arch="typescript")]]

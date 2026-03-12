@@ -254,29 +254,29 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn opt_consume_generic_args(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<Vec<TypRepr>, ParseError> {
-        let mut genargs = vec![];
+    ) -> Result<Option<Vec<TypRepr>>, ParseError> {
         if let Some(t) = self.peek()
             && matches!(t.kind, TkKind::LBracket)
         {
             self.next();
         } else {
-            return Ok(genargs);
+            return Ok(None);
         }
 
+        let mut genargs = vec![];
         loop {
             if let Some(t) = self.peek()
                 && let TkKind::RBracket = t.kind
             {
                 self.next();
 
-                return Ok(genargs);
+                return Ok(Some(genargs));
             } else {
                 genargs.push(self.consume_type_representaion(self_typ)?);
 
                 if let Some(t) = self.next() {
                     if let TkKind::RBracket = t.kind {
-                        return Ok(genargs);
+                        return Ok(Some(genargs));
                     } else if let TkKind::Comma = t.kind {
                         continue;
                     } else {

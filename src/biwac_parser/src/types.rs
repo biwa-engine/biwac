@@ -58,7 +58,7 @@ pub enum PrimTyp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefTyp {
     pub qualid: QualifiedId,
-    pub genargs: Vec<TypRepr>,
+    pub genargs: Option<Vec<TypRepr>>,
 }
 
 /// Generic argument like `T`
