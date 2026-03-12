@@ -83,6 +83,8 @@ pub struct FnDefContent {
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<LocVarId, Ty>,
+
+    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
 }
 
 // ```
@@ -92,8 +94,6 @@ pub struct FnDefContent {
 // ```
 #[derive(Debug, Clone)]
 pub struct FnDefContentSignature {
-    // TODO:
-    // pub args: Vec<DecledArg>,
     pub args: Vec<(Ident, Ty)>,
 
     // if the function does not return value ( = void function),
@@ -101,9 +101,6 @@ pub struct FnDefContentSignature {
     pub rty: Ty,
 
     pub genargs: Vec<(Ident, LocGenTyId)>,
-    // TODO:
-    // pub genargs: HashMap<LocGenTyId, Ident>,
-    // pub genargs: HashMap<String, (Ident, LocGenTyId)>,
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +124,8 @@ pub struct NativeFnDefContent {
     pub fn_name_span: Span,
     pub native_span: Span,
     pub span: Span,
+
+    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +162,8 @@ pub struct MethodDefContent {
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<LocVarId, Ty>,
+
+    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
 }
 
 // 各種の型の定義
@@ -253,19 +254,28 @@ impl LocGenTyId {
 }
 
 impl FnDefContent {
-    pub fn new(signature: FnDefContentSignature, fn_def: FnDef) -> Self {
+    pub fn new(
+        signature: FnDefContentSignature,
+        fn_def: FnDef,
+        impl_genargs: Vec<(Ident, LocGenTyId)>,
+    ) -> Self {
         Self {
             fn_name_span: fn_def.id.span.clone(),
             signature,
             body: Progressive::NotYet(fn_def),
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
+            impl_genargs,
         }
     }
 }
 
 impl MethodDefContent {
-    pub fn new(signature: FnDefContentSignature, method_def: MethodDef) -> Self {
+    pub fn new(
+        signature: FnDefContentSignature,
+        method_def: MethodDef,
+        impl_genargs: Vec<(Ident, LocGenTyId)>,
+    ) -> Self {
         Self {
             fn_name_span: method_def.id.span.clone(),
             signature,
@@ -273,18 +283,24 @@ impl MethodDefContent {
             vars: HashMap::new(),
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
+            impl_genargs,
         }
     }
 }
 
 impl NativeFnDefContent {
-    pub fn new(signature: FnDefContentSignature, fn_def: NativeFnDef) -> Self {
+    pub fn new(
+        signature: FnDefContentSignature,
+        fn_def: NativeFnDef,
+        impl_genargs: Vec<(Ident, LocGenTyId)>,
+    ) -> Self {
         Self {
             signature,
             native_body: fn_def.native,
             fn_name_span: fn_def.id.span,
             native_span: fn_def.native_span,
             span: fn_def.span,
+            impl_genargs,
         }
     }
 }

@@ -112,7 +112,7 @@ impl ModuleLevelResolveCtx {
         }
     }
 
-    pub(crate) fn try_resolve_defined_ty(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<Ty> {
+    pub(crate) fn try_resolve_defined_tid(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<TyId> {
         let tid = if deftyp.qualid.is_from_root {
             // `package::hoge::fuga` の場合、直ちにOk
             TyId::new(deftyp.qualid.quals.clone(), deftyp.qualid.id.clone())
@@ -172,14 +172,7 @@ impl ModuleLevelResolveCtx {
         if let Some(ty_existence) = hir.get_type_existence(&tid) {
             // ジェネリック引数の数が合うか検査
             if deftyp.genargs.len() == ty_existence.genarg_len {
-                Ok(Ty::Defined(DefinedTy {
-                    tid,
-                    genargs: deftyp
-                        .genargs
-                        .iter()
-                        .map(|typ| self.try_resolve_ty(typ, hir))
-                        .collect::<RsvResult<_>>()?,
-                }))
+                Ok(tid)
             } else {
                 Err(ResolveError::GenericArgLengthMismatched {
                     deftyp: Box::new(deftyp.clone()),
@@ -193,6 +186,20 @@ impl ModuleLevelResolveCtx {
                 tid: Box::new(tid),
             })
         }
+    }
+
+    pub(crate) fn try_resolve_defined_ty(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<Ty> {
+        // ジェネリック引数の数が合うか検査済み
+        let tid = self.try_resolve_defined_tid(deftyp, hir)?;
+
+        Ok(Ty::Defined(DefinedTy {
+            tid,
+            genargs: deftyp
+                .genargs
+                .iter()
+                .map(|typ| self.try_resolve_ty(typ, hir))
+                .collect::<RsvResult<_>>()?,
+        }))
     }
 
     // 値を解決する

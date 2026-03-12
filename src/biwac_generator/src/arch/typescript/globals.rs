@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use biwac_hir::{
-    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, StructDefContent, TyId, ValId,
+    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, StructDefContent, Ty, TyId, ValId,
 };
 
 use crate::arch::typescript::{AsOxc, AsOxcGlobal, FnAstBuildEnv, IntoOxc, Mangled, span};
@@ -21,7 +21,36 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, TyId> for StructDefContent
                     name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
                     symbol_id: Cell::new(None),
                 },
-                type_parameters: None,
+                type_parameters: if !self.genargs.is_empty() {
+                    Some(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::TSTypeParameterDeclaration {
+                            span: span(),
+                            params: oxc_allocator::Vec::from_iter_in(
+                                self.genargs
+                                    .iter()
+                                    .map(|gid| oxc_ast::ast::TSTypeParameter {
+                                        span: span(),
+                                        name: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&gid.mangled()),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        constraint: None,
+                                        default: None,
+                                        r#in: false,
+                                        out: false,
+                                        r#const: false,
+                                    }),
+                                allocator,
+                            ),
+                        },
+                        allocator,
+                    ))
+                } else {
+                    None
+                },
                 type_annotation: oxc_ast::ast::TSType::TSTypeLiteral(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeLiteral {
                         span: span(),
@@ -172,7 +201,55 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for FnDefCo
                     },
                     allocator,
                 )),
-                type_parameters: None,
+                type_parameters: if !self.signature.genargs.is_empty()
+                    || !self.impl_genargs.is_empty()
+                {
+                    Some(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::TSTypeParameterDeclaration {
+                            span: span(),
+                            params: oxc_allocator::Vec::from_iter_in(
+                                self.impl_genargs
+                                    .iter()
+                                    .map(|(_, lgid)| oxc_ast::ast::TSTypeParameter {
+                                        span: span(),
+                                        name: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&lgid.mangled()),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        constraint: None,
+                                        default: None,
+                                        r#in: false,
+                                        out: false,
+                                        r#const: false,
+                                    })
+                                    .chain(self.signature.genargs.iter().map(|(_, lgid)| {
+                                        oxc_ast::ast::TSTypeParameter {
+                                            span: span(),
+                                            name: oxc_ast::ast::BindingIdentifier {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator.alloc_str(&lgid.mangled()),
+                                                ),
+                                                symbol_id: Cell::new(None),
+                                            },
+                                            constraint: None,
+                                            default: None,
+                                            r#in: false,
+                                            out: false,
+                                            r#const: false,
+                                        }
+                                    })),
+                                allocator,
+                            ),
+                        },
+                        allocator,
+                    ))
+                } else {
+                    None
+                },
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
@@ -264,7 +341,55 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, ValId> for NativeFnDefCont
                     },
                     allocator,
                 )),
-                type_parameters: None,
+                type_parameters: if !self.signature.genargs.is_empty()
+                    || !self.impl_genargs.is_empty()
+                {
+                    Some(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::TSTypeParameterDeclaration {
+                            span: span(),
+                            params: oxc_allocator::Vec::from_iter_in(
+                                self.impl_genargs
+                                    .iter()
+                                    .map(|(_, lgid)| oxc_ast::ast::TSTypeParameter {
+                                        span: span(),
+                                        name: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&lgid.mangled()),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        constraint: None,
+                                        default: None,
+                                        r#in: false,
+                                        out: false,
+                                        r#const: false,
+                                    })
+                                    .chain(self.signature.genargs.iter().map(|(_, lgid)| {
+                                        oxc_ast::ast::TSTypeParameter {
+                                            span: span(),
+                                            name: oxc_ast::ast::BindingIdentifier {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator.alloc_str(&lgid.mangled()),
+                                                ),
+                                                symbol_id: Cell::new(None),
+                                            },
+                                            constraint: None,
+                                            default: None,
+                                            r#in: false,
+                                            out: false,
+                                            r#const: false,
+                                        }
+                                    })),
+                                allocator,
+                            ),
+                        },
+                        allocator,
+                    ))
+                } else {
+                    None
+                },
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
@@ -379,7 +504,55 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for MethodD
                     },
                     allocator,
                 )),
-                type_parameters: None,
+                type_parameters: if !self.signature.genargs.is_empty()
+                    || !self.impl_genargs.is_empty()
+                {
+                    Some(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::TSTypeParameterDeclaration {
+                            span: span(),
+                            params: oxc_allocator::Vec::from_iter_in(
+                                self.impl_genargs
+                                    .iter()
+                                    .map(|(_, lgid)| oxc_ast::ast::TSTypeParameter {
+                                        span: span(),
+                                        name: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&lgid.mangled()),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        constraint: None,
+                                        default: None,
+                                        r#in: false,
+                                        out: false,
+                                        r#const: false,
+                                    })
+                                    .chain(self.signature.genargs.iter().map(|(_, lgid)| {
+                                        oxc_ast::ast::TSTypeParameter {
+                                            span: span(),
+                                            name: oxc_ast::ast::BindingIdentifier {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator.alloc_str(&lgid.mangled()),
+                                                ),
+                                                symbol_id: Cell::new(None),
+                                            },
+                                            constraint: None,
+                                            default: None,
+                                            r#in: false,
+                                            out: false,
+                                            r#const: false,
+                                        }
+                                    })),
+                                allocator,
+                            ),
+                        },
+                        allocator,
+                    ))
+                } else {
+                    None
+                },
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),

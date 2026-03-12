@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biwac_base::Span;
-use biwac_hir::{Hir, LocGenTyId, Ty};
+use biwac_hir::{DefinedTy, Hir, LocGenTyId, Ty};
 use biwac_parser::{DefTyp, PrimTyp, QualifiedId, TypRepr, TypReprVal};
 
 use crate::{
@@ -52,7 +52,17 @@ impl<'mctx> ImplLevelResolveCtx<'mctx> {
         {
             Ok(Ty::LocGen(*gid))
         } else {
-            self.mctx.try_resolve_defined_ty(deftyp, hir)
+            // ジェネリック引数の数が合うか検査済み
+            let tid = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
+
+            Ok(Ty::Defined(DefinedTy {
+                tid,
+                genargs: deftyp
+                    .genargs
+                    .iter()
+                    .map(|typ| self.try_resolve_ty(typ, hir))
+                    .collect::<RsvResult<_>>()?,
+            }))
         }
     }
 

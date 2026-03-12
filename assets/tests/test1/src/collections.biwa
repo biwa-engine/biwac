@@ -1,0 +1,32 @@
+struct Pair[T, U] {
+  x: T,
+  y: U,
+}
+
+impl[T, U] Pair[T, U] {
+  fn x(self) -> T {
+    self.x
+  }
+
+  fn y(self) -> U {
+    self.y
+  }
+}
+
+impl Pair[Int, Int] {
+  fn add(self) -> Int {
+    self.x + self.y
+  }
+}
+
+impl Pair[Float, Float] {
+  fn add(self) -> Float {
+    self.x + self.y
+  }
+}
+
+impl[T] Pair[T, Int] {
+  fn y_int(self) -> Int {
+    self.y
+  }
+}

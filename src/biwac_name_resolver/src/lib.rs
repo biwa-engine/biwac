@@ -219,7 +219,11 @@ impl ResolveCtx {
                                     ictx.impl_block_genargs,
                                     &fn_def.id.clone(),
                                     ImplValDefContentKind::Fn(Box::new(
-                                        biwac_hir::FnDefContent::new(signature, fn_def),
+                                        biwac_hir::FnDefContent::new(
+                                            signature,
+                                            fn_def,
+                                            ictx.impl_block_genarg_vec,
+                                        ),
                                     )),
                                 )?;
                             } else {
@@ -237,7 +241,9 @@ impl ResolveCtx {
                                 self.hir.register_value_existence(
                                     vid,
                                     ValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
-                                        signature, fn_def,
+                                        signature,
+                                        fn_def,
+                                        ictx.impl_block_genarg_vec,
                                     ))),
                                 )?;
                             }
@@ -256,7 +262,11 @@ impl ResolveCtx {
                             self.hir.register_value_existence(
                                 vid,
                                 ValDefContentKind::Native(Box::new(
-                                    biwac_hir::NativeFnDefContent::new(signature, fn_def),
+                                    biwac_hir::NativeFnDefContent::new(
+                                        signature,
+                                        fn_def,
+                                        ictx.impl_block_genarg_vec,
+                                    ),
                                 )),
                             )?;
                         }
@@ -279,7 +289,11 @@ impl ResolveCtx {
                                 ictx.impl_block_genargs,
                                 &method_def.id.clone(),
                                 ImplValDefContentKind::Method(Box::new(
-                                    biwac_hir::MethodDefContent::new(signature, method_def),
+                                    biwac_hir::MethodDefContent::new(
+                                        signature,
+                                        method_def,
+                                        ictx.impl_block_genarg_vec,
+                                    ),
                                 )),
                             )?;
                         }

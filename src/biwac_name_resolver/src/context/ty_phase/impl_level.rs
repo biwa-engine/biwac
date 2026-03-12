@@ -1,7 +1,7 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_base::Span;
-use biwac_hir::{Hir, LocGenTyId, Ty};
+use biwac_hir::{DefinedTy, Hir, LocGenTyId, Ty};
 use biwac_parser::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
 
 use crate::{ResolveError, RsvResult, context::ty_phase::module_level::ModuleLevelTyResolveCtx};
@@ -14,6 +14,7 @@ use crate::{ResolveError, RsvResult, context::ty_phase::module_level::ModuleLeve
 pub(crate) struct ImplLevelTyResolveCtx<'mctx> {
     mctx: &'mctx ModuleLevelTyResolveCtx,
     pub(crate) impl_block_genargs: HashMap<String, (LocGenTyId, Span)>,
+    pub(crate) impl_block_genarg_vec: Vec<(Ident, LocGenTyId)>,
 }
 
 impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
@@ -21,6 +22,7 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
         Self {
             mctx,
             impl_block_genargs: HashMap::new(),
+            impl_block_genarg_vec: vec![],
         }
     }
 
@@ -30,6 +32,7 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
     ) -> RsvResult<Self> {
         let mut next_gen_id = 0;
         let mut impl_block_genarg_map = HashMap::<String, (LocGenTyId, Ident)>::new();
+        let mut impl_block_genarg_vec = vec![];
 
         for ident in impl_block_genargs {
             match impl_block_genarg_map.entry(ident.id.clone()) {
@@ -37,6 +40,7 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
                     let id = LocGenTyId::new(next_gen_id);
                     next_gen_id += 1;
                     e.insert((id, ident.clone()));
+                    impl_block_genarg_vec.push((ident.clone(), id));
                 }
                 Entry::Occupied(e) => {
                     return Err(ResolveError::DuplicatedGenericTypeDeclaration {
@@ -53,6 +57,7 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
                 .into_iter()
                 .map(|(name, (id, ident))| (name, (id, ident.span)))
                 .collect::<HashMap<_, _>>(),
+            impl_block_genarg_vec,
         })
     }
 
@@ -67,11 +72,22 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
         //       | (1)次に解決が試みられる
         //  }
         if let Some(id) = deftyp.qualid.only_id()
-            && let Some((gid, _)) = self.impl_block_genargs.get(id)
+            && let Some((lgid, _)) = self.impl_block_genargs.get(id)
         {
-            Ok(Ty::LocGen(*gid))
+            // TODO: T[U] のように、ジェネリック型にgenargsがあるのは不正
+            Ok(Ty::LocGen(*lgid))
         } else {
-            self.mctx.try_resolve_defined_ty(deftyp, hir)
+            // ジェネリック引数の数が合うか検査済み
+            let tid = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
+
+            Ok(Ty::Defined(DefinedTy {
+                tid,
+                genargs: deftyp
+                    .genargs
+                    .iter()
+                    .map(|typ| self.try_resolve_ty(typ, hir))
+                    .collect::<RsvResult<_>>()?,
+            }))
         }
     }
 
