@@ -1,11 +1,14 @@
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry},
+    os::linux::net::SocketAddrExt,
+};
 
 pub(crate) mod context;
 
 use biwac_hir::{
     BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir,
-    ImplValDefContentKind, InferTy, Literal, LocGenTyId, LocVarId, Primary, Stmt, Ty,
-    TyDefContentKind, TyVar, ValDefContentKind, VarIdKind,
+    ImplValDefContentKind, InferTy, Literal, LocGenTyId, Primary, Stmt, Ty, TyDefContentKind,
+    TyVar, ValDefContentKind, VarIdKind,
 };
 use biwac_parser::{BinOperator, Ident, UnOperator};
 
@@ -14,12 +17,12 @@ use crate::{
     inferrer::context::{FnTyCtx, TyInfo},
 };
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct CallCtx {
     gen_assigns: HashMap<LocGenTyId, Ty>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct DefinedTyCtx {
     gen_assigns: HashMap<GenTyId, Ty>,
 }
@@ -137,6 +140,37 @@ impl<'tctx> FnTyCtx<'tctx> {
         }
     }
 
+    // callee の型を具体化する
+    fn call_embody(&self, callee_ty: Ty, ctx: &mut CallCtx) -> Ty {
+        match callee_ty {
+            Ty::LocGen(lgid) => {
+                if let Some(ty) = ctx.gen_assigns.get(&lgid) {
+                    ty.clone()
+                } else {
+                    callee_ty
+                }
+            }
+            Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+                tid: defined_ty.tid,
+                genargs: defined_ty
+                    .genargs
+                    .into_iter()
+                    .map(|ty| self.call_embody(ty, ctx))
+                    .collect(),
+            }),
+            Ty::Fn(fty) => Ty::Fn(FnTy {
+                args: fty
+                    .args
+                    .into_iter()
+                    .map(|ty| self.call_embody(ty, ctx))
+                    .collect(),
+                rty: Box::new(self.call_embody(*fty.rty, ctx)),
+                genargs: fty.genargs,
+            }),
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Gen(_) | Ty::Infer(_) => callee_ty,
+        }
+    }
+
     fn call_unify(&mut self, callee_ty: Ty, caller_ty: Ty, ctx: &mut CallCtx) -> TyResult<Ty> {
         let callee_ty = self.apply(callee_ty);
         let caller_ty = self.apply(caller_ty);
@@ -144,6 +178,7 @@ impl<'tctx> FnTyCtx<'tctx> {
         match (callee_ty.clone(), caller_ty.clone()) {
             (Ty::Infer(i), t) | (t, Ty::Infer(i)) => {
                 let t = self.apply(t);
+                let t = self.call_embody(t, ctx);
                 let v = self.ty_var_of_infer_ty(i); // 型変数を取得(なければ新規割り当て)
                 if t == Ty::Infer(InferTy::Var(v)) {
                     Ok(t)
@@ -226,13 +261,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             },
             (Ty::Gen(_), _) | (_, Ty::Gen(_)) => {
-                // Ty::Gen(GenTyId) は型定義しにしか現れない
+                // Ty::Gen(GenTyId) は型定義にしか現れない
                 panic!("compiler bug: unresolved generic type found")
             }
             (x, y) => {
                 if x == y {
                     // WARN: really?
-                    Ok(x)
+                    Ok(self.call_embody(x, ctx))
                 } else {
                     Err(TyError::TypeConfliced(callee_ty, caller_ty))
                 }
@@ -613,8 +648,6 @@ impl<'tctx> FnTyCtx<'tctx> {
                         ValDefContentKind::Native(f) => FnTy::from(&f.signature),
                     };
 
-                    let callee_rty = callee_fty.rty.clone();
-
                     let args = c
                         .args
                         .iter()
@@ -625,7 +658,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
                     let mut cctx = CallCtx::default();
-                    self.call_unify(
+                    let unified_ty = self.call_unify(
                         Ty::Fn(callee_fty),
                         Ty::Fn(FnTy {
                             args,
@@ -635,7 +668,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                         &mut cctx,
                     )?;
 
-                    Ok(*callee_rty)
+                    let unified_fty = if let Ty::Fn(fty) = unified_ty {
+                        fty
+                    } else {
+                        panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
+                    };
+
+                    Ok(*unified_fty.rty)
                 }
                 Callee::Var(v) => {
                     // 変数は名前解決済みであるため、先に型推論されているはず
@@ -668,8 +707,6 @@ impl<'tctx> FnTyCtx<'tctx> {
                 Callee::Assoc(assoc_callee) => {
                     let callee_fty = self.tctx.hir.get_assoc_of_type(assoc_callee)?;
 
-                    let callee_rty = callee_fty.rty.clone();
-
                     let args = c
                         .args
                         .iter()
@@ -680,7 +717,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
                     let mut cctx = CallCtx::default();
-                    self.call_unify(
+                    let unified_ty = self.call_unify(
                         Ty::Fn(callee_fty),
                         Ty::Fn(FnTy {
                             args,
@@ -689,8 +726,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                         }),
                         &mut cctx,
                     )?;
+                    let unified_fty = if let Ty::Fn(fty) = unified_ty {
+                        fty
+                    } else {
+                        panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
+                    };
 
-                    Ok(*callee_rty)
+                    Ok(*unified_fty.rty)
                 }
             },
             Primary::MemberAccess(m) => {
