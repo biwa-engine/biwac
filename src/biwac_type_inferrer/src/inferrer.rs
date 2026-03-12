@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
-    os::linux::net::SocketAddrExt,
-};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 pub(crate) mod context;
 
