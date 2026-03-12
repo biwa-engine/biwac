@@ -7,8 +7,6 @@ edition.workspace = true
 biwac_base = { path = "../biwac_base"}
 biwac_parser = { path = "../biwac_parser"}
 biwac_package_loader = { path = "../biwac_package_loader"}
-biwac_name_resolver = { path = "../biwac_name_resolver"}
-biwac_type_inferrer = { path = "../biwac_type_inferrer"}
 biwac_hir = { path = "../biwac_hir"}
 oxc_codegen = { workspace = true, optional = true }
 oxc_ast = { workspace = true, optional = true }
