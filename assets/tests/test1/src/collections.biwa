@@ -1,3 +1,8 @@
+[[native(arch="typescript")]]
+type Vec[T] = {{
+  Array<T>
+}};
+
 struct Pair[T, U] {
   x: T,
   y: U,

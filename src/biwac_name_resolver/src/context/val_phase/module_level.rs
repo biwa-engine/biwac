@@ -333,6 +333,10 @@ impl ModuleLevelResolveCtx {
                         let genargs = vec![Ty::Infer(InferTy::Unknown); struct_.genargs.len()];
                         Ty::Defined(DefinedTy { tid, genargs })
                     }
+                    TyDefContentKind::NativeTypeAlias(native) => {
+                        let genargs = vec![Ty::Infer(InferTy::Unknown); native.genargs.len()];
+                        Ty::Defined(DefinedTy { tid, genargs })
+                    }
 
                     // alias は解決した型を返す
                     TyDefContentKind::TypeAlias(alias) => match &alias.right {

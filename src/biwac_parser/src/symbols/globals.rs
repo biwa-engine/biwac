@@ -27,6 +27,20 @@ pub struct TypeAlias {
     pub right: TypRepr,
 }
 
+//  native type alias
+//  ```
+//  type Foo[T] = {{
+//      native type implementation
+//  }};
+//  ```
+#[derive(Debug, Clone)]
+pub struct NativeTypeAlias {
+    pub ident: Ident,
+    pub genargs: Vec<Ident>,
+    pub native: String,
+    pub native_span: Span,
+}
+
 #[derive(Debug)]
 pub enum Globals {
     Import(ImportDecl),
@@ -105,6 +119,7 @@ pub enum TypeDef {
     Struct(StructDef),
     // Enum(EnumType),
     TypeAlias(TypeAlias),
+    NativeTypeAlias(NativeTypeAlias),
 }
 
 // FnParseCtx
@@ -315,24 +330,54 @@ impl<'t> TokenStream<'t> {
                     }
                 }
                 TkKind::Type => {
-                    // "type" <identifier> ( <generic-argument-declaration> )? "=" <type-representation> ";"
-                    self.next();
+                    if flags.iter().any(|f| &f.flag.id == "native") {
+                        // "type" <identifier> ( <generic-argument-declaration> )?
+                        //     "=" {{
+                        //         native type implementation
+                        //     }} ";"
 
-                    let ident = self.consume_identifier()?;
+                        self.next();
 
-                    let genargs = self.opt_consume_generic_argument_declaration()?;
+                        let ident = self.consume_identifier()?;
 
-                    let _ = self.must_consume_next(vec![TkKind::Assign])?;
+                        let genargs = self.opt_consume_generic_argument_declaration()?;
 
-                    let right = self.consume_type_representaion(&None)?;
+                        let _ = self.must_consume_next(vec![TkKind::Assign])?;
 
-                    let _ = self.must_consume_next(vec![TkKind::SemiColon])?;
+                        let t = self.must_consume_next(vec![TkKind::DslLiteral])?;
+                        let native = t.unwrap_string_value();
+                        let native_span = t.span.clone();
 
-                    Ok(vec![Globals::TypeDef(TypeDef::TypeAlias(TypeAlias {
-                        ident,
-                        genargs,
-                        right,
-                    }))])
+                        let _ = self.must_consume_next(vec![TkKind::SemiColon])?;
+
+                        Ok(vec![Globals::TypeDef(TypeDef::NativeTypeAlias(
+                            NativeTypeAlias {
+                                ident,
+                                genargs,
+                                native,
+                                native_span,
+                            },
+                        ))])
+                    } else {
+                        // "type" <identifier> ( <generic-argument-declaration> )? "=" <type-representation> ";"
+                        self.next();
+
+                        let ident = self.consume_identifier()?;
+
+                        let genargs = self.opt_consume_generic_argument_declaration()?;
+
+                        let _ = self.must_consume_next(vec![TkKind::Assign])?;
+
+                        let right = self.consume_type_representaion(&None)?;
+
+                        let _ = self.must_consume_next(vec![TkKind::SemiColon])?;
+
+                        Ok(vec![Globals::TypeDef(TypeDef::TypeAlias(TypeAlias {
+                            ident,
+                            genargs,
+                            right,
+                        }))])
+                    }
                 }
                 TkKind::Impl => {
                     // "impl" ( <generic-argument-declaration> )? <type-representation> "{" ... "}"

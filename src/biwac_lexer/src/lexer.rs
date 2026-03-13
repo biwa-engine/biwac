@@ -32,13 +32,10 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                 // ```biwa
                 // }}
                 // ```
-                // の行が来たら終了
+                // のように`}}`で始まる行が来たら終了
                 // それまではここでは何もしない
                 // パースは独自のパーサに委譲する
-                if l.len() == 2
-                    && '}' == l.chars().nth(0).unwrap()
-                    && '}' == l.chars().nth(1).unwrap()
-                {
+                if l.starts_with("}}") {
                     // end of DSL
                     inner_dsl = false;
                     regions.push(SrcRegion {

@@ -1,8 +1,11 @@
 use std::cell::Cell;
 
 use biwac_hir::{
-    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, StructDefContent, TyId, ValId,
+    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, NativeTypeAliasDefContent,
+    StructDefContent, TyId, ValId,
 };
+
+use oxc_allocator::CloneIn;
 
 use crate::arch::typescript::{AsOxc, AsOxcGlobal, FnAstBuildEnv, IntoOxc, Mangled, span};
 
@@ -560,6 +563,77 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for MethodD
                     },
                     allocator,
                 )),
+            },
+            allocator,
+        ))
+    }
+}
+
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, TyId>
+    for (&'a NativeTypeAliasDefContent, String)
+{
+    fn as_oxc_global(
+        &'a self,
+        id: &TyId,
+        allocator: &'a oxc_allocator::Allocator,
+        _hir: &Hir,
+    ) -> oxc_ast::ast::Statement<'a> {
+        // TODO: そもそもnativeのターゲットがTSかチェック
+
+        // let src = format!("type X = {};", &self.native);
+
+        // TSをパースして取り込む
+        let ts = oxc_parser::Parser::new(allocator, &self.1, oxc_span::SourceType::ts()).parse();
+
+        let type_annotation = match &ts.program.body[0] {
+            oxc_ast::ast::Statement::TSTypeAliasDeclaration(decl) => {
+                decl.type_annotation.clone_in(allocator)
+            }
+            _ => panic!("unexpected AST"),
+        };
+
+        oxc_ast::ast::Statement::TSTypeAliasDeclaration(oxc_allocator::Box::new_in(
+            oxc_ast::ast::TSTypeAliasDeclaration {
+                span: span(),
+                id: oxc_ast::ast::BindingIdentifier {
+                    span: span(),
+                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    symbol_id: Cell::new(None),
+                },
+                type_parameters: if !self.0.genargs.is_empty() {
+                    Some(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::TSTypeParameterDeclaration {
+                            span: span(),
+                            params: oxc_allocator::Vec::from_iter_in(
+                                self.0
+                                    .genargs
+                                    .iter()
+                                    .map(|ident| oxc_ast::ast::TSTypeParameter {
+                                        span: span(),
+                                        name: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&ident.id),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        constraint: None,
+                                        default: None,
+                                        r#in: false,
+                                        out: false,
+                                        r#const: false,
+                                    }),
+                                allocator,
+                            ),
+                        },
+                        allocator,
+                    ))
+                } else {
+                    None
+                },
+                type_annotation,
+                scope_id: Cell::new(None),
+                declare: false,
             },
             allocator,
         ))

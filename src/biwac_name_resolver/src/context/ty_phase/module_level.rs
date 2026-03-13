@@ -131,6 +131,19 @@ impl ModuleLevelTyResolveCtx {
                             });
                         }
                     },
+                    TypeDef::NativeTypeAlias(native) => {
+                        match types.entry(native.ident.id.clone()) {
+                            Entry::Vacant(e) => {
+                                e.insert(native.ident.clone());
+                            }
+                            Entry::Occupied(e) => {
+                                return Err(ResolveError::DuplicatedTypeName {
+                                    tid1: Box::new(native.ident.clone()),
+                                    tid2: Box::new(e.remove()),
+                                });
+                            }
+                        }
+                    }
                 },
                 Globals::FnDef(fn_def) => match vals.entry(fn_def.id.id.clone()) {
                     Entry::Vacant(e) => {

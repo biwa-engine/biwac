@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use biwac_base::{ModPath, Span};
 use biwac_hir::{
-    Hir, HirError, ImplValDefContentKind, StructDefContent, Ty, TyDefContentKind, TyExistence,
-    TyId, ValDefContentKind, ValId,
+    Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, StructDefContent, Ty,
+    TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
 };
 use biwac_package_loader::Pkg;
 use biwac_parser::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
@@ -200,6 +200,16 @@ impl ResolveCtx {
 
                             alias_defs.insert(tid, alias);
                         }
+                        TypeDef::NativeTypeAlias(native) => {
+                            let tid = TyId::from_modpath(modpath, native.ident.id.clone());
+                            self.hir.register_type_existence(
+                                tid.clone(),
+                                TyExistence {
+                                    ty_name_span: native.ident.span.clone(),
+                                    genarg_len: native.genargs.len(),
+                                },
+                            )?;
+                        }
                     }
                 }
             }
@@ -245,6 +255,21 @@ impl ResolveCtx {
                         }
                         TypeDef::TypeAlias(_) => {
                             // すでに解決済み
+                        }
+                        TypeDef::NativeTypeAlias(native) => {
+                            let tid = TyId::from_modpath(modpath, native.ident.id.clone());
+
+                            self.hir.register_type_content(
+                                &tid,
+                                TyDefContentKind::NativeTypeAlias(Box::new(
+                                    NativeTypeAliasDefContent {
+                                        alias_name_span: native.ident.span.clone(),
+                                        genargs: native.genargs.clone(),
+                                        native: native.native.clone(),
+                                        native_span: native.native_span.clone(),
+                                    },
+                                )),
+                            )?;
                         }
                     }
                 }

@@ -169,6 +169,7 @@ impl Hir {
                     Progressive::Completed(ty_content) => match ty_content {
                         TyDefContentKind::Struct(struct_) => struct_.struct_name_span.clone(),
                         TyDefContentKind::TypeAlias(alias) => alias.alias_name_span.clone(),
+                        TyDefContentKind::NativeTypeAlias(native) => native.alias_name_span.clone(),
                     },
                 }),
                 defined_position2: Box::new(ty_existence.ty_name_span),
@@ -772,6 +773,10 @@ impl Progressive<TyExistence, TyDefContentKind> {
                 TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
                     ty_name_span: alias.alias_name_span.clone(),
                     genarg_len: alias.genargs.len(),
+                }),
+                TyDefContentKind::NativeTypeAlias(native) => Some(TyExistence {
+                    ty_name_span: native.alias_name_span.clone(),
+                    genarg_len: native.genargs.len(),
                 }),
             },
         }

@@ -13,6 +13,23 @@ use biwac_hir::{
 pub fn generate(hir: &Hir) -> String {
     let allocator = oxc_allocator::Allocator::default();
 
+    // ライフタイムが長い必要がある
+    let native_tys = hir
+        .tys
+        .iter()
+        .flat_map(
+            |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
+                TyDefContentKind::Struct(_) => None,
+                TyDefContentKind::TypeAlias(_) => None,
+                TyDefContentKind::NativeTypeAlias(native) => Some((
+                    tid.clone(),
+                    // 型単体をパースできないため、文にする
+                    (&**native, format!("type X = {};", &native.native)),
+                )),
+            },
+        )
+        .collect::<HashMap<TyId, (&_, String)>>();
+
     let oxc_ast = oxc_ast::ast::Program {
         span: span(),
         source_type: oxc_ast::ast::SourceType::ts(), // TypeScript
@@ -25,6 +42,12 @@ pub fn generate(hir: &Hir) -> String {
                             Some(struct_.as_oxc_global(tid, &allocator, hir))
                         }
                         TyDefContentKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
+                        TyDefContentKind::NativeTypeAlias(_) => Some(
+                            native_tys
+                                .get(tid)
+                                .unwrap()
+                                .as_oxc_global(tid, &allocator, hir),
+                        ),
                     },
                 )
                 .chain(hir.tys.iter().flat_map(|(tid, ty_impl)| {

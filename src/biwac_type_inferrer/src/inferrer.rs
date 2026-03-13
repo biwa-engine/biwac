@@ -577,6 +577,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                     self.infer_struct_literal(&defined_ty.tid, struct_literal)
                 }
             },
+            TyDefContentKind::NativeTypeAlias(alias) => {
+                // native type alias を構造体のように初期化することは出来ない
+                Err(TyError::InvalidStructLiteralOnAliasType {
+                    ty: Ty::Defined(DefinedTy {
+                        tid: tid.clone(),
+                        genargs: vec![Ty::Infer(InferTy::Unknown); alias.genargs.len()],
+                    }),
+                    sliteral: Box::new(struct_literal.clone()),
+                })
+            }
         }
     }
 
@@ -793,6 +803,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                     TyDefContentKind::TypeAlias(alias) => {
                         // alias の右辺の型で再度試行
                         self.infer_member_access(alias.right.clone(), member_access)
+                    }
+                    TyDefContentKind::NativeTypeAlias(_) => {
+                        // native type alias にはメンバアクセスできない
+                        Err(TyError::ExprNotHasMember {
+                            ty: Ty::Defined(defined_ty),
+                            access: Box::new(member_access.clone()),
+                        })
                     }
                 }
             }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use biwac_base::{ModPath, Span};
 use biwac_parser::{FnDef, Ident, MethodDef, NativeFnDef};
 
-use crate::{DecledVar, DefinedTy, Expr, ExprId, FnTy, LocVarId, Progressive, Stmt, Ty};
+use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
 
 // 型名前空間のシンボルを
 // 識別するid
@@ -173,6 +173,7 @@ pub enum TyDefContentKind {
     Struct(Box<StructDefContent>),
     // Enum(EnumDefContent),
     TypeAlias(Box<TypeAliasDefContent>),
+    NativeTypeAlias(Box<NativeTypeAliasDefContent>),
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +189,14 @@ pub struct TypeAliasDefContent {
     pub genargs: Vec<GenTyId>,
     pub right: Ty,
     pub alias_name_span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeTypeAliasDefContent {
+    pub alias_name_span: Span,
+    pub genargs: Vec<Ident>,
+    pub native: String,
+    pub native_span: Span,
 }
 
 impl TyId {
