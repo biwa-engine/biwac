@@ -13,6 +13,20 @@ pub struct StructDef {
     pub genargs: Vec<Ident>,
 }
 
+//  type alias
+//  ```
+//  type Foo[T] = Bar[T, Int];
+//       ^^^
+//       |  ^^^ genargs
+//       ident
+//  ```
+#[derive(Debug, Clone)]
+pub struct TypeAlias {
+    pub ident: Ident,
+    pub genargs: Vec<Ident>,
+    pub right: TypRepr,
+}
+
 #[derive(Debug)]
 pub enum Globals {
     Import(ImportDecl),
@@ -90,7 +104,7 @@ pub struct ImplBlock {
 pub enum TypeDef {
     Struct(StructDef),
     // Enum(EnumType),
-    // Typedef(Box<Self>),
+    TypeAlias(TypeAlias),
 }
 
 // FnParseCtx

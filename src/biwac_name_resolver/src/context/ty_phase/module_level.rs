@@ -120,6 +120,17 @@ impl ModuleLevelTyResolveCtx {
                             });
                         }
                     },
+                    TypeDef::TypeAlias(alias) => match types.entry(alias.ident.id.clone()) {
+                        Entry::Vacant(e) => {
+                            e.insert(alias.ident.clone());
+                        }
+                        Entry::Occupied(e) => {
+                            return Err(ResolveError::DuplicatedTypeName {
+                                tid1: Box::new(alias.ident.clone()),
+                                tid2: Box::new(e.remove()),
+                            });
+                        }
+                    },
                 },
                 Globals::FnDef(fn_def) => match vals.entry(fn_def.id.id.clone()) {
                     Entry::Vacant(e) => {

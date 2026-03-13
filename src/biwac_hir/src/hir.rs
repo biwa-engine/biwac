@@ -168,6 +168,7 @@ impl Hir {
                     Progressive::NotYet(ty_existence) => ty_existence.ty_name_span.clone(),
                     Progressive::Completed(ty_content) => match ty_content {
                         TyDefContentKind::Struct(struct_) => struct_.struct_name_span.clone(),
+                        TyDefContentKind::TypeAlias(alias) => alias.alias_name_span.clone(),
                     },
                 }),
                 defined_position2: Box::new(ty_existence.ty_name_span),
@@ -203,6 +204,10 @@ impl Hir {
                 TyDefContentKind::Struct(struct_) => Some(TyExistence {
                     ty_name_span: struct_.struct_name_span.clone(),
                     genarg_len: struct_.genargs.len(),
+                }),
+                TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
+                    ty_name_span: alias.alias_name_span.clone(),
+                    genarg_len: alias.genargs.len(),
                 }),
             },
         }

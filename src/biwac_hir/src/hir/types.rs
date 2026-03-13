@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{FnDefContentSignature, GenTyId, LocGenTyId, TyId};
 
 // Ty はAST以降各種の検査を行う上での 型 を表す
@@ -196,6 +198,38 @@ impl Ty {
             (Self::Infer(_), _) => panic!("compiler bug: inferrence needed type cannot be impled"),
             (_, Self::Infer(_)) => panic!("compiler bug: inferrence needed type cannot be impled"),
             (_, _) => false,
+        }
+    }
+
+    // ジェネリック型の具体型への割り当て assigns を受け取り
+    // 具体化した型を返す
+    pub fn embody_by_gen_ty_id(self, assigns: &HashMap<GenTyId, Self>) -> Self {
+        match self {
+            Ty::Gen(gid) => {
+                if let Some(t) = assigns.get(&gid) {
+                    t.clone()
+                } else {
+                    self
+                }
+            }
+            Ty::Fn(fty) => Ty::Fn(FnTy {
+                args: fty
+                    .args
+                    .into_iter()
+                    .map(|aty| aty.embody_by_gen_ty_id(assigns))
+                    .collect(),
+                rty: Box::new(fty.rty.embody_by_gen_ty_id(assigns)),
+                genargs: fty.genargs,
+            }),
+            Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+                tid: defined_ty.tid,
+                genargs: defined_ty
+                    .genargs
+                    .into_iter()
+                    .map(|aty| aty.embody_by_gen_ty_id(assigns))
+                    .collect(),
+            }),
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Infer(_) | Ty::LocGen(_) => self,
         }
     }
 }
