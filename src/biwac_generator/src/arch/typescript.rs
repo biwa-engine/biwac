@@ -19,11 +19,12 @@ pub fn generate(hir: &Hir) -> String {
         body: oxc_allocator::Vec::from_iter_in(
             hir.tys
                 .iter()
-                .map(
+                .flat_map(
                     |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
                         TyDefContentKind::Struct(struct_) => {
-                            struct_.as_oxc_global(tid, &allocator, hir)
+                            Some(struct_.as_oxc_global(tid, &allocator, hir))
                         }
+                        TyDefContentKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
                     },
                 )
                 .chain(hir.tys.iter().flat_map(|(tid, ty_impl)| {

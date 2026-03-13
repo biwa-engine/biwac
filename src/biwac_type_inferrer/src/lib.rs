@@ -22,6 +22,10 @@ pub enum TyError {
         sliteral: Box<StructLiteral>,
         insufficient_members: Vec<String>,
     },
+    InvalidStructLiteralOnAliasType {
+        ty: Ty,
+        sliteral: Box<StructLiteral>,
+    },
     MethodConfliced {
         ty: Ty,
         method1: Box<Ident>,

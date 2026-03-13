@@ -4,8 +4,8 @@ pub(crate) mod context;
 
 use biwac_hir::{
     BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir,
-    ImplValDefContentKind, InferTy, Literal, LocGenTyId, Primary, Stmt, Ty, TyDefContentKind,
-    TyVar, ValDefContentKind, VarIdKind,
+    ImplValDefContentKind, InferTy, Literal, LocGenTyId, MemberAccess, Primary, Stmt,
+    StructLiteral, Ty, TyDefContentKind, TyId, TyVar, ValDefContentKind, VarIdKind,
 };
 use biwac_parser::{BinOperator, Ident, UnOperator};
 
@@ -487,6 +487,99 @@ impl<'tctx> FnTyCtx<'tctx> {
         res
     }
 
+    fn infer_struct_literal(&mut self, tid: &TyId, struct_literal: &StructLiteral) -> TyResult<Ty> {
+        match self.tctx.hir.get_type_definition(tid).unwrap() {
+            TyDefContentKind::Struct(struct_) => {
+                let mut members = HashMap::<&str, (&Ident, &Expr)>::new();
+                for (ident, expr) in &struct_literal.members {
+                    match members.entry(&ident.id) {
+                        Entry::Vacant(e) => {
+                            e.insert((ident, expr));
+                        }
+                        Entry::Occupied(e) => {
+                            return Err(TyError::StructLiteralMemberConfliced {
+                                member1: Box::new(e.get().0.clone()),
+                                member2: Box::new(ident.clone()),
+                            });
+                        }
+                    }
+                }
+
+                // 構造体に定義されているメンバ名の集合
+                let mut member_ids = struct_
+                    .members
+                    .keys()
+                    .map(|m| m.as_str())
+                    .collect::<HashSet<&str>>();
+
+                let mut dtctx = DefinedTyCtx::default();
+                for (id, (ident, expr)) in &members {
+                    if let Some((definition_ty, _)) = struct_.members.get(*id).cloned() {
+                        let user_ty = self.infer_expr(expr)?;
+                        self.defined_ty_unify(definition_ty, user_ty, &mut dtctx)?;
+                        // メンバを取り除いていく
+                        member_ids.remove(id);
+                    } else {
+                        return Err(TyError::StructLiteralAssignToInexsistentMember {
+                            tid: Box::new(tid.clone()),
+                            member: Box::new(ident.to_owned().clone()),
+                        });
+                    }
+                }
+
+                // 定義型のジェネリック引数宣言に登場するジェネリック型が
+                // そのメンバなどに必ず使用されることが保証されているなら、
+                // dtctx.gen_assigns にはこの時点で必ず GenTyId -> Ty の割り当てがある
+                // その割り当てを収集して返す
+                let genargs = struct_
+                    .genargs
+                    .iter()
+                    .map(|gid| dtctx.gen_assigns.get(gid).unwrap().clone())
+                    .collect();
+
+                if member_ids.is_empty() {
+                    Ok(Ty::Defined(DefinedTy {
+                        tid: tid.clone(),
+                        genargs,
+                    }))
+                } else {
+                    // メンバ名の集合に残されているものが、
+                    // 初期化されていないメンバ
+                    Err(TyError::StructLiteralMemberInsufficient {
+                        sliteral: Box::new(struct_literal.clone()),
+                        insufficient_members: member_ids
+                            .into_iter()
+                            .map(|m| m.to_string())
+                            .collect(),
+                    })
+                }
+            }
+            TyDefContentKind::TypeAlias(alias) => match &alias.right {
+                Ty::Int | Ty::Float | Ty::Bool | Ty::Fn(_) | Ty::Void => {
+                    Err(TyError::InvalidStructLiteralOnAliasType {
+                        ty: alias.right.clone(),
+                        sliteral: Box::new(struct_literal.clone()),
+                    })
+                }
+                Ty::Infer(_) => panic!("compiler bug: type alias on unknown type"),
+                Ty::Gen(_) => {
+                    // Ty::Gen(GenTyId) は型定義にしか現れないため、
+                    // メンバアクセスの左辺地に現れる場合はバグ
+                    panic!("compiler bug: generic type not resolved")
+                }
+                Ty::LocGen(_) => {
+                    // impl block や 関数 でローカルに宣言されたジェネリック型
+                    // これがグローバルな type alias で現れることはないのでバグ
+                    panic!("compiler bug: type alias on generic type")
+                }
+                Ty::Defined(defined_ty) => {
+                    // alias された TyId で再試行
+                    self.infer_struct_literal(&defined_ty.tid, struct_literal)
+                }
+            },
+        }
+    }
+
     fn infer_primary_expr(&mut self, primary: &Primary) -> TyResult<Ty> {
         match primary {
             Primary::Literal(l) => match l {
@@ -494,77 +587,8 @@ impl<'tctx> FnTyCtx<'tctx> {
                 // Literal::Float(_) => Ok(Ty::Float),
                 Literal::Bool(_) => Ok(Ty::Bool),
                 Literal::String(_) => todo!(),
-                Literal::Struct(s) => {
-                    // TODO: member type check
-
-                    match self.tctx.hir.get_type_definition(&s.tid).unwrap() {
-                        TyDefContentKind::Struct(struct_) => {
-                            let mut members = HashMap::<&str, (&Ident, &Expr)>::new();
-                            for (ident, expr) in &s.members {
-                                match members.entry(&ident.id) {
-                                    Entry::Vacant(e) => {
-                                        e.insert((ident, expr));
-                                    }
-                                    Entry::Occupied(e) => {
-                                        return Err(TyError::StructLiteralMemberConfliced {
-                                            member1: Box::new(e.get().0.clone()),
-                                            member2: Box::new(ident.clone()),
-                                        });
-                                    }
-                                }
-                            }
-
-                            // 構造体に定義されているメンバ名の集合
-                            let mut member_ids = struct_
-                                .members
-                                .keys()
-                                .map(|m| m.as_str())
-                                .collect::<HashSet<&str>>();
-
-                            let mut dtctx = DefinedTyCtx::default();
-                            for (id, (ident, expr)) in &members {
-                                if let Some((definition_ty, _)) = struct_.members.get(*id).cloned()
-                                {
-                                    let user_ty = self.infer_expr(expr)?;
-                                    self.defined_ty_unify(definition_ty, user_ty, &mut dtctx)?;
-                                    // メンバを取り除いていく
-                                    member_ids.remove(id);
-                                } else {
-                                    return Err(TyError::StructLiteralAssignToInexsistentMember {
-                                        tid: Box::new(s.tid.clone()),
-                                        member: Box::new(ident.to_owned().clone()),
-                                    });
-                                }
-                            }
-
-                            // 定義型のジェネリック引数宣言に登場するジェネリック型が
-                            // そのメンバなどに必ず使用されることが保証されているなら、
-                            // dtctx.gen_assigns にはこの時点で必ず GenTyId -> Ty の割り当てがある
-                            // その割り当てを収集して返す
-                            let genargs = struct_
-                                .genargs
-                                .iter()
-                                .map(|gid| dtctx.gen_assigns.get(gid).unwrap().clone())
-                                .collect();
-
-                            if member_ids.is_empty() {
-                                Ok(Ty::Defined(DefinedTy {
-                                    tid: s.tid.clone(),
-                                    genargs,
-                                }))
-                            } else {
-                                // メンバ名の集合に残されているものが、
-                                // 初期化されていないメンバ
-                                Err(TyError::StructLiteralMemberInsufficient {
-                                    sliteral: Box::new(s.clone()),
-                                    insufficient_members: member_ids
-                                        .into_iter()
-                                        .map(|m| m.to_string())
-                                        .collect(),
-                                })
-                            }
-                        }
-                    }
+                Literal::Struct(struct_literal) => {
+                    self.infer_struct_literal(&struct_literal.tid, struct_literal)
                 }
             },
             Primary::Variable(v) => {
@@ -674,60 +698,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             Primary::MemberAccess(m) => {
                 let left = self.infer_expr(&m.left)?;
 
-                match left.clone() {
-                    Ty::Int | Ty::Float | Ty::Bool | Ty::Fn(_) | Ty::Void => {
-                        Err(TyError::ExprNotHasMember {
-                            ty: left,
-                            access: Box::new(m.clone()),
-                        })
-                    }
-                    Ty::Infer(_) => Err(TyError::InsufficientContext),
-                    Ty::Defined(defined_ty) => {
-                        match self.tctx.hir.get_type_definition(&defined_ty.tid).unwrap() {
-                            TyDefContentKind::Struct(struct_) => {
-                                let ty = struct_
-                                    .members
-                                    .get(&m.member.id)
-                                    .ok_or(TyError::StructNotHasMember {
-                                        tid: defined_ty.tid.clone(),
-                                        access: Box::new(m.clone()),
-                                    })
-                                    .map(|(ty, _)| ty)
-                                    .cloned()?;
-
-                                // NOTE: ジェネリック型 Ty::Gen(GenTyId) の場合、
-                                // ジェネリック引数列の位置から GenTyId -> Ty を割り当て
-                                if let Ty::Gen(gid) = &ty {
-                                    let idx = struct_.genargs.iter().position(|g| g == gid).expect(
-                                        "compiler bug: undefined generic type found in struct member",
-                                    );
-
-                                    if defined_ty.genargs.len() == struct_.genargs.len() {
-                                        Ok(defined_ty.genargs.get(idx).unwrap().clone())
-                                    } else {
-                                        panic!("compiler bug: generic argument length mismatched")
-                                    }
-                                } else {
-                                    Ok(ty)
-                                }
-                            }
-                        }
-                    }
-                    Ty::Gen(_) => {
-                        // Ty::Gen(GenTyId) は型定義にしか現れないため、
-                        // メンバアクセスの左辺地に現れる場合はバグ
-                        panic!("compiler bug: generic type not resolved")
-                    }
-                    Ty::LocGen(_) => {
-                        // impl block や 関数 でローカルに宣言されたジェネリック型
-                        // これがメンバアクセス可能性を満たすことは判定できないため
-                        // コンパイルエラー
-                        Err(TyError::ExprNotHasMember {
-                            ty: left,
-                            access: Box::new(m.clone()),
-                        })
-                    }
-                }
+                self.infer_member_access(left, m)
             }
             Primary::IfExpr(if_expr) => {
                 let cond = self.infer_expr(&if_expr.cond)?;
@@ -773,6 +744,67 @@ impl<'tctx> FnTyCtx<'tctx> {
                         method: Box::new(m.method.clone()),
                     })
                 }
+            }
+        }
+    }
+
+    fn infer_member_access(&mut self, left_ty: Ty, member_access: &MemberAccess) -> TyResult<Ty> {
+        match left_ty {
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Fn(_) | Ty::Void => {
+                Err(TyError::ExprNotHasMember {
+                    ty: left_ty,
+                    access: Box::new(member_access.clone()),
+                })
+            }
+            Ty::Infer(_) => Err(TyError::InsufficientContext),
+            Ty::Defined(defined_ty) => {
+                match self.tctx.hir.get_type_definition(&defined_ty.tid).unwrap() {
+                    TyDefContentKind::Struct(struct_) => {
+                        let ty = struct_
+                            .members
+                            .get(&member_access.member.id)
+                            .ok_or(TyError::StructNotHasMember {
+                                tid: defined_ty.tid.clone(),
+                                access: Box::new(member_access.clone()),
+                            })
+                            .map(|(ty, _)| ty)
+                            .cloned()?;
+
+                        // NOTE: ジェネリック型 Ty::Gen(GenTyId) の場合、
+                        // ジェネリック引数列の位置から GenTyId -> Ty を割り当て
+                        if let Ty::Gen(gid) = &ty {
+                            let idx = struct_.genargs.iter().position(|g| g == gid).expect(
+                                "compiler bug: undefined generic type found in struct member",
+                            );
+
+                            if defined_ty.genargs.len() == struct_.genargs.len() {
+                                Ok(defined_ty.genargs.get(idx).unwrap().clone())
+                            } else {
+                                panic!("compiler bug: generic argument length mismatched")
+                            }
+                        } else {
+                            Ok(ty)
+                        }
+                    }
+                    TyDefContentKind::TypeAlias(alias) => {
+                        // alias の右辺の型で再度試行
+                        self.infer_member_access(alias.right.clone(), member_access)
+                    }
+                }
+            }
+            Ty::Gen(_) => {
+                // Ty::Gen(GenTyId) は型定義にしか現れないため、
+                // メンバアクセスの左辺地に現れる場合はバグ
+                panic!("compiler bug: generic type not resolved")
+            }
+            Ty::LocGen(_) => {
+                // impl block や 関数 でローカルに宣言されたジェネリック型
+                // これがメンバアクセス可能性を満たすことは判定できないため
+                // コンパイルエラー
+                Err(TyError::ExprNotHasMember {
+                    ty: left_ty,
+                    access: Box::new(member_access.clone()),
+                })
             }
         }
     }
