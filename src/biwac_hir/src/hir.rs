@@ -7,8 +7,8 @@ use biwac_base::{ModPath, Span};
 use biwac_parser::Ident;
 
 use crate::{
-    AssocCallee, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind, LocGenTyId,
-    Ty, TyDefContentKind, TyId, ValDefContentKind, ValId,
+    AssocCallee, DefinedTy, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind,
+    InferTy, LocGenTyId, Ty, TyDefContentKind, TyId, ValDefContentKind, ValId,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -198,19 +198,7 @@ impl Hir {
 
     // 型の存在を取得する
     pub fn get_type_existence(&self, tid: &TyId) -> Option<TyExistence> {
-        match &self.tys.get(tid)?.ty_content {
-            Progressive::NotYet(ty_existence) => Some(ty_existence.clone()),
-            Progressive::Completed(ty_content) => match ty_content {
-                TyDefContentKind::Struct(struct_) => Some(TyExistence {
-                    ty_name_span: struct_.struct_name_span.clone(),
-                    genarg_len: struct_.genargs.len(),
-                }),
-                TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
-                    ty_name_span: alias.alias_name_span.clone(),
-                    genarg_len: alias.genargs.len(),
-                }),
-            },
-        }
+        self.tys.get(tid)?.ty_content.as_type_existence()
     }
 
     // 値(fn, const)の存在およびシグニチャを登録する
@@ -305,63 +293,70 @@ impl Hir {
                     .get_mut(&defined_ty.tid)
                     .expect("compiler bug: type not found");
 
-                // すでに同名の関連値名(メンバ名、関連関数名、関連定数名)が登録されているとき、
-                // ジェネリック引数列の重複検査をして登録
-                if let Some(impl_list) = defined_ty_impl.vals.get_mut(&ident.id) {
-                    // 既存のすべての実装に対し、ジェネリック引数列の重複検査
-                    for impl_ in impl_list.vals.values() {
-                        // SAFETY:
-                        // 同じTyIdに対する登録なので、ジェネリック引数列の長さの同一は保証されている
-                        // そもそも型のジェネリック引数列が長さ0のとき、常に重複。
-                        // Iterator::all()
-                        // は空のイテレータに対してはtrueを返すため、これは達成される
-                        // https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.all
-                        // > An empty iterator returns true.
-                        if impl_
-                            .genargs
-                            .iter()
-                            .zip(defined_ty.genargs.iter())
-                            .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
-                        {
-                            // 引数列すべてが重複判定なら、重複
-                            return Err(HirError::DuplicatedImplementationForType {
-                                defined_ty: Box::new(defined_ty),
-                                ty_existence: Box::new(ty_existence),
-                                val_content1: Box::new(impl_.val_content.clone()),
-                                val_content2: Box::new(val_content),
-                            });
-                        }
-                    }
-
-                    // 重複がなかった場合
-                    impl_list.vals.insert(
-                        ImplValId::new(impl_list.vals.len()),
-                        TyValImplGenargsContentPair {
-                            genargs: defined_ty.genargs,
-                            val_content,
-                            impl_block_genargs,
-                        },
-                    );
-
-                    Ok(())
+                // type alias なら解決した先の型に登録
+                if let Some(ty) =
+                    resolve_ty_alias(&defined_ty, defined_ty_impl.ty_content.expect_completed())?
+                {
+                    self.register_impl_value_existence(ty, impl_block_genargs, ident, val_content)
                 } else {
-                    // その関連値名の登録が初めてであるとき、自明に重複検査を必要としない
-                    defined_ty_impl.vals.insert(
-                        ident.id.clone(),
-                        TyValImplList {
-                            vals: [(
-                                ImplValId::new(0),
-                                TyValImplGenargsContentPair {
-                                    genargs: defined_ty.genargs,
-                                    val_content,
-                                    impl_block_genargs,
-                                },
-                            )]
-                            .into(),
-                        },
-                    );
+                    // すでに同名の関連値名(メンバ名、関連関数名、関連定数名)が登録されているとき、
+                    // ジェネリック引数列の重複検査をして登録
+                    if let Some(impl_list) = defined_ty_impl.vals.get_mut(&ident.id) {
+                        // 既存のすべての実装に対し、ジェネリック引数列の重複検査
+                        for impl_ in impl_list.vals.values() {
+                            // SAFETY:
+                            // 同じTyIdに対する登録なので、ジェネリック引数列の長さの同一は保証されている
+                            // そもそも型のジェネリック引数列が長さ0のとき、常に重複。
+                            // Iterator::all()
+                            // は空のイテレータに対してはtrueを返すため、これは達成される
+                            // https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.all
+                            // > An empty iterator returns true.
+                            if impl_
+                                .genargs
+                                .iter()
+                                .zip(defined_ty.genargs.iter())
+                                .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                            {
+                                // 引数列すべてが重複判定なら、重複
+                                return Err(HirError::DuplicatedImplementationForType {
+                                    defined_ty: Box::new(defined_ty),
+                                    ty_existence: Box::new(ty_existence),
+                                    val_content1: Box::new(impl_.val_content.clone()),
+                                    val_content2: Box::new(val_content),
+                                });
+                            }
+                        }
 
-                    Ok(())
+                        // 重複がなかった場合
+                        impl_list.vals.insert(
+                            ImplValId::new(impl_list.vals.len()),
+                            TyValImplGenargsContentPair {
+                                genargs: defined_ty.genargs,
+                                val_content,
+                                impl_block_genargs,
+                            },
+                        );
+
+                        Ok(())
+                    } else {
+                        // その関連値名の登録が初めてであるとき、自明に重複検査を必要としない
+                        defined_ty_impl.vals.insert(
+                            ident.id.clone(),
+                            TyValImplList {
+                                vals: [(
+                                    ImplValId::new(0),
+                                    TyValImplGenargsContentPair {
+                                        genargs: defined_ty.genargs,
+                                        val_content,
+                                        impl_block_genargs,
+                                    },
+                                )]
+                                .into(),
+                            },
+                        );
+
+                        Ok(())
+                    }
                 }
             }
             Ty::Int | Ty::Float | Ty::Bool => {
@@ -411,31 +406,61 @@ impl Hir {
         fn_body: FnDefContentBody,
     ) -> HirResult<()> {
         let defined_ty_impl = self.tys.get_mut(tid).expect("compiler bug: type not found");
-        let impl_list = defined_ty_impl
-            .vals
-            .get_mut(value_name)
-            .expect("compiler bug: implementation for type not found");
-        let impl_content = impl_list
-            .vals
-            .get_mut(impl_vid)
-            .expect("compiler bug: implementation for type not found");
-        match &mut impl_content.val_content {
-            ImplValDefContentKind::Fn(f) => match f.body {
-                Progressive::NotYet(_) => {
-                    f.body = Progressive::Completed(fn_body);
-                }
-                Progressive::Completed(_) => {
-                    panic!("compiler bug: already registered function body")
-                }
+        // alias なら解決先の型について探索する
+        if let Some(ty) = resolve_ty_alias(
+            &DefinedTy {
+                tid: tid.clone(),
+                genargs: vec![
+                    Ty::Infer(InferTy::Unknown);
+                    defined_ty_impl
+                        .ty_content
+                        .as_type_existence()
+                        .unwrap()
+                        .genarg_len
+                ],
             },
-            ImplValDefContentKind::Method(m) => match m.body {
-                Progressive::NotYet(_) => {
-                    m.body = Progressive::Completed(fn_body);
+            defined_ty_impl.ty_content.expect_completed(),
+        )? {
+            match ty {
+                Ty::Defined(aliased_defined_ty) => {
+                    self.register_impl_value_definition(
+                        &aliased_defined_ty.tid,
+                        value_name,
+                        impl_vid,
+                        fn_body,
+                    )?;
                 }
-                Progressive::Completed(_) => {
-                    panic!("compiler bug: already registered function body")
+                _ => {
+                    self.register_special_impl_value_definition(&ty, value_name, fn_body)?;
                 }
-            },
+            }
+        } else {
+            let impl_list = defined_ty_impl
+                .vals
+                .get_mut(value_name)
+                .expect("compiler bug: implementation for type not found");
+            let impl_content = impl_list
+                .vals
+                .get_mut(impl_vid)
+                .expect("compiler bug: implementation for type not found");
+            match &mut impl_content.val_content {
+                ImplValDefContentKind::Fn(f) => match f.body {
+                    Progressive::NotYet(_) => {
+                        f.body = Progressive::Completed(fn_body);
+                    }
+                    Progressive::Completed(_) => {
+                        panic!("compiler bug: already registered function body")
+                    }
+                },
+                ImplValDefContentKind::Method(m) => match m.body {
+                    Progressive::NotYet(_) => {
+                        m.body = Progressive::Completed(fn_body);
+                    }
+                    Progressive::Completed(_) => {
+                        panic!("compiler bug: already registered function body")
+                    }
+                },
+            }
         }
 
         Ok(())
@@ -492,27 +517,34 @@ impl Hir {
                     .get(&defined_ty.tid)
                     .expect("compiler bug: type not found");
 
-                // ジェネリック引数列が重複する(一致する)ものを探す
-                defined_ty_impl
-                    .vals
-                    .get(value_name)
-                    .and_then(|impl_list| {
-                        impl_list
-                            .vals
-                            .iter()
-                            .find(|(_, impl_)| {
-                                impl_
-                                    .genargs
-                                    .iter()
-                                    .zip(defined_ty.genargs.iter())
-                                    .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
-                            })
-                            .map(|(impl_vid, impl_)| match &impl_.val_content {
-                                ImplValDefContentKind::Fn(_) => Ok(*impl_vid),
-                                ImplValDefContentKind::Method(_) => Ok(*impl_vid),
-                            })
-                    })
-                    .transpose()
+                // alias なら解決先の型について探索する
+                if let Some(ty) =
+                    resolve_ty_alias(defined_ty, defined_ty_impl.ty_content.expect_completed())?
+                {
+                    self.get_impl_value_id_of_type(&ty, value_name)
+                } else {
+                    // ジェネリック引数列が重複する(一致する)ものを探す
+                    defined_ty_impl
+                        .vals
+                        .get(value_name)
+                        .and_then(|impl_list| {
+                            impl_list
+                                .vals
+                                .iter()
+                                .find(|(_, impl_)| {
+                                    impl_
+                                        .genargs
+                                        .iter()
+                                        .zip(defined_ty.genargs.iter())
+                                        .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                                })
+                                .map(|(impl_vid, impl_)| match &impl_.val_content {
+                                    ImplValDefContentKind::Fn(_) => Ok(*impl_vid),
+                                    ImplValDefContentKind::Method(_) => Ok(*impl_vid),
+                                })
+                        })
+                        .transpose()
+                }
             }
             _ => Ok(None),
         }
@@ -549,16 +581,34 @@ impl Hir {
                                     val_content: Box::new(impl_.val_content.clone()),
                                 })
                             }
-                            ImplValDefContentKind::Method(m) => Ok(FnTy {
-                                args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
-                                rty: Box::new(m.signature.rty.clone()),
-                                genargs: m
-                                    .signature
-                                    .genargs
-                                    .iter()
-                                    .map(|(_, lgid)| *lgid)
-                                    .collect(),
-                            }),
+                            ImplValDefContentKind::Method(m) => {
+                                // LocGenTyId -> Ty の割り当てがあれば具体化する
+                                let mut assigns = HashMap::new();
+                                for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
+                                {
+                                    if let Ty::LocGen(lgid) = t1 {
+                                        assigns.insert(*lgid, t2.clone());
+                                    }
+                                }
+
+                                Ok(FnTy {
+                                    args: m
+                                        .signature
+                                        .args
+                                        .iter()
+                                        .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
+                                        .collect(),
+                                    rty: Box::new(
+                                        m.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
+                                    ),
+                                    genargs: m
+                                        .signature
+                                        .genargs
+                                        .iter()
+                                        .map(|(_, lgid)| *lgid)
+                                        .collect(),
+                                })
+                            }
                         })
                         .transpose()
                 } else {
@@ -600,25 +650,61 @@ impl Hir {
                     .get(&defined_ty.tid)
                     .expect("compiler bug: type not found");
 
-                let impl_list = defined_ty_impl
-                    .vals
-                    .get(&assoc_callee.assoc)
-                    .expect("compiler bug: implemented value not found for this name");
-                let impl_ = impl_list
-                    .vals
-                    .get(&assoc_callee.impl_vid)
-                    .expect("compiler bug: implemented value not found");
+                // alias なら解決先の型について探索する
+                if let Some(ty) =
+                    resolve_ty_alias(defined_ty, defined_ty_impl.ty_content.expect_completed())?
+                {
+                    let assoc_callee = AssocCallee {
+                        ty,
+                        assoc: assoc_callee.assoc.clone(),
+                        impl_vid: assoc_callee.impl_vid,
+                    };
 
-                match &impl_.val_content {
-                    ImplValDefContentKind::Fn(f) => Ok(FnTy::from(&f.signature)),
-                    // WARN: really?
-                    //
-                    // Ok(FnTy {
-                    //     args: f.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
-                    //     rty: Box::new(f.signature.rty.clone()),
-                    //     genargs: f.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
-                    // }),
-                    ImplValDefContentKind::Method(_) => Err(todo!()),
+                    self.get_assoc_of_type(&assoc_callee)
+                } else {
+                    let impl_list = defined_ty_impl
+                        .vals
+                        .get(&assoc_callee.assoc)
+                        .expect("compiler bug: implemented value not found for this name");
+                    let impl_ = impl_list
+                        .vals
+                        .get(&assoc_callee.impl_vid)
+                        .expect("compiler bug: implemented value not found");
+
+                    match &impl_.val_content {
+                        ImplValDefContentKind::Fn(f) => {
+                            Ok(FnTy::from(&f.signature))
+
+                            // WARN: really?
+                            //
+                            // // LocGenTyId -> Ty の割り当てがあれば具体化する
+                            // let mut assigns = HashMap::new();
+                            // for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter()) {
+                            //     if let Ty::LocGen(lgid) = t1 {
+                            //         assigns.insert(*lgid, t2.clone());
+                            //     }
+                            // }
+                            //
+                            // Ok(FnTy {
+                            //     args: f
+                            //         .signature
+                            //         .args
+                            //         .iter()
+                            //         .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
+                            //         .collect(),
+                            //     rty: Box::new(
+                            //         f.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
+                            //     ),
+                            //     genargs: f
+                            //         .signature
+                            //         .genargs
+                            //         .iter()
+                            //         .map(|(_, lgid)| *lgid)
+                            //         .collect(),
+                            // })
+                        }
+                        ImplValDefContentKind::Method(_) => Err(todo!()),
+                    }
                 }
             }
             _ => Ok(todo!()), // TODO:
@@ -641,6 +727,53 @@ impl<Y, C> Progressive<Y, C> {
                 panic!("compiler bug: progressive registration not yet")
             }
             Self::Completed(c) => c,
+        }
+    }
+}
+
+// alias なら解決先の型を返す
+fn resolve_ty_alias(
+    defined_ty: &DefinedTy,
+    ty_content: &TyDefContentKind,
+) -> HirResult<Option<Ty>> {
+    if let TyDefContentKind::TypeAlias(alias) = ty_content {
+        if alias.genargs.len() == defined_ty.genargs.len() {
+            let assigns = alias
+                .genargs
+                .iter()
+                .cloned()
+                .zip(defined_ty.genargs.iter().cloned())
+                .collect::<HashMap<_, _>>();
+
+            Ok(Some(alias.right.clone().embody_by_gen_ty_id(&assigns)))
+        } else {
+            Err(HirError::GenericArgLengthMismatched {
+                defined_ty: Box::new(defined_ty.clone()),
+                ty_existence: Box::new(TyExistence {
+                    ty_name_span: alias.alias_name_span.clone(),
+                    genarg_len: alias.genargs.len(),
+                }),
+            })
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+impl Progressive<TyExistence, TyDefContentKind> {
+    fn as_type_existence(&self) -> Option<TyExistence> {
+        match &self {
+            Progressive::NotYet(ty_existence) => Some(ty_existence.clone()),
+            Progressive::Completed(ty_content) => match ty_content {
+                TyDefContentKind::Struct(struct_) => Some(TyExistence {
+                    ty_name_span: struct_.struct_name_span.clone(),
+                    genarg_len: struct_.genargs.len(),
+                }),
+                TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
+                    ty_name_span: alias.alias_name_span.clone(),
+                    genarg_len: alias.genargs.len(),
+                }),
+            },
         }
     }
 }

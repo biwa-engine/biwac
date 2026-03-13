@@ -314,6 +314,26 @@ impl<'t> TokenStream<'t> {
                         }
                     }
                 }
+                TkKind::Type => {
+                    // "type" <identifier> ( <generic-argument-declaration> )? "=" <type-representation> ";"
+                    self.next();
+
+                    let ident = self.consume_identifier()?;
+
+                    let genargs = self.opt_consume_generic_argument_declaration()?;
+
+                    let _ = self.must_consume_next(vec![TkKind::Assign])?;
+
+                    let right = self.consume_type_representaion(&None)?;
+
+                    let _ = self.must_consume_next(vec![TkKind::SemiColon])?;
+
+                    Ok(vec![Globals::TypeDef(TypeDef::TypeAlias(TypeAlias {
+                        ident,
+                        genargs,
+                        right,
+                    }))])
+                }
                 TkKind::Impl => {
                     // "impl" ( <generic-argument-declaration> )? <type-representation> "{" ... "}"
                     self.next();

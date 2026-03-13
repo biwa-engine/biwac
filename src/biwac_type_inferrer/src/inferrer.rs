@@ -727,17 +727,21 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
                     let mut cctx = CallCtx::default();
-                    self.call_unify(
-                        Ty::Fn(callee_fty),
-                        Ty::Fn(FnTy {
-                            args,
-                            rty: Box::new(rty.clone()),
-                            genargs: vec![],
-                        }),
-                        &mut cctx,
-                    )?;
+                    let caller_fty = FnTy {
+                        args,
+                        rty: Box::new(rty.clone()),
+                        genargs: vec![],
+                    };
+                    let unified_ty =
+                        self.call_unify(Ty::Fn(callee_fty), Ty::Fn(caller_fty), &mut cctx)?;
 
-                    Ok(rty)
+                    let unified_fty = if let Ty::Fn(fty) = unified_ty {
+                        fty
+                    } else {
+                        panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
+                    };
+
+                    Ok(*unified_fty.rty)
                 } else {
                     Err(TyError::MethodNotImplemented {
                         ty: left,

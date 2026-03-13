@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_hir::{GenTyId, Hir, Ty};
+use biwac_hir::{DefinedTy, GenTyId, Hir, InferTy, Ty};
 use biwac_parser::{Ident, PrimTyp, TypRepr, TypReprVal};
 
 use crate::{ResolveError, RsvResult, context::ty_phase::module_level::ModuleLevelTyResolveCtx};
@@ -83,7 +83,20 @@ impl<'mctx> TyDefLevelTyResolveCtx<'mctx> {
                 {
                     Ok(Ty::Gen(*gid))
                 } else {
-                    self.mctx.try_resolve_defined_ty(deftyp, hir)
+                    // ジェネリック引数の数が合うか検査済み
+                    let (tid, ty_existence) = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
+
+                    Ok(Ty::Defined(DefinedTy {
+                        tid,
+                        genargs: if let Some(genargs) = &deftyp.genargs {
+                            genargs
+                                .iter()
+                                .map(|typ| self.try_resolve_ty(typ, hir))
+                                .collect::<RsvResult<_>>()?
+                        } else {
+                            vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len]
+                        },
+                    }))
                 }
             }
         }

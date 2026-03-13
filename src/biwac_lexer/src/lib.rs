@@ -34,6 +34,7 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                     "import" => (TkKind::Import, None),
                     "package" => (TkKind::Package, None),
                     "fn" => (TkKind::Fn, None),
+                    "type" => (TkKind::Type, None),
                     "let" => (TkKind::Let, None),
                     "if" => (TkKind::If, None),
                     "else" => (TkKind::Else, None),

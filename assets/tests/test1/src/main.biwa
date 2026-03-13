@@ -2,6 +2,8 @@ import math::pos::Pos;
 import math::pos::Pos::new;
 import collections::Pair;
 
+type PairIntT[T] = Pair[Int, T];
+
 fn add(x: Int, y: Int) -> Int {
     return x + y;
 }
@@ -16,6 +18,7 @@ fn main() {
   let z = native_add(3, 2);
   let pair = Pair::new(l, z);
   let aa = Pair::new(x, pair.y()).add();
+  let ab = PairIntT::new(0, aa).x();
 }
 
 [[native(arch="typescript")]]

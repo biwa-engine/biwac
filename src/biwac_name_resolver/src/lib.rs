@@ -224,8 +224,35 @@ impl ResolveCtx {
                 .register_type_content(&tid, TyDefContentKind::TypeAlias(Box::new(alias)))?;
         }
 
+        // 型の実体(シグニチャ)を記録する
+        for (modpath, modu) in &pkg.modules {
+            let mctx = mctxes.get(modpath).unwrap();
+
+            for g in &modu.globals {
+                if let biwac_parser::Globals::TypeDef(type_def) = g {
+                    match type_def {
+                        TypeDef::Struct(struct_) => {
+                            let tid = TyId::from_modpath(modpath, struct_.id.id.clone());
+
+                            self.hir.register_type_content(
+                                &tid,
+                                TyDefContentKind::Struct(Box::new(
+                                    StructDefContent::try_resolve_in_module(
+                                        struct_, mctx, &self.hir,
+                                    )?,
+                                )),
+                            )?;
+                        }
+                        TypeDef::TypeAlias(_) => {
+                            // すでに解決済み
+                        }
+                    }
+                }
+            }
+        }
+        // hir から型の実体を取得できるようになる
+
         // 値(fn, const)の存在(シグニチャ)を記録する
-        let mut type_defs = vec![];
         for (modpath, modu) in pkg.modules {
             let mctx = mctxes.get(&modpath).unwrap();
 
@@ -332,35 +359,13 @@ impl ResolveCtx {
                     biwac_parser::Globals::Import(_) => {
                         // nothing to do
                     }
-                    biwac_parser::Globals::TypeDef(type_def) => {
-                        type_defs.push((modpath.clone(), type_def));
+                    biwac_parser::Globals::TypeDef(_) => {
+                        // nothing to do
                     }
                 }
             }
         }
         // hir から値の存在(シグニチャ)を取得できるようになる
-
-        // 型の実体(シグニチャ)を記録する
-        for (modpath, type_def) in type_defs {
-            let mctx = mctxes.get(&modpath).unwrap();
-
-            match type_def {
-                TypeDef::Struct(struct_) => {
-                    let tid = TyId::from_modpath(&modpath, struct_.id.id.clone());
-
-                    self.hir.register_type_content(
-                        &tid,
-                        TyDefContentKind::Struct(Box::new(
-                            StructDefContent::try_resolve_in_module(&struct_, mctx, &self.hir)?,
-                        )),
-                    )?;
-                }
-                TypeDef::TypeAlias(_) => {
-                    // すでに解決済み
-                }
-            }
-        }
-        // hir から型の実体を取得できるようになる
 
         // 関数内の名前解決を行う
         let mctxes = mctxes

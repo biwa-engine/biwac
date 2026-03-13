@@ -232,6 +232,38 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Infer(_) | Ty::LocGen(_) => self,
         }
     }
+
+    // ジェネリック型の具体型への割り当て assigns を受け取り
+    // 具体化した型を返す
+    pub fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocGenTyId, Self>) -> Self {
+        match self {
+            Ty::LocGen(lgid) => {
+                if let Some(t) = assigns.get(&lgid) {
+                    t.clone()
+                } else {
+                    self
+                }
+            }
+            Ty::Fn(fty) => Ty::Fn(FnTy {
+                args: fty
+                    .args
+                    .into_iter()
+                    .map(|aty| aty.embody_by_loc_gen_ty_id(assigns))
+                    .collect(),
+                rty: Box::new(fty.rty.embody_by_loc_gen_ty_id(assigns)),
+                genargs: fty.genargs,
+            }),
+            Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+                tid: defined_ty.tid,
+                genargs: defined_ty
+                    .genargs
+                    .into_iter()
+                    .map(|aty| aty.embody_by_loc_gen_ty_id(assigns))
+                    .collect(),
+            }),
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Infer(_) | Ty::Gen(_) => self,
+        }
+    }
 }
 
 impl From<&FnDefContentSignature> for FnTy {

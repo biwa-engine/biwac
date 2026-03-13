@@ -41,6 +41,7 @@ pub enum TkKind {
     Import,           // import
     Package,          // package
     Fn,               // fn
+    Type,             // type
     Let,              // let
     If,               // if
     Else,             // else
@@ -95,6 +96,7 @@ impl TkKind {
             Self::Import => "import".to_string(),
             Self::Package => "package".to_string(),
             Self::Fn => "fn".to_string(),
+            Self::Type => "type".to_string(),
             Self::Let => "let".to_string(),
             Self::If => "if".to_string(),
             Self::Else => "else".to_string(),

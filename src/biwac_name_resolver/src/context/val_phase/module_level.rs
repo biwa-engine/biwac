@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use biwac_base::ModPath;
 use biwac_hir::{
-    AssocCallee, DefinedTy, Hir, InferTy, Ty, TyExistence, TyId, ValDefContentKind, ValId,
+    AssocCallee, DefinedTy, Hir, InferTy, Ty, TyDefContentKind, TyExistence, TyId,
+    ValDefContentKind, ValId,
 };
 use biwac_parser::{DefTyp, ImportDecl, PrimTyp, QualifiedId, TypRepr, TypReprVal};
 
@@ -322,13 +323,26 @@ impl ModuleLevelResolveCtx {
                 qualid.quals.last().unwrap().clone(),
             );
 
-            if let Some(ty_existence) = hir.get_type_existence(&tid) {
+            if let Some(ty_content) = hir.get_type_definition(&tid) {
                 // TODO:
                 // 明示的にジェネリック引数を記述している場合はそれを利用
                 // foo::bar[Foo, Bar]::baz()
                 // ない場合は、すべて推論が必要扱いで生成
-                let genargs = vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len];
-                let ty = Ty::Defined(DefinedTy { tid, genargs });
+                let ty = match ty_content {
+                    TyDefContentKind::Struct(struct_) => {
+                        let genargs = vec![Ty::Infer(InferTy::Unknown); struct_.genargs.len()];
+                        Ty::Defined(DefinedTy { tid, genargs })
+                    }
+
+                    // alias は解決した型を返す
+                    TyDefContentKind::TypeAlias(alias) => match &alias.right {
+                        Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+                            tid: defined_ty.tid.clone(),
+                            genargs: vec![Ty::Infer(InferTy::Unknown); alias.genargs.len()],
+                        }),
+                        x => x.clone(),
+                    },
+                };
 
                 // 一意に取得できた場合のみ返す
                 if let Some(impl_vid) = hir.get_impl_value_id_of_type(&ty, &qualid.id)? {
