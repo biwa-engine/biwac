@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biwac_base::{ModPath, Span};
-use biwac_parser::{FnDef, Ident, MethodDef, NativeFnDef};
+use biwac_parser::{FnDef, Ident, MethodDef, NativeFnDef, symbols::globals::NativeMethodDef};
 
 use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
 
@@ -66,7 +66,9 @@ pub enum ValDefContentKind {
 #[derive(Debug, Clone)]
 pub enum ImplValDefContentKind {
     Fn(Box<FnDefContent>),
+    NativeFn(Box<NativeFnDefContent>),
     Method(Box<MethodDefContent>),
+    NativeMethod(Box<NativeMethodDefContent>),
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +165,22 @@ pub struct MethodDefContent {
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<LocVarId, Ty>,
 
+    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
+}
+
+// TODO: NativeFnDefContent と同じで済むなら同じに
+#[derive(Debug, Clone)]
+pub struct NativeMethodDefContent {
+    // signature
+    pub signature: FnDefContentSignature,
+
+    pub native_body: String,
+
+    pub fn_name_span: Span,
+    pub native_span: Span,
+    pub span: Span,
+
+    pub self_ty: Ty,
     pub impl_genargs: Vec<(Ident, LocGenTyId)>,
 }
 
@@ -316,6 +334,25 @@ impl NativeFnDefContent {
             fn_name_span: fn_def.id.span,
             native_span: fn_def.native_span,
             span: fn_def.span,
+            impl_genargs,
+        }
+    }
+}
+
+impl NativeMethodDefContent {
+    pub fn new(
+        signature: FnDefContentSignature,
+        method_def: NativeMethodDef,
+        self_ty: Ty,
+        impl_genargs: Vec<(Ident, LocGenTyId)>,
+    ) -> Self {
+        Self {
+            signature,
+            native_body: method_def.native,
+            fn_name_span: method_def.id.span,
+            native_span: method_def.native_span,
+            span: method_def.span,
+            self_ty,
             impl_genargs,
         }
     }

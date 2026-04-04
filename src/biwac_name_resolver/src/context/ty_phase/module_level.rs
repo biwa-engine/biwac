@@ -145,28 +145,37 @@ impl ModuleLevelTyResolveCtx {
                         }
                     }
                 },
-                Globals::FnDef(fn_def) => match vals.entry(fn_def.id.id.clone()) {
-                    Entry::Vacant(e) => {
-                        e.insert(fn_def.id.clone());
+                Globals::FnDef(fn_def) => {
+                    // 関連関数でない、通常関数のみ、モジュール直下の値名前空間に登録
+                    if fn_def.impl_ctx.is_none() {
+                        match vals.entry(fn_def.id.id.clone()) {
+                            Entry::Vacant(e) => {
+                                e.insert(fn_def.id.clone());
+                            }
+                            Entry::Occupied(e) => {
+                                return Err(ResolveError::DuplicatedTypeName {
+                                    tid1: Box::new(fn_def.id.clone()),
+                                    tid2: Box::new(e.remove()),
+                                });
+                            }
+                        }
                     }
-                    Entry::Occupied(e) => {
-                        return Err(ResolveError::DuplicatedTypeName {
-                            tid1: Box::new(fn_def.id.clone()),
-                            tid2: Box::new(e.remove()),
-                        });
+                }
+                Globals::NativeFnDef(fn_def) => {
+                    if fn_def.impl_ctx.is_none() {
+                        match vals.entry(fn_def.id.id.clone()) {
+                            Entry::Vacant(e) => {
+                                e.insert(fn_def.id.clone());
+                            }
+                            Entry::Occupied(e) => {
+                                return Err(ResolveError::DuplicatedTypeName {
+                                    tid1: Box::new(fn_def.id.clone()),
+                                    tid2: Box::new(e.remove()),
+                                });
+                            }
+                        }
                     }
-                },
-                Globals::NativeFnDef(fn_def) => match vals.entry(fn_def.id.id.clone()) {
-                    Entry::Vacant(e) => {
-                        e.insert(fn_def.id.clone());
-                    }
-                    Entry::Occupied(e) => {
-                        return Err(ResolveError::DuplicatedTypeName {
-                            tid1: Box::new(fn_def.id.clone()),
-                            tid2: Box::new(e.remove()),
-                        });
-                    }
-                },
+                }
                 Globals::VarDecl(var_decl) => match vals.entry(var_decl.id.id.clone()) {
                     Entry::Vacant(e) => {
                         e.insert(var_decl.id.clone());
@@ -178,7 +187,7 @@ impl ModuleLevelTyResolveCtx {
                         });
                     }
                 },
-                Globals::MethodDef(_) => {
+                Globals::MethodDef(_) | Globals::NativeMethodDef(_) => {
                     // nothing to do
                 }
             }

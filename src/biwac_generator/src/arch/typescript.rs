@@ -66,6 +66,16 @@ pub fn generate(hir: &Hir) -> String {
                                     &allocator,
                                     hir,
                                 ),
+                                ImplValDefContentKind::NativeFn(f) => f.as_oxc_global(
+                                    &(&tid.clone(), val_name.as_str(), impl_valid),
+                                    &allocator,
+                                    hir,
+                                ),
+                                ImplValDefContentKind::NativeMethod(m) => m.as_oxc_global(
+                                    &(&tid.clone(), val_name.as_str(), impl_valid),
+                                    &allocator,
+                                    hir,
+                                ),
                             })
                     })
                 }))
@@ -75,6 +85,12 @@ pub fn generate(hir: &Hir) -> String {
                             f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
                         }
                         ImplValDefContentKind::Method(m) => {
+                            m.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
+                        }
+                        ImplValDefContentKind::NativeFn(f) => {
+                            f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
+                        }
+                        ImplValDefContentKind::NativeMethod(m) => {
                             m.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
                         }
                     })

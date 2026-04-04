@@ -30,19 +30,21 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
             if inner_dsl {
                 // DSLの領域は
                 // ```biwa
-                // }}
+                //   }}
                 // ```
-                // のように`}}`で始まる行が来たら終了
+                // のように空白文字を除けば`}}`で始まる行が来たら終了
                 // それまではここでは何もしない
                 // パースは独自のパーサに委譲する
-                if l.starts_with("}}") {
+                let trimmed = l.trim_start();
+                let trimmed_idx = l.len() - trimmed.len();
+                if trimmed.starts_with("}}") {
                     // end of DSL
                     inner_dsl = false;
                     regions.push(SrcRegion {
                         kind: RegionKind::Dsl,
                         span: Span::new(modu.clone(), last_pos, Pos::new(lidx, 0)),
                     });
-                    last_pos = Pos::new(lidx, 2);
+                    last_pos = Pos::new(lidx, trimmed_idx + 2);
                 } else {
                     break;
                 }

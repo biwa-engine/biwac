@@ -1113,6 +1113,10 @@ impl TyCtx {
                                 },
                             ));
                         }
+                        ImplValDefContentKind::NativeFn(_)
+                        | ImplValDefContentKind::NativeMethod(_) => {
+                            // nothing to do
+                        }
                     }
                 }
             }
@@ -1141,6 +1145,9 @@ impl TyCtx {
                 ImplValDefContentKind::Method(m) => {
                     m.expr_tys = ty_info.expr_tys;
                     m.var_tys = ty_info.var_tys;
+                }
+                ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                    // nothing to do
                 }
             }
         }
@@ -1237,6 +1244,9 @@ impl TyCtx {
                             },
                         ));
                     }
+                    ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                        // nothing to do
+                    }
                 }
             }
         }
@@ -1256,6 +1266,9 @@ impl TyCtx {
                 ImplValDefContentKind::Method(m) => {
                     m.expr_tys = ty_info.expr_tys;
                     m.var_tys = ty_info.var_tys;
+                }
+                ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                    // nothing to do
                 }
             }
         }

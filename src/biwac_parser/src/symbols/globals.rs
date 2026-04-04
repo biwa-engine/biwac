@@ -49,6 +49,7 @@ pub enum Globals {
     TypeDef(TypeDef),
     NativeFnDef(NativeFnDef),
     MethodDef(MethodDef),
+    NativeMethodDef(NativeMethodDef),
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +103,21 @@ pub struct MethodDef {
     pub stmts: Vec<Stmt>,
     pub expr: Option<Exprs>,
     pub rtype: Option<TypRepr>, // None means void
+    pub span: Span,
+    pub flags: Vec<CompilerFlag>,
+    pub genargs: Vec<Ident>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeMethodDef {
+    pub impl_genargs: Vec<Ident>,
+    pub self_typ: TypRepr,
+    pub self_ident: Ident,
+    pub id: Ident,
+    pub args: Vec<ArgDecl>,     // 第一引数がselfであるのは自明なので含まない
+    pub rtype: Option<TypRepr>, // None means void
+    pub native: String,
+    pub native_span: Span,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
     pub genargs: Vec<Ident>,
@@ -171,17 +187,47 @@ impl<'t> TokenStream<'t> {
         if flags.iter().any(|f| &f.flag.id == "native") {
             if let Some(t) = self.next() {
                 if TkKind::DslLiteral == t.kind {
-                    Ok(Globals::NativeFnDef(NativeFnDef {
-                        impl_ctx: None, // TODO: native function も関連関数, メソッド化可能に
-                        id,
-                        args,
-                        native: t.unwrap_string_value(),
-                        rtype,
-                        span: Span::merge(&begin, &t.span),
-                        native_span: t.span.clone(),
-                        flags,
-                        genargs,
-                    }))
+                    if let Some(impl_ctx) = impl_ctx {
+                        if let Some(self_ident) = self_ident {
+                            Ok(Globals::NativeMethodDef(NativeMethodDef {
+                                impl_genargs: impl_ctx.genargs,
+                                self_typ: impl_ctx.self_typ,
+                                self_ident,
+                                id,
+                                args,
+                                rtype,
+                                native: t.unwrap_string_value(),
+                                native_span: t.span.clone(),
+                                span: Span::merge(&begin, &t.span),
+                                flags,
+                                genargs,
+                            }))
+                        } else {
+                            Ok(Globals::NativeFnDef(NativeFnDef {
+                                impl_ctx: Some(impl_ctx),
+                                id,
+                                args,
+                                native: t.unwrap_string_value(),
+                                rtype,
+                                span: Span::merge(&begin, &t.span),
+                                native_span: t.span.clone(),
+                                flags,
+                                genargs,
+                            }))
+                        }
+                    } else {
+                        Ok(Globals::NativeFnDef(NativeFnDef {
+                            impl_ctx: None,
+                            id,
+                            args,
+                            native: t.unwrap_string_value(),
+                            rtype,
+                            span: Span::merge(&begin, &t.span),
+                            native_span: t.span.clone(),
+                            flags,
+                            genargs,
+                        }))
+                    }
                 } else {
                     Err(ParseError::InvalidToken(
                         vec![TkKind::DslLiteral],

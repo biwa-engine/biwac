@@ -461,6 +461,14 @@ impl Hir {
                         panic!("compiler bug: already registered function body")
                     }
                 },
+                ImplValDefContentKind::NativeFn(_) => {
+                    panic!(
+                        "compiler bug: native associated function must not be registered its body"
+                    )
+                }
+                ImplValDefContentKind::NativeMethod(_) => {
+                    panic!("compiler bug: native method must not be registered its body")
+                }
             }
         }
 
@@ -499,6 +507,12 @@ impl Hir {
                     panic!("compiler bug: already registered function body")
                 }
             },
+            ImplValDefContentKind::NativeFn(_) => {
+                panic!("compiler bug: native associated function must not be registered its body")
+            }
+            ImplValDefContentKind::NativeMethod(_) => {
+                panic!("compiler bug: native method must not be registered its body")
+            }
         }
 
         Ok(())
@@ -542,6 +556,8 @@ impl Hir {
                                 .map(|(impl_vid, impl_)| match &impl_.val_content {
                                     ImplValDefContentKind::Fn(_) => Ok(*impl_vid),
                                     ImplValDefContentKind::Method(_) => Ok(*impl_vid),
+                                    ImplValDefContentKind::NativeFn(_) => Ok(*impl_vid),
+                                    ImplValDefContentKind::NativeMethod(_) => Ok(*impl_vid),
                                 })
                         })
                         .transpose()
@@ -582,7 +598,42 @@ impl Hir {
                                     val_content: Box::new(impl_.val_content.clone()),
                                 })
                             }
+                            ImplValDefContentKind::NativeFn(_) => {
+                                Err(HirError::ImplementedValueIsNotMethod {
+                                    ty: Box::new(ty.clone()),
+                                    method: Box::new(method.clone()),
+                                    val_content: Box::new(impl_.val_content.clone()),
+                                })
+                            }
                             ImplValDefContentKind::Method(m) => {
+                                // LocGenTyId -> Ty の割り当てがあれば具体化する
+                                let mut assigns = HashMap::new();
+                                for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
+                                {
+                                    if let Ty::LocGen(lgid) = t1 {
+                                        assigns.insert(*lgid, t2.clone());
+                                    }
+                                }
+
+                                Ok(FnTy {
+                                    args: m
+                                        .signature
+                                        .args
+                                        .iter()
+                                        .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
+                                        .collect(),
+                                    rty: Box::new(
+                                        m.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
+                                    ),
+                                    genargs: m
+                                        .signature
+                                        .genargs
+                                        .iter()
+                                        .map(|(_, lgid)| *lgid)
+                                        .collect(),
+                                })
+                            }
+                            ImplValDefContentKind::NativeMethod(m) => {
                                 // LocGenTyId -> Ty の割り当てがあれば具体化する
                                 let mut assigns = HashMap::new();
                                 for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
@@ -628,7 +679,19 @@ impl Hir {
                                 val_content: Box::new(val.clone()),
                             })
                         }
+                        ImplValDefContentKind::NativeFn(_) => {
+                            Err(HirError::ImplementedValueIsNotMethod {
+                                ty: Box::new(ty.clone()),
+                                method: Box::new(method.clone()),
+                                val_content: Box::new(val.clone()),
+                            })
+                        }
                         ImplValDefContentKind::Method(m) => Ok(Some(FnTy {
+                            args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+                            rty: Box::new(m.signature.rty.clone()),
+                            genargs: m.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
+                        })),
+                        ImplValDefContentKind::NativeMethod(m) => Ok(Some(FnTy {
                             args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
                             rty: Box::new(m.signature.rty.clone()),
                             genargs: m.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
@@ -704,7 +767,9 @@ impl Hir {
                             //         .collect(),
                             // })
                         }
+                        ImplValDefContentKind::NativeFn(f) => Ok(FnTy::from(&f.signature)),
                         ImplValDefContentKind::Method(_) => Err(todo!()),
+                        ImplValDefContentKind::NativeMethod(_) => Err(todo!()),
                     }
                 }
             }

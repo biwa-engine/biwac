@@ -14,8 +14,9 @@ pub use crate::hir::{
         globals::{
             DecledArg, FnDefContent, FnDefContentBody, FnDefContentSignature, GenTyId,
             ImplValDefContentKind, LocGenTyId, MethodDefContent, NativeFnArgDecl,
-            NativeFnDefContent, NativeTypeAliasDefContent, StructDefContent, TyDefContentKind,
-            TyId, TypeAliasDefContent, ValDefContentKind, ValId,
+            NativeFnDefContent, NativeMethodDefContent, NativeTypeAliasDefContent,
+            StructDefContent, TyDefContentKind, TyId, TypeAliasDefContent, ValDefContentKind,
+            ValId,
         },
         statements::{
             AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, LocVarId, ReturnStmt, Stmt,

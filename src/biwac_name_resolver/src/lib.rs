@@ -330,26 +330,54 @@ impl ResolveCtx {
                         }
                     }
                     biwac_parser::Globals::NativeFnDef(fn_def) => {
-                        let vid = ValId::from_modpath(&modpath, fn_def.id.id.clone());
-                        let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
-                        let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+                        // 関連関数のとき
+                        if let Some(impl_ctx) = &fn_def.impl_ctx {
+                            let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
+                            let self_ty = ictx.try_resolve_ty(&impl_ctx.self_typ, &self.hir)?;
 
-                        let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                            (&fn_def.args, &fn_def.rtype),
-                            &fctx,
-                            &self.hir,
-                        )?;
+                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
 
-                        self.hir.register_value_existence(
-                            vid,
-                            ValDefContentKind::Native(Box::new(
-                                biwac_hir::NativeFnDefContent::new(
-                                    signature,
-                                    fn_def,
-                                    ictx.impl_block_genarg_vec,
-                                ),
-                            )),
-                        )?;
+                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                                (&fn_def.args, &fn_def.rtype),
+                                &fctx,
+                                &self.hir,
+                            )?;
+
+                            self.hir.register_impl_value_existence(
+                                self_ty,
+                                ictx.impl_block_genargs,
+                                &fn_def.id.clone(),
+                                ImplValDefContentKind::NativeFn(Box::new(
+                                    biwac_hir::NativeFnDefContent::new(
+                                        signature,
+                                        fn_def,
+                                        ictx.impl_block_genarg_vec,
+                                    ),
+                                )),
+                            )?;
+                        } else {
+                            // 通常の関数のとき
+                            let vid = ValId::from_modpath(&modpath, fn_def.id.id.clone());
+                            let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
+                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+
+                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                                (&fn_def.args, &fn_def.rtype),
+                                &fctx,
+                                &self.hir,
+                            )?;
+
+                            self.hir.register_value_existence(
+                                vid,
+                                ValDefContentKind::Native(Box::new(
+                                    biwac_hir::NativeFnDefContent::new(
+                                        signature,
+                                        fn_def,
+                                        ictx.impl_block_genarg_vec,
+                                    ),
+                                )),
+                            )?;
+                        }
                     }
                     biwac_parser::Globals::MethodDef(method_def) => {
                         let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
@@ -373,6 +401,34 @@ impl ResolveCtx {
                                 biwac_hir::MethodDefContent::new(
                                     signature,
                                     method_def,
+                                    ictx.impl_block_genarg_vec,
+                                ),
+                            )),
+                        )?;
+                    }
+                    biwac_parser::Globals::NativeMethodDef(method_def) => {
+                        let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
+                        let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
+
+                        let fctx = FnLevelTyResolveCtx::new(&ictx, &method_def.genargs)?;
+
+                        // 第一引数 self は含まない
+                        let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                            (&method_def.args, &method_def.rtype),
+                            &fctx,
+                            &self.hir,
+                        )?;
+
+                        // メソッドとして登録
+                        self.hir.register_impl_value_existence(
+                            self_ty.clone(),
+                            ictx.impl_block_genargs,
+                            &method_def.id.clone(),
+                            ImplValDefContentKind::NativeMethod(Box::new(
+                                biwac_hir::NativeMethodDefContent::new(
+                                    signature,
+                                    method_def,
+                                    self_ty,
                                     ictx.impl_block_genarg_vec,
                                 ),
                             )),
@@ -505,6 +561,10 @@ impl ResolveCtx {
                                 }
                             }
                         }
+                        ImplValDefContentKind::NativeFn(_)
+                        | ImplValDefContentKind::NativeMethod(_) => {
+                            // nothing to do
+                        }
                     }
                 }
             }
@@ -575,6 +635,9 @@ impl ResolveCtx {
                                 // nothing to do
                             }
                         }
+                    }
+                    ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                        // nothing to do
                     }
                 }
             }

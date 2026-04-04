@@ -3,6 +3,19 @@ type Vec[T] = {{
   Array<T>
 }};
 
+impl[T] Vec[T] {
+  [[native(arch="typescript")]]
+  fn push(self, v: T) {{
+    self.push(v);
+    return;
+  }}
+  
+  [[native(arch="typescript")]]
+  fn new() -> Self {{
+    return [];
+  }}
+}
+
 struct Pair[T, U] {
   x: T,
   y: U,
