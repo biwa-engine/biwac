@@ -1,0 +1,74 @@
+// もっともプリミティブなAPIを提供する
+// 描画の単位はピクセル
+
+import package::types::string::String;
+import package::game::font::Font;
+import package::game::image::Image;
+import package::types::option::Option;
+
+struct Window {
+  canvas: Canvas,
+  message_window: MessageWindow,
+}
+
+impl Window {
+  fn new() -> Self {
+    Self {
+      canvas = Canvas{},
+      message_window = MessageWindow{},
+    }
+  }
+  
+  [[native(arch="typescript")]]
+  fn width(self) -> Uint {{
+    //
+  }}
+  
+  [[native(arch="typescript")]]
+  fn height(self) -> Uint {{
+    //
+  }}
+}
+
+struct Canvas {}
+
+impl Canvas {
+  [[native(arch="typescript")]]
+  fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]) {{
+    //
+  }}
+}
+
+struct MessageWindow {}
+
+impl MessageWindow {
+  [[native(arch="typescript")]]
+  fn append(self, text: String, font: Font, size: Uint, speed: Uint) {{
+    //
+  }}
+  
+  [[native(arch="typescript")]]
+  fn clear(self) {{
+    //
+  }}
+  
+  [[native(arch="typescript")]]
+  fn flush(self) {{
+    //
+  }}
+  
+  [[native(arch="typescript")]]
+  fn set_talker_name(self, name: String) {{
+    //
+  }}
+  
+  [[native(arch="typescript")]]
+  fn set_talker_image(self, image: Image) {{
+    //
+  }}
+}
+
+struct Position {
+  x: Int,
+  y: Int,
+}

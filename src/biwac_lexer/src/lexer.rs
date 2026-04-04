@@ -147,6 +147,10 @@ pub(crate) enum PreTkKind {
 pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
     let lines: Vec<&str> = src.lines().collect();
     let mut pretokens = vec![];
+    if lines.is_empty() {
+        return pretokens;
+    }
+
     for r in &regions {
         match r.kind {
             RegionKind::Raw => {

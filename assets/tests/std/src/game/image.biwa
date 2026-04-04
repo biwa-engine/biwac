@@ -1,0 +1,5 @@
+import package::types::string::String;
+
+struct Image {
+  path: String,
+}

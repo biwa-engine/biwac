@@ -1,0 +1,19 @@
+// Option[T] 型
+// 将来的にはenumで実装する
+
+[[native(arch="typescript")]]
+type Option[T] = {{
+  T | null
+}};
+
+impl[T] Option[T] {
+  [[native(arch="typescript")]]
+  fn is_some(self) -> Bool {{
+    self !== null
+  }}
+
+  [[native(arch="typescript")]]
+  fn none() -> Self {{
+    return null;
+  }}
+}

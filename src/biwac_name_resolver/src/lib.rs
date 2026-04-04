@@ -47,9 +47,29 @@ pub enum ResolveError {
         qualid: Box<QualifiedId>,
         tid: Box<TyId>,
     },
+    TypeNotFoundModuleFound {
+        qualid: Box<QualifiedId>,
+        import_decl: Box<ImportDecl>,
+        modpath: Box<ModPath>,
+    },
+    TypeNotFoundValueFound {
+        qualid: Box<QualifiedId>,
+        import_decl: Box<ImportDecl>,
+        vid: Box<ValId>,
+    },
     ValueNotFound {
         qualid: Box<QualifiedId>,
         vid: Box<ValId>,
+    },
+    ValueNotFoundModuleFound {
+        qualid: Box<QualifiedId>,
+        import_decl: Box<ImportDecl>,
+        modpath: Box<ModPath>,
+    },
+    ValueNotFoundTypeFound {
+        qualid: Box<QualifiedId>,
+        import_decl: Box<ImportDecl>,
+        tid: Box<TyId>,
     },
     ImplementedValueNotFound {
         ty: Box<Ty>,

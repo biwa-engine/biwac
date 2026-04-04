@@ -1,0 +1,11 @@
+import package::types::string::String;
+
+struct Font {
+  path: String,
+}
+
+impl Font {
+  fn new(path: String) -> Self {
+    Self { path = path }
+  }
+}

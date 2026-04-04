@@ -1,0 +1,9 @@
+import package::types::string::String;
+
+[[native(arch="typescript")]]
+fn create_image(path: String, x: Int, y: Int) {{
+  createImage(path, x, y, {
+    dx: (_) => 0,
+    dy: (_) => 0,
+  });
+}}

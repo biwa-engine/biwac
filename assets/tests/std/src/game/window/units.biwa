@@ -1,0 +1,25 @@
+struct Pixel {
+  val: Uint,
+}
+
+struct Vw {
+  val: Float, // unsigned?
+}
+
+// Vw::vw()自体をimportしてしまい、
+// vw(0.8) のようにユーザが使いやすいようにnewではなくvw
+impl Vw {
+  fn vw(val: Float) -> Self {
+    Self { val = val }
+  }
+}
+
+struct Vh {
+  val: Float, // unsigned?
+}
+
+impl Vh {
+  fn vh(val: Float) -> Self {
+    Self { val = val }
+  }
+}

@@ -127,16 +127,22 @@ impl ModuleLevelResolveCtx {
             // `hoge` の場合
             if self.types.contains(&deftyp.qualid.id) {
                 TyId::from_modpath(&self.modpath, deftyp.qualid.id.clone())
-            } else if let Some((_, sym)) = self.imports.get(&deftyp.qualid.id) {
+            } else if let Some((import_decl, sym)) = self.imports.get(&deftyp.qualid.id) {
                 match sym {
                     ImportedSym::Ty(tid) => tid.clone(),
-                    ImportedSym::Mod(_) => {
-                        // error
-                        todo!()
+                    ImportedSym::Mod(modpath) => {
+                        return Err(ResolveError::TypeNotFoundModuleFound {
+                            qualid: Box::new(deftyp.qualid.clone()),
+                            import_decl: Box::new(import_decl.clone()),
+                            modpath: Box::new(modpath.clone()),
+                        });
                     }
-                    ImportedSym::Val(_) => {
-                        // error
-                        todo!()
+                    ImportedSym::Val(vid) => {
+                        return Err(ResolveError::TypeNotFoundValueFound {
+                            qualid: Box::new(deftyp.qualid.clone()),
+                            import_decl: Box::new(import_decl.clone()),
+                            vid: Box::new(vid.clone()),
+                        });
                     }
                 }
             } else {
@@ -231,15 +237,21 @@ impl ModuleLevelResolveCtx {
             // `hoge` の場合
             if self.vals.contains(&qualid.id) {
                 Ok(ValId::from_modpath(&self.modpath, qualid.id.clone()))
-            } else if let Some((i, sym)) = self.imports.get(&qualid.id) {
+            } else if let Some((import_decl, sym)) = self.imports.get(&qualid.id) {
                 match sym {
-                    ImportedSym::Ty(_) => {
-                        // error
-                        todo!()
+                    ImportedSym::Ty(tid) => {
+                        return Err(ResolveError::ValueNotFoundTypeFound {
+                            qualid: Box::new(qualid.clone()),
+                            import_decl: Box::new(import_decl.clone()),
+                            tid: Box::new(tid.clone()),
+                        });
                     }
-                    ImportedSym::Mod(_) => {
-                        // error
-                        todo!()
+                    ImportedSym::Mod(modpath) => {
+                        return Err(ResolveError::ValueNotFoundModuleFound {
+                            qualid: Box::new(qualid.clone()),
+                            import_decl: Box::new(import_decl.clone()),
+                            modpath: Box::new(modpath.clone()),
+                        });
                     }
                     ImportedSym::Val(vid) => Ok(vid.clone()),
                 }

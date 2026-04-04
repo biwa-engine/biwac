@@ -1,0 +1,104 @@
+import package::types::string::String;
+import package::types::option::Option;
+import image::Image;
+import window::Window;
+import window::Position;
+
+// 進行中のノベルゲームを表す構造体
+// C: キャラクター構造体Character[V]のみをいくつもメンバに含む構造体
+//    - characters.akane でakaneというキャラクターにアクセスできる
+//    というようにユーザが定義
+// S: ゲーム内で(セーブ、ロードも関係なく)継続して保持したい状態をいくつもメンバに含む構造体
+//    - states.likeabilities.akane でakaneというキャラクターのプレイヤーへの好感度にアクセスできる
+//    - states.game_difficulty でゲームの難易度にアクセスできる
+//    というようにユーザが定義
+struct Game[C, S] {
+  name: String, // ゲームの名前
+  characters: C,
+  states: S,
+  window: Window,
+}
+
+
+// キャラクターを表す構造体
+// P: 個々のキャラクターが持つ特有のプロパティを格納するcustom properties
+//    ゲーム開発者が必要に応じて定義する
+struct Character[P] {
+  name: String,
+  display_name: String,
+  props: P,
+  default_visual: Image,
+  default_face: Image,
+  current_visual: Image,
+  current_face: Image,
+  current_position: Option[Position], // キャラクターの画面上の位置。noneならば画面上にない
+  window: Window, // Window の API を利用するために参照を内部的に保持
+}
+
+
+impl[P] Character[P] {
+  fn new(
+    window: Window,
+    name: String,
+    display_name: String,
+    props: P,
+    default_visual: Image,
+    default_face: Image,
+  ) -> Self {
+    Self {
+      name = name,
+      display_name = display_name,
+      props = props,
+      default_visual = default_visual,
+      default_face = default_face,
+      current_visual = default_visual,
+      current_face = default_face,
+      window = window,
+      current_position = Option::none(),
+    }
+  }
+
+  // 容姿を更新し表示に反映
+  fn update_visual(self, visual: Image) {
+    self.current_visual = visual;
+    // // TODO: window 更新処理
+    // match self.current_position {
+    //   Some(pos) => {
+    //     // TODO:
+    //   }
+    //   None => {}
+    // }
+  }
+
+  // 表情を更新し表示に反映
+  fn update_face(self, face: Image) {
+    self.current_face = face;
+    self.become_talker();
+  }
+
+  fn appear(self) {
+    // TODO: 画面上に登場する
+  }
+
+  fn disappear(self) {
+    // TODO: 画面上から消える
+  }
+
+  fn become_talker(self) {
+    self.window.message_window.set_talker_name(self.display_name);
+    self.window.message_window.set_talker_image(self.current_face);
+  }
+}
+
+// // ゲーム開発者は、独自定義の型でジェネリクスを埋めた具体の型についてimplする
+// 
+// struct AkaneProps {}
+// 
+// type CharacterAkane = Character[AkaneProps];
+// 
+// impl CharacterAkane {
+//   fn cry(self) {
+//     self.update_visual(Image::new("images/characters/akane/cry_visual.png"));
+//     self.update_face(Image::new("images/characters/akane/cry_face.png"));
+//   }
+// }
