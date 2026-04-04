@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use biwac_hir::{Hir, Stmt};
+use biwac_hir::{Hir, Primary, Stmt};
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
 
@@ -64,11 +64,71 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                     allocator,
                 ))
             }
-            Stmt::Expr(_) => todo!(),
+            Stmt::Expr(expr) => {
+                oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::ExpressionStatement {
+                        span: span(),
+                        expression: expr.expr.as_oxc(env, allocator, hir),
+                    },
+                    allocator,
+                ))
+            }
             Stmt::If(_) => todo!(),
             Stmt::Block(_) => todo!(),
             Stmt::While(_) => todo!(),
-            Stmt::Assign(_) => todo!(),
+            Stmt::Assign(assign) => {
+                oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::ExpressionStatement {
+                        span: span(),
+                        expression: oxc_ast::ast::Expression::AssignmentExpression(
+                            oxc_allocator::Box::new_in(
+                                oxc_ast::ast::AssignmentExpression {
+                                    span: span(),
+                                    operator: oxc_ast::ast::AssignmentOperator::Assign,
+                                    left: match &assign.dst {
+                                        Primary::Variable(v) => {
+                                            oxc_ast::ast::AssignmentTarget::AssignmentTargetIdentifier(
+                                                oxc_allocator::Box::new_in(
+                                                    oxc_ast::ast::IdentifierReference{
+                                                        span: span(),
+                                                        name: oxc_span::Ident::new_const(
+                                                            allocator.alloc_str(&v.id.mangled())
+                                                        ),
+                                                        reference_id: Cell::new(None)
+                                                    }, allocator)
+                                            )
+                                        },
+                                        Primary::MemberAccess(m) => {
+                                            oxc_ast::ast::AssignmentTarget::StaticMemberExpression(
+                                                oxc_allocator::Box::new_in(
+                                                    oxc_ast::ast::StaticMemberExpression {
+                                                        span: span(),
+                                                        object: m.left.as_oxc(env, allocator, hir),
+                                                        property: oxc_ast::ast::IdentifierName {
+                                                            span: span(),
+                                                            name: oxc_span::Ident::new_const(allocator.alloc(&m.member.id)),
+                                                        },
+                                                        optional: false,
+                                                    },
+                                                    allocator
+                                                )
+                                            )                        
+                                        }
+                                        _ => {
+                                            panic!(
+                                                "compiler bug: other than variable and member access cannot be assigned"
+                                            )
+                                        }
+                                    },
+                                    right: assign.src.as_oxc(env, allocator, hir),
+                                },
+                                allocator,
+                            ),
+                        ),
+                    },
+                    allocator,
+                ))
+            }
         }
     }
 }
