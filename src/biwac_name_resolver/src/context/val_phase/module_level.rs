@@ -5,7 +5,7 @@ use biwac_hir::{
     AssocCallee, DefinedTy, Hir, InferTy, Ty, TyDefContentKind, TyExistence, TyId, TyKind,
     ValDefContentKind, ValId,
 };
-use biwac_parser::{DefTyp, ImportDecl, PrimTyp, QualifiedId, TypRepr, TypReprVal};
+use biwac_parser::{DefTyp, ImportDecl, QualifiedId};
 
 use crate::{
     ResolveError, RsvResult,
@@ -103,19 +103,6 @@ impl ModuleLevelResolveCtx {
         })
     }
 
-    fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
-        match &typ.val {
-            TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                // TODO: Uint
-                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
-                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
-            },
-            TypReprVal::Defined(deftyp) => self.try_resolve_defined_ty(deftyp, hir),
-        }
-    }
-
     pub(crate) fn try_resolve_defined_tid(
         &self,
         deftyp: &DefTyp,
@@ -204,35 +191,6 @@ impl ModuleLevelResolveCtx {
                 tid: Box::new(tid),
             })
         }
-    }
-
-    pub(crate) fn try_resolve_defined_ty(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<Ty> {
-        // ジェネリック引数の数が合うか検査済み
-        let (tid, ty_existence) = self.try_resolve_defined_tid(deftyp, hir)?;
-
-        let garg_span = Span::new(
-            deftyp.qualid.span.module().clone(),
-            deftyp.qualid.span.end().clone(),
-            deftyp.qualid.span.end().clone(),
-        );
-
-        Ok(Ty::new(
-            TyKind::Defined(DefinedTy {
-                tid,
-                genargs: if let Some(genargs) = &deftyp.genargs {
-                    genargs
-                        .iter()
-                        .map(|typ| self.try_resolve_ty(typ, hir))
-                        .collect::<RsvResult<_>>()?
-                } else {
-                    vec![
-                        Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
-                        ty_existence.genarg_len
-                    ]
-                },
-            }),
-            deftyp.qualid.span.clone(),
-        ))
     }
 
     // 値を解決する

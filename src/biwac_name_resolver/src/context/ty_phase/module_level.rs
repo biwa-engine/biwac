@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
-use biwac_base::{ModPath, Span};
-use biwac_hir::{DefinedTy, Hir, InferTy, Ty, TyExistence, TyId, TyKind};
-use biwac_parser::{
-    DefTyp, Globals, Ident, ImportDecl, ModAst, PrimTyp, TypRepr, TypReprVal, TypeDef,
-};
+use biwac_base::ModPath;
+use biwac_hir::{Hir, TyExistence, TyId};
+use biwac_parser::{DefTyp, Globals, Ident, ImportDecl, ModAst, TypeDef};
 
 use crate::{ResolveError, RsvResult};
 
@@ -202,19 +200,6 @@ impl ModuleLevelTyResolveCtx {
         })
     }
 
-    fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
-        match &typ.val {
-            TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                // TODO: Uint
-                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
-                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
-            },
-            TypReprVal::Defined(deftyp) => self.try_resolve_defined_ty(deftyp, hir),
-        }
-    }
-
     // ジェネリック引数の数が合うかも検査する
     pub(crate) fn try_resolve_defined_tid(
         &self,
@@ -290,34 +275,5 @@ impl ModuleLevelTyResolveCtx {
                 tid: Box::new(tid),
             })
         }
-    }
-
-    pub(crate) fn try_resolve_defined_ty(&self, deftyp: &DefTyp, hir: &Hir) -> RsvResult<Ty> {
-        // ジェネリック引数の数が合うか検査済み
-        let (tid, ty_existence) = self.try_resolve_defined_tid(deftyp, hir)?;
-
-        let garg_span = Span::new(
-            deftyp.qualid.span.module().clone(),
-            deftyp.qualid.span.end().clone(),
-            deftyp.qualid.span.end().clone(),
-        );
-
-        Ok(Ty::new(
-            TyKind::Defined(DefinedTy {
-                tid,
-                genargs: if let Some(genargs) = &deftyp.genargs {
-                    genargs
-                        .iter()
-                        .map(|typ| self.try_resolve_ty(typ, hir))
-                        .collect::<RsvResult<_>>()?
-                } else {
-                    vec![
-                        Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
-                        ty_existence.genarg_len
-                    ]
-                },
-            }),
-            deftyp.qualid.span.clone(),
-        ))
     }
 }
