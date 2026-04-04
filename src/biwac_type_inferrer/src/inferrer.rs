@@ -594,7 +594,11 @@ impl<'tctx> FnTyCtx<'tctx> {
                 for (id, (ident, expr)) in &members {
                     if let Some((definition_ty, _)) = struct_.members.get(*id).cloned() {
                         let user_ty = self.infer_expr(expr)?;
-                        self.defined_ty_unify(definition_ty, user_ty, &mut dtctx)?;
+                        self.defined_ty_unify(
+                            Ty::new(definition_ty.kind, ident.span.clone()),
+                            user_ty,
+                            &mut dtctx,
+                        )?;
                         // メンバを取り除いていく
                         member_ids.remove(id);
                     } else {
@@ -737,7 +741,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                     };
 
-                    Ok(*unified_fty.rty)
+                    Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
                 }
                 Callee::Var(v) => {
                     // 変数は名前解決済みであるため、先に型推論されているはず
@@ -801,7 +805,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                     };
 
-                    Ok(*unified_fty.rty)
+                    Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
                 }
             },
             Primary::MemberAccess(m) => {
@@ -852,7 +856,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                     };
 
-                    Ok(*unified_fty.rty)
+                    Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
                 } else {
                     Err(TyError::MethodNotImplemented {
                         ty: Box::new(left),
@@ -860,6 +864,82 @@ impl<'tctx> FnTyCtx<'tctx> {
                     })
                 }
             }
+        }
+    }
+
+    // 関数や型などの定義に存在するジェネリック型について、
+    // 呼び出して使用する際に未確定の場合、
+    // 推論が必要なものとして型変数を割り当てる
+    fn fresh_gen_ty(&mut self, ty: Ty) -> Ty {
+        match ty.kind {
+            TyKind::Int
+            | TyKind::Float
+            | TyKind::Bool
+            | TyKind::Infer(_)
+            | TyKind::Void
+            | TyKind::LocGen(_) => ty,
+            TyKind::Fn(fty) => Ty::new(
+                TyKind::Fn(FnTy {
+                    args: fty
+                        .args
+                        .into_iter()
+                        .map(|a| self.fresh_loc_gen_ty(a))
+                        .collect(),
+                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty)),
+                    genargs: fty.genargs,
+                }),
+                ty.span,
+            ),
+            TyKind::Defined(defined_ty) => Ty::new(
+                TyKind::Defined(DefinedTy {
+                    tid: defined_ty.tid,
+                    genargs: defined_ty
+                        .genargs
+                        .into_iter()
+                        .map(|g| self.fresh_loc_gen_ty(g))
+                        .collect(),
+                }),
+                ty.span,
+            ),
+            TyKind::Gen(_) => Ty::new(self.fresh(), ty.span),
+        }
+    }
+
+    // 関数や型などの定義に存在するジェネリック型について、
+    // 呼び出して使用する際に未確定の場合、
+    // 推論が必要なものとして型変数を割り当てる
+    fn fresh_loc_gen_ty(&mut self, ty: Ty) -> Ty {
+        match ty.kind {
+            TyKind::Int
+            | TyKind::Float
+            | TyKind::Bool
+            | TyKind::Infer(_)
+            | TyKind::Void
+            | TyKind::Gen(_) => ty,
+            TyKind::Fn(fty) => Ty::new(
+                TyKind::Fn(FnTy {
+                    args: fty
+                        .args
+                        .into_iter()
+                        .map(|a| self.fresh_loc_gen_ty(a))
+                        .collect(),
+                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty)),
+                    genargs: fty.genargs,
+                }),
+                ty.span,
+            ),
+            TyKind::Defined(defined_ty) => Ty::new(
+                TyKind::Defined(DefinedTy {
+                    tid: defined_ty.tid,
+                    genargs: defined_ty
+                        .genargs
+                        .into_iter()
+                        .map(|g| self.fresh_loc_gen_ty(g))
+                        .collect(),
+                }),
+                ty.span,
+            ),
+            TyKind::LocGen(_) => Ty::new(self.fresh(), ty.span),
         }
     }
 
