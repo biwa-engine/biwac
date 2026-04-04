@@ -23,37 +23,28 @@ pub enum TyError {
         insufficient_members: Vec<String>,
     },
     InvalidStructLiteralOnAliasType {
-        ty: Ty,
+        ty: Box<Ty>,
         sliteral: Box<StructLiteral>,
     },
-    MethodConfliced {
-        ty: Ty,
-        method1: Box<Ident>,
-        method2: Box<Ident>,
-    },
     MethodNotImplemented {
-        ty: Ty,
+        ty: Box<Ty>,
         method: Box<Ident>,
     },
-    // SymbolNotCallable {
-    //     id: AbsId,
-    //     caller: Span,
-    // },
     StructNotHasMember {
         tid: TyId,
         access: Box<MemberAccess>,
     },
     ExprNotHasMember {
-        ty: Ty,
+        ty: Box<Ty>,
         access: Box<MemberAccess>,
     },
     InvalidBinaryOperationForType {
-        ty: Ty,
+        ty: Box<Ty>,
         op: BinOperator,
         expr: Box<Expr>,
     },
     InvalidUnaryOperationForType {
-        ty: Ty,
+        ty: Box<Ty>,
         op: UnOperator,
         expr: Box<Expr>,
     },
@@ -64,9 +55,19 @@ pub enum TyError {
 
     FnArgLenMismatched(FnTy, FnTy),
     FnGenArgLenMismatched(FnTy, FnTy),
-    TypeConfliced(Ty, Ty),
-    OccursCheckFailed(TyVar, Ty),
+
+    TypeConfliced {
+        t1: Box<Ty>,
+        t2: Box<Ty>,
+    },
+    OccursCheckFailed {
+        tv: Box<TyVar>,
+        ty: Box<Ty>,
+    },
     InsufficientContext,
+    ReturnTypeRequired {
+        rty: Box<Ty>, // 関数が要求する戻り値
+    },
 
     HirError(HirError),
 }

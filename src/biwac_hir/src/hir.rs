@@ -3,12 +3,12 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 pub(crate) mod symbols;
 pub(crate) mod types;
 
-use biwac_base::{ModPath, Span};
+use biwac_base::{ModPath, Pos, Span};
 use biwac_parser::Ident;
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind,
-    InferTy, LocGenTyId, Ty, TyDefContentKind, TyId, ValDefContentKind, ValId,
+    InferTy, LocGenTyId, Ty, TyDefContentKind, TyId, TyKind, ValDefContentKind, ValId,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -73,7 +73,7 @@ pub struct Hir {
     //      fn into(self) { self }
     //  }
     // ```
-    pub special_ty_impls: HashMap<Ty, SpecialTyImpl>,
+    pub special_ty_impls: HashMap<TyKind, SpecialTyImpl>,
 
     // パッケージ内に存在するモジュールの集合
     pub modules: HashSet<ModPath>,
@@ -270,13 +270,13 @@ impl Hir {
     // 型は、ジェネリック引数列が排他である場合は別とみなしてimplを登録する
     pub fn register_impl_value_existence(
         &mut self,
-        ty: Ty,
+        ty: TyKind,
         impl_block_genargs: HashMap<String, (LocGenTyId, Span)>,
         ident: &Ident,
         val_content: ImplValDefContentKind,
     ) -> HirResult<()> {
         match ty {
-            Ty::Defined(defined_ty) => {
+            TyKind::Defined(defined_ty) => {
                 // 型の存在を取得し、ジェネリック引数の長さの一致を検査
                 let ty_existence = self
                     .get_type_existence(&defined_ty.tid)
@@ -298,7 +298,12 @@ impl Hir {
                 if let Some(ty) =
                     resolve_ty_alias(&defined_ty, defined_ty_impl.ty_content.expect_completed())?
                 {
-                    self.register_impl_value_existence(ty, impl_block_genargs, ident, val_content)
+                    self.register_impl_value_existence(
+                        ty.kind,
+                        impl_block_genargs,
+                        ident,
+                        val_content,
+                    )
                 } else {
                     // すでに同名の関連値名(メンバ名、関連関数名、関連定数名)が登録されているとき、
                     // ジェネリック引数列の重複検査をして登録
@@ -316,7 +321,7 @@ impl Hir {
                                 .genargs
                                 .iter()
                                 .zip(defined_ty.genargs.iter())
-                                .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                                .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
                             {
                                 // 引数列すべてが重複判定なら、重複
                                 return Err(HirError::DuplicatedImplementationForType {
@@ -360,7 +365,7 @@ impl Hir {
                     }
                 }
             }
-            Ty::Int | Ty::Float | Ty::Bool => {
+            TyKind::Int | TyKind::Float | TyKind::Bool => {
                 if !impl_block_genargs.is_empty() {
                     panic!("compiler bug: primitive type has no generic arguments")
                 }
@@ -391,9 +396,11 @@ impl Hir {
                     Ok(())
                 }
             }
-            Ty::LocGen(_) => todo!(),
-            Ty::Void | Ty::Fn(_) | Ty::Gen(_) => panic!("impl not supported for this type"),
-            Ty::Infer(_) => panic!("implementation target type must be absolute"),
+            TyKind::LocGen(_) => todo!(),
+            TyKind::Void | TyKind::Fn(_) | TyKind::Gen(_) => {
+                panic!("impl not supported for this type")
+            }
+            TyKind::Infer(_) => panic!("implementation target type must be absolute"),
         }
     }
 
@@ -412,7 +419,12 @@ impl Hir {
             &DefinedTy {
                 tid: tid.clone(),
                 genargs: vec![
-                    Ty::Infer(InferTy::Unknown);
+                    // alias を検索するのにしか使われない
+                    // genargs のため、適当な値を入れる
+                    Ty {
+                        kind: TyKind::Infer(InferTy::Unknown),
+                        span: Span::new(ModPath::Lib, Pos::new(0, 0), Pos::new(0, 0)),
+                    };
                     defined_ty_impl
                         .ty_content
                         .as_type_existence()
@@ -422,8 +434,8 @@ impl Hir {
             },
             defined_ty_impl.ty_content.expect_completed(),
         )? {
-            match ty {
-                Ty::Defined(aliased_defined_ty) => {
+            match ty.kind {
+                TyKind::Defined(aliased_defined_ty) => {
                     self.register_impl_value_definition(
                         &aliased_defined_ty.tid,
                         value_name,
@@ -432,7 +444,7 @@ impl Hir {
                     )?;
                 }
                 _ => {
-                    self.register_special_impl_value_definition(&ty, value_name, fn_body)?;
+                    self.register_special_impl_value_definition(&ty.kind, value_name, fn_body)?;
                 }
             }
         } else {
@@ -479,7 +491,7 @@ impl Hir {
     // 値(fn)の実装の実体(関数のボディ)を登録する
     pub fn register_special_impl_value_definition(
         &mut self,
-        ty: &Ty,
+        ty: &TyKind,
         value_name: &str,
         fn_body: FnDefContentBody,
     ) -> HirResult<()> {
@@ -522,11 +534,11 @@ impl Hir {
     // 種類(関連関数、メソッド、関連定数)は問わない
     pub fn get_impl_value_id_of_type(
         &self,
-        ty: &Ty,
+        ty: &TyKind,
         value_name: &String,
     ) -> HirResult<Option<ImplValId>> {
         match ty {
-            Ty::Defined(defined_ty) => {
+            TyKind::Defined(defined_ty) => {
                 let defined_ty_impl = self
                     .tys
                     .get(&defined_ty.tid)
@@ -536,7 +548,7 @@ impl Hir {
                 if let Some(ty) =
                     resolve_ty_alias(defined_ty, defined_ty_impl.ty_content.expect_completed())?
                 {
-                    self.get_impl_value_id_of_type(&ty, value_name)
+                    self.get_impl_value_id_of_type(&ty.kind, value_name)
                 } else {
                     // ジェネリック引数列が重複する(一致する)ものを探す
                     defined_ty_impl
@@ -547,11 +559,9 @@ impl Hir {
                                 .vals
                                 .iter()
                                 .find(|(_, impl_)| {
-                                    impl_
-                                        .genargs
-                                        .iter()
-                                        .zip(defined_ty.genargs.iter())
-                                        .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                                    impl_.genargs.iter().zip(defined_ty.genargs.iter()).all(
+                                        |(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind),
+                                    )
                                 })
                                 .map(|(impl_vid, impl_)| match &impl_.val_content {
                                     ImplValDefContentKind::Fn(_) => Ok(*impl_vid),
@@ -570,9 +580,9 @@ impl Hir {
     // メソッドのシグニチャ(FnTy)を取得
     // ただし、第一引数selfはその型自体であり、型推論時に必要ないので含まない
     // Ident は caller 側の場所を保持したIdent
-    pub fn get_method_of_type(&self, ty: &Ty, method: &Ident) -> HirResult<Option<FnTy>> {
+    pub fn get_method_of_type(&self, ty: &TyKind, method: &Ident) -> HirResult<Option<Ty>> {
         match ty {
-            Ty::Defined(defined_ty) => {
+            TyKind::Defined(defined_ty) => {
                 let defined_ty_impl = self
                     .tys
                     .get(&defined_ty.tid)
@@ -588,7 +598,7 @@ impl Hir {
                                 .genargs
                                 .iter()
                                 .zip(defined_ty.genargs.iter())
-                                .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                                .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
                         })
                         .map(|impl_| match &impl_.val_content {
                             ImplValDefContentKind::Fn(_) => {
@@ -610,56 +620,72 @@ impl Hir {
                                 let mut assigns = HashMap::new();
                                 for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
                                 {
-                                    if let Ty::LocGen(lgid) = t1 {
-                                        assigns.insert(*lgid, t2.clone());
+                                    if let TyKind::LocGen(lgid) = &t1.kind {
+                                        assigns.insert(*lgid, t2.kind.clone());
                                     }
                                 }
 
-                                Ok(FnTy {
-                                    args: m
-                                        .signature
-                                        .args
-                                        .iter()
-                                        .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
-                                        .collect(),
-                                    rty: Box::new(
-                                        m.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
-                                    ),
-                                    genargs: m
-                                        .signature
-                                        .genargs
-                                        .iter()
-                                        .map(|(_, lgid)| *lgid)
-                                        .collect(),
-                                })
+                                Ok(Ty::new(
+                                    TyKind::Fn(FnTy {
+                                        args: m
+                                            .signature
+                                            .args
+                                            .iter()
+                                            .map(|(_, ty)| {
+                                                ty.clone().embody_by_loc_gen_ty_id(&assigns)
+                                            })
+                                            .collect(),
+                                        rty: Box::new(
+                                            m.signature
+                                                .rty
+                                                .clone()
+                                                .embody_by_loc_gen_ty_id(&assigns),
+                                        ),
+                                        genargs: m
+                                            .signature
+                                            .genargs
+                                            .iter()
+                                            .map(|(_, lgid)| *lgid)
+                                            .collect(),
+                                    }),
+                                    m.signature.span.clone(),
+                                ))
                             }
                             ImplValDefContentKind::NativeMethod(m) => {
                                 // LocGenTyId -> Ty の割り当てがあれば具体化する
                                 let mut assigns = HashMap::new();
                                 for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
                                 {
-                                    if let Ty::LocGen(lgid) = t1 {
-                                        assigns.insert(*lgid, t2.clone());
+                                    if let TyKind::LocGen(lgid) = &t1.kind {
+                                        assigns.insert(*lgid, t2.kind.clone());
                                     }
                                 }
 
-                                Ok(FnTy {
-                                    args: m
-                                        .signature
-                                        .args
-                                        .iter()
-                                        .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
-                                        .collect(),
-                                    rty: Box::new(
-                                        m.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
-                                    ),
-                                    genargs: m
-                                        .signature
-                                        .genargs
-                                        .iter()
-                                        .map(|(_, lgid)| *lgid)
-                                        .collect(),
-                                })
+                                Ok(Ty::new(
+                                    TyKind::Fn(FnTy {
+                                        args: m
+                                            .signature
+                                            .args
+                                            .iter()
+                                            .map(|(_, ty)| {
+                                                ty.clone().embody_by_loc_gen_ty_id(&assigns)
+                                            })
+                                            .collect(),
+                                        rty: Box::new(
+                                            m.signature
+                                                .rty
+                                                .clone()
+                                                .embody_by_loc_gen_ty_id(&assigns),
+                                        ),
+                                        genargs: m
+                                            .signature
+                                            .genargs
+                                            .iter()
+                                            .map(|(_, lgid)| *lgid)
+                                            .collect(),
+                                    }),
+                                    m.signature.span.clone(),
+                                ))
                             }
                         })
                         .transpose()
@@ -667,7 +693,7 @@ impl Hir {
                     Ok(None)
                 }
             }
-            Ty::Int | Ty::Float | Ty::Bool => {
+            TyKind::Int | TyKind::Float | TyKind::Bool => {
                 if let Some(ty_impl) = self.special_ty_impls.get(ty)
                     && let Some(val) = ty_impl.vals.get(&method.id)
                 {
@@ -686,16 +712,32 @@ impl Hir {
                                 val_content: Box::new(val.clone()),
                             })
                         }
-                        ImplValDefContentKind::Method(m) => Ok(Some(FnTy {
-                            args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
-                            rty: Box::new(m.signature.rty.clone()),
-                            genargs: m.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
-                        })),
-                        ImplValDefContentKind::NativeMethod(m) => Ok(Some(FnTy {
-                            args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
-                            rty: Box::new(m.signature.rty.clone()),
-                            genargs: m.signature.genargs.iter().map(|(_, lgid)| *lgid).collect(),
-                        })),
+                        ImplValDefContentKind::Method(m) => Ok(Some(Ty::new(
+                            TyKind::Fn(FnTy {
+                                args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+                                rty: Box::new(m.signature.rty.clone()),
+                                genargs: m
+                                    .signature
+                                    .genargs
+                                    .iter()
+                                    .map(|(_, lgid)| *lgid)
+                                    .collect(),
+                            }),
+                            m.signature.span.clone(),
+                        ))),
+                        ImplValDefContentKind::NativeMethod(m) => Ok(Some(Ty::new(
+                            TyKind::Fn(FnTy {
+                                args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+                                rty: Box::new(m.signature.rty.clone()),
+                                genargs: m
+                                    .signature
+                                    .genargs
+                                    .iter()
+                                    .map(|(_, lgid)| *lgid)
+                                    .collect(),
+                            }),
+                            m.signature.span.clone(),
+                        ))),
                     }
                 } else {
                     Ok(None)
@@ -706,9 +748,9 @@ impl Hir {
     }
 
     // ある型に対する関連関数のシグニチャ(FnTy)を取得する
-    pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee) -> HirResult<FnTy> {
-        match &assoc_callee.ty {
-            Ty::Defined(defined_ty) => {
+    pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee) -> HirResult<Ty> {
+        match &assoc_callee.ty.kind {
+            TyKind::Defined(defined_ty) => {
                 let defined_ty_impl = self
                     .tys
                     .get(&defined_ty.tid)
@@ -737,7 +779,7 @@ impl Hir {
 
                     match &impl_.val_content {
                         ImplValDefContentKind::Fn(f) => {
-                            Ok(FnTy::from(&f.signature))
+                            Ok(f.signature.as_ty())
 
                             // WARN: really?
                             //
@@ -767,7 +809,7 @@ impl Hir {
                             //         .collect(),
                             // })
                         }
-                        ImplValDefContentKind::NativeFn(f) => Ok(FnTy::from(&f.signature)),
+                        ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
                         ImplValDefContentKind::Method(_) => Err(todo!()),
                         ImplValDefContentKind::NativeMethod(_) => Err(todo!()),
                     }
@@ -808,7 +850,7 @@ fn resolve_ty_alias(
                 .genargs
                 .iter()
                 .cloned()
-                .zip(defined_ty.genargs.iter().cloned())
+                .zip(defined_ty.genargs.iter().map(|ty| ty.kind.clone()))
                 .collect::<HashMap<_, _>>();
 
             Ok(Some(alias.right.clone().embody_by_gen_ty_id(&assigns)))

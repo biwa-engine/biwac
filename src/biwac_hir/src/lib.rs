@@ -23,7 +23,7 @@ pub use crate::hir::{
             VarDecl, WhileStmt,
         },
     },
-    types::{DefinedTy, FnTy, InferTy, Ty, TyVar},
+    types::{DefinedTy, FnTy, InferTy, Ty, TyKind, TyVar},
 };
 
 pub type HirResult<T> = Result<T, HirError>;
@@ -51,17 +51,17 @@ pub enum HirError {
         val_content2: Box<ImplValDefContentKind>,
     },
     DuplicatedImplementationForSpecialType {
-        ty: Box<Ty>,
+        ty: Box<TyKind>,
         val_content1: Box<ImplValDefContentKind>,
         val_content2: Box<ImplValDefContentKind>,
     },
     ImplementedValueIsNotMethod {
-        ty: Box<Ty>,
+        ty: Box<TyKind>,
         method: Box<Ident>,                      // caller のspanを含む
         val_content: Box<ImplValDefContentKind>, // 取得された実装
     },
     ImplementedValueIsNotAssoc {
-        ty: Box<Ty>,
+        ty: Box<TyKind>,
         assoc: Box<Ident>,                       // caller のspanを含む
         val_content: Box<ImplValDefContentKind>, // 取得された実装
     },

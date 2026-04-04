@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_hir::{DecledVar, ExprId, Hir, LocGenTyId, LocVarId, Ty, VarIdKind};
+use biwac_hir::{DecledVar, ExprId, Hir, LocGenTyId, LocVarId, Ty, TyKind, VarIdKind};
 use biwac_parser::{DefTyp, Ident, PrimTyp, QualifiedId, TypRepr, TypReprVal};
 
 use crate::{
@@ -44,10 +44,11 @@ impl<'ictx> FnLevelResolveCtx<'ictx> {
     pub(crate) fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
         match &typ.val {
             TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::Int),
-                PrimTyp::Uint => Ok(Ty::Int), // TODO
-                PrimTyp::Float => Ok(Ty::Float),
-                PrimTyp::Bool => Ok(Ty::Bool),
+                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
+                // TODO: Uint
+                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
+                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
+                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
             },
             TypReprVal::Defined(deftyp) => {
                 // deftypがidのみ(ex: `T`)の場合、
@@ -73,7 +74,7 @@ impl<'ictx> FnLevelResolveCtx<'ictx> {
                 if let Some(id) = deftyp.qualid.only_id()
                     && let Some(gid) = self.fn_def_genargs.get(id)
                 {
-                    Ok(Ty::LocGen(*gid))
+                    Ok(Ty::new(TyKind::LocGen(*gid), typ.span.clone()))
                 } else {
                     self.ictx.try_resolve_defined_ty(deftyp, hir)
                 }

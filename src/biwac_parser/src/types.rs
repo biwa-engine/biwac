@@ -34,6 +34,21 @@ pub struct TypRepr {
     pub span: Span,
 }
 
+/// RetTypRepr は関数の戻り値の表明子
+/// 無い場合、つまり Void の場合、
+/// その位置を示すspanのみ持つ
+///  ```biwa
+///  fn foo() -> Int { ... }
+///              ^^^
+///  fn bar() { ... }
+///          ^
+///  ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetTypRepr {
+    Typ(TypRepr),
+    Void(Span),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypReprVal {
     Primitive(PrimTyp),

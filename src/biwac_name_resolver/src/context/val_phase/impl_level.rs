@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biwac_base::Span;
-use biwac_hir::{DefinedTy, Hir, InferTy, LocGenTyId, Ty};
+use biwac_hir::{DefinedTy, Hir, InferTy, LocGenTyId, Ty, TyKind};
 use biwac_parser::{DefTyp, PrimTyp, QualifiedId, TypRepr, TypReprVal};
 
 use crate::{
@@ -50,32 +50,45 @@ impl<'mctx> ImplLevelResolveCtx<'mctx> {
         if let Some(id) = deftyp.qualid.only_id()
             && let Some((gid, _)) = self.impl_block_genargs.get(id)
         {
-            Ok(Ty::LocGen(*gid))
+            Ok(Ty::new(TyKind::LocGen(*gid), deftyp.qualid.span.clone()))
         } else {
             // ジェネリック引数の数が合うか検査済み
             let (tid, ty_existence) = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
 
-            Ok(Ty::Defined(DefinedTy {
-                tid,
-                genargs: if let Some(genargs) = &deftyp.genargs {
-                    genargs
-                        .iter()
-                        .map(|typ| self.try_resolve_ty(typ, hir))
-                        .collect::<RsvResult<_>>()?
-                } else {
-                    vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len]
-                },
-            }))
+            let garg_span = Span::new(
+                deftyp.qualid.span.module().clone(),
+                deftyp.qualid.span.end().clone(),
+                deftyp.qualid.span.end().clone(),
+            );
+
+            Ok(Ty::new(
+                TyKind::Defined(DefinedTy {
+                    tid,
+                    genargs: if let Some(genargs) = &deftyp.genargs {
+                        genargs
+                            .iter()
+                            .map(|typ| self.try_resolve_ty(typ, hir))
+                            .collect::<RsvResult<_>>()?
+                    } else {
+                        vec![
+                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                            ty_existence.genarg_len
+                        ]
+                    },
+                }),
+                deftyp.qualid.span.clone(),
+            ))
         }
     }
 
     pub(crate) fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
         match &typ.val {
             TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::Int),
-                PrimTyp::Uint => Ok(Ty::Int), // TODO
-                PrimTyp::Float => Ok(Ty::Float),
-                PrimTyp::Bool => Ok(Ty::Bool),
+                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
+                // TODO: Uint
+                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
+                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
+                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
             },
             TypReprVal::Defined(deftyp) => self.try_resolve_defined_ty(deftyp, hir),
         }

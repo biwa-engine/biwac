@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use biwac_hir::{GenTyId, Hir, LocGenTyId, Ty};
+use biwac_hir::{GenTyId, Hir, LocGenTyId, TyKind};
 
 use crate::arch::typescript::{AsOxc, IntoOxc, Mangled, span};
 
@@ -16,7 +16,7 @@ impl Mangled for LocGenTyId {
     }
 }
 
-impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for Ty {
+impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
     fn as_oxc(
         &'a self,
         _env: &mut super::FnAstBuildEnv<'a>,
@@ -65,7 +65,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for Ty {
                                         defined_ty
                                             .genargs
                                             .iter()
-                                            .map(|ty| ty.clone().into_oxc(allocator, hir)),
+                                            .map(|ty| ty.kind.clone().into_oxc(allocator, hir)),
                                         allocator,
                                     ),
                                 },
@@ -123,11 +123,11 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for Ty {
     }
 }
 
-impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for Ty {
+impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
     fn into_oxc(
         self,
         allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
+        _hir: &Hir,
     ) -> oxc_ast::ast::TSType<'a> {
         match self {
             Self::Infer(_) => panic!("compiler bug, type inferrence failed for type variable"),
@@ -171,7 +171,7 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for Ty {
                                         defined_ty
                                             .genargs
                                             .into_iter()
-                                            .map(|ty| ty.into_oxc(allocator, hir)),
+                                            .map(|ty| ty.kind.into_oxc(allocator, _hir)),
                                         allocator,
                                     ),
                                 },

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use biwac_hir::{ExprId, Hir, InferTy, LocVarId, Ty, TyVar};
+use biwac_hir::{ExprId, Hir, InferTy, LocVarId, Ty, TyKind, TyVar};
 
 #[derive(Debug, Clone)]
 pub struct TyCtx {
@@ -61,8 +61,8 @@ impl<'tctx> FnTyCtx<'tctx> {
     }
 
     #[inline]
-    pub(crate) fn fresh(&mut self) -> Ty {
-        Ty::Infer(InferTy::Var(self.new_ty_var()))
+    pub(crate) fn fresh(&mut self) -> TyKind {
+        TyKind::Infer(InferTy::Var(self.new_ty_var()))
     }
 
     pub(crate) fn ty_var_of_infer_ty(&mut self, i: InferTy) -> TyVar {

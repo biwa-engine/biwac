@@ -1,6 +1,6 @@
 use biwac_hir::{
     BinaryExpr, BlockExpr, Callee, Expr, ExprVal, FnCall, IfExpr, Literal, MemberAccess,
-    MethodCall, Primary, Stmt, StructLiteral, Ty, UnaryExpr, Variable,
+    MethodCall, Primary, Stmt, StructLiteral, TyKind, UnaryExpr, Variable,
 };
 use biwac_parser::Ident;
 
@@ -140,14 +140,17 @@ impl TryResolve<&biwac_parser::Literal> for Literal {
             biwac_parser::Literal::Bool(b) => Ok(Self::Bool(b.clone())),
             biwac_parser::Literal::Struct(s) => Ok(Self::Struct(StructLiteral {
                 // NOTE: struct リテラルにはジェネリック型注釈が必要か否か
-                tid: match fctx.try_resolve_defined_ty(
-                    &biwac_parser::DefTyp {
-                        qualid: s.qualid.clone(),
-                        genargs: None, // ジェネリック引数列が明示されていない
-                    },
-                    hir,
-                )? {
-                    Ty::Defined(defined_ty) => defined_ty.tid,
+                tid: match fctx
+                    .try_resolve_defined_ty(
+                        &biwac_parser::DefTyp {
+                            qualid: s.qualid.clone(),
+                            genargs: None, // ジェネリック引数列が明示されていない
+                        },
+                        hir,
+                    )?
+                    .kind
+                {
+                    TyKind::Defined(defined_ty) => defined_ty.tid,
                     _ => panic!("compiler bug: not a user-defined type"),
                 },
                 members: s

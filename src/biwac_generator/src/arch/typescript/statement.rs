@@ -40,6 +40,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                             .var_tys
                                             .get(&v.id)
                                             .unwrap()
+                                            .kind
                                             .as_oxc(env, allocator, hir),
                                     },
                                     allocator,

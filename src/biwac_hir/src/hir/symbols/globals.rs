@@ -103,6 +103,7 @@ pub struct FnDefContentSignature {
     pub rty: Ty,
 
     pub genargs: Vec<(Ident, LocGenTyId)>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -130,7 +131,7 @@ pub struct NativeFnDefContent {
     pub impl_genargs: Vec<(Ident, LocGenTyId)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct NativeFnArgDecl {
     pub ty: Ty,
     pub id: Ident,

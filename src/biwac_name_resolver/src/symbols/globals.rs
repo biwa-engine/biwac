@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use biwac_hir::{Expr, FnDefContentBody, Hir, Stmt, Ty};
+use biwac_base::Span;
+use biwac_hir::{Expr, FnDefContentBody, Hir, Stmt, Ty, TyKind};
+use biwac_parser::RetTypRepr;
 
 use crate::{
     ModuleLevelTryResolveTy, ResolveError, RsvResult, TryResolve, TryResolveTy,
@@ -129,27 +131,28 @@ impl ModuleLevelTryResolveTy<&biwac_parser::StructDef> for biwac_hir::StructDefC
 //     }
 // }
 
-impl TryResolveTy<(&Vec<biwac_parser::ArgDecl>, &Option<biwac_parser::TypRepr>)>
+impl TryResolveTy<(&biwac_parser::ArgDeclList, &biwac_parser::RetTypRepr)>
     for biwac_hir::FnDefContentSignature
 {
     fn try_resolve<'mctx>(
-        value: (&Vec<biwac_parser::ArgDecl>, &Option<biwac_parser::TypRepr>),
+        value: (&biwac_parser::ArgDeclList, &biwac_parser::RetTypRepr),
         fctx: &crate::context::ty_phase::fn_level::FnLevelTyResolveCtx<'mctx>,
         hir: &Hir,
     ) -> crate::RsvResult<Self> {
         let args = value
             .0
+            .args
             .iter()
             .map(|arg| Ok((arg.id.clone(), fctx.try_resolve_ty(&arg.typ, hir)?)))
             .collect::<RsvResult<Vec<_>>>()?;
 
-        let rty = if let Some(typ) = &value.1 {
-            fctx.try_resolve_ty(typ, hir)?
-        } else {
-            Ty::Void
+        let rty = match &value.1 {
+            RetTypRepr::Typ(typ) => fctx.try_resolve_ty(typ, hir)?,
+            RetTypRepr::Void(span) => Ty::new(TyKind::Void, span.clone()),
         };
 
         Ok(biwac_hir::FnDefContentSignature {
+            span: Span::merge(&value.0.span, &rty.span),
             args,
             rty,
             genargs: vec![],

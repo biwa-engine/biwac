@@ -318,7 +318,7 @@ impl ResolveCtx {
                             )?;
 
                             self.hir.register_impl_value_existence(
-                                self_ty,
+                                self_ty.kind,
                                 ictx.impl_block_genargs,
                                 &fn_def.id.clone(),
                                 ImplValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
@@ -364,7 +364,7 @@ impl ResolveCtx {
                             )?;
 
                             self.hir.register_impl_value_existence(
-                                self_ty,
+                                self_ty.kind,
                                 ictx.impl_block_genargs,
                                 &fn_def.id.clone(),
                                 ImplValDefContentKind::NativeFn(Box::new(
@@ -414,7 +414,7 @@ impl ResolveCtx {
 
                         // メソッドとして登録
                         self.hir.register_impl_value_existence(
-                            self_ty,
+                            self_ty.kind,
                             ictx.impl_block_genargs,
                             &method_def.id.clone(),
                             ImplValDefContentKind::Method(Box::new(
@@ -441,7 +441,7 @@ impl ResolveCtx {
 
                         // メソッドとして登録
                         self.hir.register_impl_value_existence(
-                            self_ty.clone(),
+                            self_ty.kind.clone(),
                             ictx.impl_block_genargs,
                             &method_def.id.clone(),
                             ImplValDefContentKind::NativeMethod(Box::new(

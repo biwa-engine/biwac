@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use biwac_base::{ModPath, Span};
-use biwac_hir::{DefinedTy, FnTy, GenTyId, Hir, Ty, TyId, TypeAliasDefContent};
+use biwac_hir::{DefinedTy, FnTy, GenTyId, Hir, Ty, TyId, TyKind, TypeAliasDefContent};
 use biwac_parser::{PrimTyp, TypReprVal, TypeAlias};
 
 use crate::{
@@ -69,10 +69,10 @@ impl<'ast> TyAliasResolveCtx<'ast> {
         for (tid, alias) in &self.alias_defs {
             let (ty, genargs) = match &alias.right.val {
                 TypReprVal::Primitive(p) => match p {
-                    PrimTyp::Int => (Ty::Int, vec![]),
-                    PrimTyp::Uint => (Ty::Int, vec![]), // TODO
-                    PrimTyp::Float => (Ty::Float, vec![]),
-                    PrimTyp::Bool => (Ty::Bool, vec![]),
+                    PrimTyp::Int => (Ty::new(TyKind::Int, alias.right.span.clone()), vec![]),
+                    PrimTyp::Uint => (Ty::new(TyKind::Int, alias.right.span.clone()), vec![]), // TODO
+                    PrimTyp::Float => (Ty::new(TyKind::Float, alias.right.span.clone()), vec![]),
+                    PrimTyp::Bool => (Ty::new(TyKind::Bool, alias.right.span.clone()), vec![]),
                 },
                 TypReprVal::Defined(_) => {
                     let mctx = self
@@ -187,8 +187,8 @@ impl<'ast> TyAliasResolveCtx<'ast> {
     }
 
     fn normalize_ty(&self, ty: Ty) -> Ty {
-        match ty {
-            Ty::Defined(defined_ty) => {
+        match ty.kind {
+            TyKind::Defined(defined_ty) => {
                 // すでに正規化済みならそれを使用
                 if let Some((normalized_ty, genargs)) = self.normalized_aliases.get(&defined_ty.tid)
                 {
@@ -197,12 +197,12 @@ impl<'ast> TyAliasResolveCtx<'ast> {
                         panic!("generic argument mismatch");
                     }
 
-                    // GenTyId -> Ty の割り当て
+                    // GenTyId -> TyKind の割り当て
                     let assigns = genargs
                         .iter()
                         .cloned()
-                        .zip(defined_ty.genargs)
-                        .collect::<HashMap<GenTyId, Ty>>();
+                        .zip(defined_ty.genargs.iter().map(|ty| ty.kind.clone()))
+                        .collect::<HashMap<GenTyId, TyKind>>();
 
                     // ジェネリクス型を代入して具体化する
                     normalized_ty.clone().embody_by_gen_ty_id(&assigns)
@@ -220,8 +220,8 @@ impl<'ast> TyAliasResolveCtx<'ast> {
                     let assigns = genargs
                         .iter()
                         .cloned()
-                        .zip(defined_ty.genargs)
-                        .collect::<HashMap<GenTyId, Ty>>();
+                        .zip(defined_ty.genargs.iter().map(|ty| ty.kind.clone()))
+                        .collect::<HashMap<GenTyId, TyKind>>();
 
                     // ジェネリクス型を代入して具体化する
                     let embodied_ty = aliased_ty.clone().embody_by_gen_ty_id(&assigns);
@@ -232,48 +232,59 @@ impl<'ast> TyAliasResolveCtx<'ast> {
                     // name_resolved_aliases にないならば
                     // type alias 以外のユーザ定義型(struct, enum)
                     // であることは名前解決時に保証済み
-                    Ty::Defined(DefinedTy {
-                        tid: defined_ty.tid.clone(),
-                        genargs: defined_ty
-                            .genargs
-                            .into_iter()
-                            .map(|t| self.normalize_ty(t))
-                            .collect(),
-                    })
+                    Ty::new(
+                        TyKind::Defined(DefinedTy {
+                            tid: defined_ty.tid.clone(),
+                            genargs: defined_ty
+                                .genargs
+                                .into_iter()
+                                .map(|t| self.normalize_ty(t))
+                                .collect(),
+                        }),
+                        ty.span,
+                    )
                 }
             }
-            Ty::Fn(fty) => Ty::Fn(FnTy {
-                args: fty
-                    .args
-                    .into_iter()
-                    .map(|ty| self.normalize_ty(ty))
-                    .collect(),
-                rty: Box::new(self.normalize_ty(*fty.rty)),
-                genargs: fty.genargs,
-            }),
-
-            x => x,
+            TyKind::Fn(fty) => Ty::new(
+                TyKind::Fn(FnTy {
+                    args: fty
+                        .args
+                        .into_iter()
+                        .map(|ty| self.normalize_ty(ty))
+                        .collect(),
+                    rty: Box::new(self.normalize_ty(*fty.rty)),
+                    genargs: fty.genargs,
+                }),
+                ty.span,
+            ),
+            _ => ty,
         }
     }
 }
 
 // 型の依存関係にあるユーザ定義型(のTyId)を収集する
 fn collect_alias_deps(ty: &Ty, tids: &mut Vec<TyId>) {
-    match ty {
-        Ty::Defined(defined_ty) => {
+    match &ty.kind {
+        TyKind::Defined(defined_ty) => {
             tids.push(defined_ty.tid.clone());
 
             for arg in &defined_ty.genargs {
                 collect_alias_deps(arg, tids);
             }
         }
-        Ty::Fn(fty) => {
+        TyKind::Fn(fty) => {
             for arg in &fty.args {
                 collect_alias_deps(arg, tids);
             }
 
             collect_alias_deps(&fty.rty, tids);
         }
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Infer(_) | Ty::Gen(_) | Ty::LocGen(_) => {}
+        TyKind::Int
+        | TyKind::Float
+        | TyKind::Bool
+        | TyKind::Void
+        | TyKind::Infer(_)
+        | TyKind::Gen(_)
+        | TyKind::LocGen(_) => {}
     }
 }

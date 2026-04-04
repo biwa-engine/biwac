@@ -1,6 +1,6 @@
 use biwac_hir::{
-    AssignStmt, BlockStmt, Expr, ExprStmt, IfStmt, InferTy, Primary, ReturnStmt, Stmt, Ty, VarDecl,
-    WhileStmt,
+    AssignStmt, BlockStmt, Expr, ExprStmt, IfStmt, InferTy, Primary, ReturnStmt, Stmt, Ty, TyKind,
+    VarDecl, WhileStmt,
 };
 use biwac_parser::types::TypDecl;
 
@@ -114,7 +114,7 @@ impl TryResolve<&biwac_parser::VarDecl> for VarDecl {
         // 変数の宣言をcontextに登録
         let ty = match &value.typ {
             TypDecl::Typ(typ) => fctx.try_resolve_ty(typ, hir)?,
-            TypDecl::Any => Ty::Infer(InferTy::Unknown), // 型が不明で推論を要する
+            TypDecl::Any => Ty::new(TyKind::Infer(InferTy::Unknown), value.id.span.clone()), // 型が不明で推論を要する
         };
         let id = fctx.declare_variable(&value.id, ty)?;
 

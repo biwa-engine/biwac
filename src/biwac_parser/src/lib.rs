@@ -17,14 +17,15 @@ pub use symbols::{
         if_expr::IfExpr,
     },
     globals::{
-        ArgDecl, FnDef, Globals, ImportDecl, MethodDef, NativeFnDef, StructDef, TypeAlias, TypeDef,
+        ArgDecl, ArgDeclList, FnDef, Globals, ImportDecl, MethodDef, NativeFnDef, StructDef,
+        TypeAlias, TypeDef,
     },
     statements::{
         AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt,
         vardecl::VarDecl, while_stmt::WhileStmt,
     },
 };
-pub use types::{DefTyp, GenArg, PrimTyp, TypRepr, TypReprVal};
+pub use types::{DefTyp, GenArg, PrimTyp, RetTypRepr, TypRepr, TypReprVal};
 
 #[derive(Debug, Clone)]
 pub enum ParseError {

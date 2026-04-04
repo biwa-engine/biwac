@@ -5,7 +5,7 @@ pub(crate) mod context;
 use biwac_hir::{
     BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir,
     ImplValDefContentKind, InferTy, Literal, LocGenTyId, MemberAccess, Primary, Stmt,
-    StructLiteral, Ty, TyDefContentKind, TyId, TyVar, ValDefContentKind, VarIdKind,
+    StructLiteral, Ty, TyDefContentKind, TyId, TyKind, TyVar, ValDefContentKind, VarIdKind,
 };
 use biwac_parser::{BinOperator, Ident, UnOperator};
 
@@ -25,25 +25,33 @@ struct DefinedTyCtx {
 }
 
 impl<'tctx> FnTyCtx<'tctx> {
-    fn apply(&mut self, t: Ty) -> Ty {
+    fn apply(&mut self, t: TyKind) -> TyKind {
         match t {
-            Ty::Infer(i) => match i {
+            TyKind::Infer(i) => match i {
                 InferTy::Var(v) => {
                     if let Some(t2) = self.substitutions.get(&v) {
-                        self.apply(t2.clone())
+                        self.apply(t2.kind.clone())
                     } else {
-                        Ty::Infer(i)
+                        TyKind::Infer(i)
                     }
                 }
                 InferTy::Unknown => self.fresh(),
             },
-            Ty::Fn(f) => Ty::Fn(FnTy {
-                args: f.args.into_iter().map(|a| self.apply(a)).collect(),
-                rty: Box::new(self.apply(*f.rty)),
+            TyKind::Fn(f) => TyKind::Fn(FnTy {
+                args: f
+                    .args
+                    .into_iter()
+                    .map(|a| Ty::new(self.apply(a.kind), a.span))
+                    .collect(),
+                rty: Box::new(Ty::new(self.apply(f.rty.kind), f.rty.span)),
                 genargs: f.genargs,
             }),
-            x => x,
+            _ => t,
         }
+    }
+
+    fn apply_ty(&mut self, t: Ty) -> Ty {
+        Ty::new(self.apply(t.kind), t.span)
     }
 
     // TODO:
@@ -53,23 +61,27 @@ impl<'tctx> FnTyCtx<'tctx> {
     //      span: Span,
     //  }
     //  などとして渡すべき
-    fn unify(&mut self, t1: Ty, t2: Ty) -> TyResult<Ty> {
-        let t1 = self.apply(t1);
-        let t2 = self.apply(t2);
+    fn unify(&mut self, t1: Ty, t2: Ty) -> TyResult<TyKind> {
+        let t1 = self.apply_ty(t1);
+        let t2 = self.apply_ty(t2);
 
         // FIXME: inefficient clone to return Err
-        match (t1.clone(), t2.clone()) {
-            (Ty::Infer(i), t) | (t, Ty::Infer(i)) => {
-                let t = self.apply(t);
+        match (t1.clone().kind, t2.clone().kind) {
+            (TyKind::Infer(i), tk) | (tk, TyKind::Infer(i)) => {
+                let tk = self.apply(tk);
                 let v = self.ty_var_of_infer_ty(i); // 型変数を取得(なければ新規割り当て)
-                if t == Ty::Infer(InferTy::Var(v)) {
-                    Ok(t)
-                } else if occurs(&v, &t) {
-                    Err(TyError::OccursCheckFailed(v, t))
+                let ty = Ty::new(tk.clone(), t1.span.clone());
+                if tk == TyKind::Infer(InferTy::Var(v)) {
+                    Ok(tk)
+                } else if occurs(&v, &tk) {
+                    Err(TyError::OccursCheckFailed {
+                        tv: Box::new(v),
+                        ty: Box::new(ty),
+                    })
                 } else {
-                    self.substitutions.insert(v, t.clone());
+                    self.substitutions.insert(v, ty.clone());
 
-                    Ok(t)
+                    Ok(tk)
                 }
             }
             //  NOTE: FnTy について
@@ -78,7 +90,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             //  let f: (Int, Int -> Int) = (x, y) -> { x + y };
             //  ```
             //  など、単に型が等しい必要がある箇所について検査する
-            (Ty::Fn(fty1), Ty::Fn(fty2)) => {
+            (TyKind::Fn(fty1), TyKind::Fn(fty2)) => {
                 if fty1.args.len() != fty2.args.len() {
                     Err(TyError::FnArgLenMismatched(fty1, fty2))
                 } else if fty1.genargs.len() != fty2.genargs.len() {
@@ -88,12 +100,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                         .args
                         .into_iter()
                         .zip(fty2.args.into_iter())
-                        .map(|(a1, a2)| self.unify(a1, a2))
+                        .map(|(a1, a2)| {
+                            let a1_span = a1.span.clone();
+                            Ok(Ty::new(self.unify(a1, a2)?, a1_span))
+                        })
                         .collect::<TyResult<_>>()?;
 
-                    let rty = self.unify(*fty1.rty, *fty2.rty)?;
+                    let rty_span = fty1.rty.span.clone();
+                    let rty = Ty::new(self.unify(*fty1.rty, *fty2.rty)?, rty_span);
 
-                    Ok(Ty::Fn(FnTy {
+                    Ok(TyKind::Fn(FnTy {
                         args,
                         rty: Box::new(rty),
                         genargs: fty2.genargs,
@@ -101,17 +117,20 @@ impl<'tctx> FnTyCtx<'tctx> {
                     }))
                 }
             }
-            (Ty::Defined(defined_ty1), Ty::Defined(defined_ty2)) => {
+            (TyKind::Defined(defined_ty1), TyKind::Defined(defined_ty2)) => {
                 if defined_ty1.tid == defined_ty2.tid {
                     if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
                         let genargs = defined_ty1
                             .genargs
                             .into_iter()
                             .zip(defined_ty2.genargs.into_iter())
-                            .map(|(g1, g2)| self.unify(g1, g2))
+                            .map(|(g1, g2)| {
+                                let g1_span = g1.span.clone();
+                                Ok(Ty::new(self.unify(g1, g2)?, g1_span))
+                            })
                             .collect::<TyResult<_>>()?;
 
-                        Ok(Ty::Defined(DefinedTy {
+                        Ok(TyKind::Defined(DefinedTy {
                             tid: defined_ty1.tid,
                             genargs,
                         }))
@@ -120,10 +139,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                         panic!("compiler bug: generic argument length mismatched")
                     }
                 } else {
-                    Err(TyError::TypeConfliced(t1, t2))
+                    Err(TyError::TypeConfliced {
+                        t1: Box::new(t1),
+                        t2: Box::new(t2),
+                    })
                 }
             }
-            (Ty::Gen(_), _) | (_, Ty::Gen(_)) => {
+            (TyKind::Gen(_), _) | (_, TyKind::Gen(_)) => {
                 // Ty::Gen(GenTyId) は型定義しにしか現れない
                 panic!("compiler bug: unresolved generic type found")
             }
@@ -131,60 +153,72 @@ impl<'tctx> FnTyCtx<'tctx> {
                 if x == y {
                     Ok(x)
                 } else {
-                    Err(TyError::TypeConfliced(t1, t2))
+                    Err(TyError::TypeConfliced {
+                        t1: Box::new(t1),
+                        t2: Box::new(t2),
+                    })
                 }
             }
         }
     }
 
     // callee の型を具体化する
-    fn call_embody(&self, callee_ty: Ty, ctx: &mut CallCtx) -> Ty {
+    fn call_embody(&self, callee_ty: TyKind, ctx: &mut CallCtx) -> TyKind {
         match callee_ty {
-            Ty::LocGen(lgid) => {
+            TyKind::LocGen(lgid) => {
                 if let Some(ty) = ctx.gen_assigns.get(&lgid) {
-                    ty.clone()
+                    ty.kind.clone()
                 } else {
                     callee_ty
                 }
             }
-            Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+            TyKind::Defined(defined_ty) => TyKind::Defined(DefinedTy {
                 tid: defined_ty.tid,
                 genargs: defined_ty
                     .genargs
                     .into_iter()
-                    .map(|ty| self.call_embody(ty, ctx))
+                    .map(|ty| Ty::new(self.call_embody(ty.kind, ctx), ty.span))
                     .collect(),
             }),
-            Ty::Fn(fty) => Ty::Fn(FnTy {
+            TyKind::Fn(fty) => TyKind::Fn(FnTy {
                 args: fty
                     .args
                     .into_iter()
-                    .map(|ty| self.call_embody(ty, ctx))
+                    .map(|ty| Ty::new(self.call_embody(ty.kind, ctx), ty.span))
                     .collect(),
-                rty: Box::new(self.call_embody(*fty.rty, ctx)),
+                rty: Box::new(Ty::new(self.call_embody(fty.rty.kind, ctx), fty.rty.span)),
                 genargs: fty.genargs,
             }),
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Gen(_) | Ty::Infer(_) => callee_ty,
+            TyKind::Int
+            | TyKind::Float
+            | TyKind::Bool
+            | TyKind::Void
+            | TyKind::Gen(_)
+            | TyKind::Infer(_) => callee_ty,
         }
     }
 
-    fn call_unify(&mut self, callee_ty: Ty, caller_ty: Ty, ctx: &mut CallCtx) -> TyResult<Ty> {
-        let callee_ty = self.apply(callee_ty);
-        let caller_ty = self.apply(caller_ty);
+    fn call_unify(&mut self, callee_ty: Ty, caller_ty: Ty, ctx: &mut CallCtx) -> TyResult<TyKind> {
+        let callee_ty = self.apply_ty(callee_ty);
+        let caller_ty = self.apply_ty(caller_ty);
 
-        match (callee_ty.clone(), caller_ty.clone()) {
-            (Ty::Infer(i), t) | (t, Ty::Infer(i)) => {
-                let t = self.apply(t);
-                let t = self.call_embody(t, ctx);
+        match (callee_ty.kind.clone(), caller_ty.kind.clone()) {
+            (TyKind::Infer(i), tk) | (tk, TyKind::Infer(i)) => {
+                let tk = self.apply(tk);
+                let tk = self.call_embody(tk, ctx);
+                let ty = Ty::new(tk.clone(), caller_ty.span.clone()); // caller 側のspanをとる
                 let v = self.ty_var_of_infer_ty(i); // 型変数を取得(なければ新規割り当て)
-                if t == Ty::Infer(InferTy::Var(v)) {
-                    Ok(t)
-                } else if occurs(&v, &t) {
-                    Err(TyError::OccursCheckFailed(v, t))
+                if tk == TyKind::Infer(InferTy::Var(v)) {
+                    Ok(tk)
+                } else if occurs(&v, &tk) {
+                    Err(TyError::OccursCheckFailed {
+                        tv: Box::new(v),
+                        ty: Box::new(ty),
+                    })
                 } else {
-                    self.substitutions.insert(v, t.clone());
+                    self.substitutions.insert(v, ty.clone());
 
-                    Ok(t)
+                    Ok(tk)
                 }
             }
             // NOTE:
@@ -193,7 +227,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             // また、caller に現れる LocGenTyId は impl block やその関数で宣言された
             // ジェネリック型であり、
             // callee に現れる LocGenTyId とは別であるので注意が必要
-            (Ty::Fn(callee_fty), Ty::Fn(caller_fty)) => {
+            (TyKind::Fn(callee_fty), TyKind::Fn(caller_fty)) => {
                 if callee_fty.args.len() != caller_fty.args.len() {
                     Err(TyError::FnArgLenMismatched(callee_fty, caller_fty))
                 } else {
@@ -203,17 +237,23 @@ impl<'tctx> FnTyCtx<'tctx> {
                         .args
                         .into_iter()
                         .zip(caller_fty.args.into_iter())
-                        .map(|(a1, a2)| self.call_unify(a1, a2, ctx))
+                        .map(|(a1, a2)| {
+                            let a2_span = a2.span.clone();
+                            Ok(Ty::new(self.call_unify(a1, a2, ctx)?, a2_span))
+                        })
                         .collect::<TyResult<_>>()?;
 
-                    let rty = self.call_unify(*callee_fty.rty, *caller_fty.rty, ctx)?;
+                    let rty = Ty::new(
+                        self.call_unify(*callee_fty.rty, *caller_fty.rty, ctx)?,
+                        caller_ty.span,
+                    );
                     // genargs に登場する LocGenTyId が必ず引数または戻り値に現れるという前提のもと、
                     // この時点で gen_assigns にはすべての LocGenTyId に対する Ty
                     // の割り当てが計算されている
                     //
                     // NOTE: FnTyに割り当てを記録しても良い
 
-                    Ok(Ty::Fn(FnTy {
+                    Ok(TyKind::Fn(FnTy {
                         args,
                         rty: Box::new(rty),
                         genargs: caller_fty.genargs,
@@ -221,17 +261,20 @@ impl<'tctx> FnTyCtx<'tctx> {
                     }))
                 }
             }
-            (Ty::Defined(defined_ty1), Ty::Defined(defined_ty2)) => {
+            (TyKind::Defined(defined_ty1), TyKind::Defined(defined_ty2)) => {
                 if defined_ty1.tid == defined_ty2.tid {
                     if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
                         let genargs = defined_ty1
                             .genargs
                             .into_iter()
                             .zip(defined_ty2.genargs.into_iter())
-                            .map(|(g1, g2)| self.call_unify(g1, g2, ctx))
+                            .map(|(g1, g2)| {
+                                let g2_span = g2.span.clone();
+                                Ok(Ty::new(self.call_unify(g1, g2, ctx)?, g2_span))
+                            })
                             .collect::<TyResult<_>>()?;
 
-                        Ok(Ty::Defined(DefinedTy {
+                        Ok(TyKind::Defined(DefinedTy {
                             tid: defined_ty1.tid,
                             genargs,
                         }))
@@ -240,24 +283,28 @@ impl<'tctx> FnTyCtx<'tctx> {
                         panic!("compiler bug: generic argument length mismatched")
                     }
                 } else {
-                    Err(TyError::TypeConfliced(callee_ty, caller_ty))
+                    Err(TyError::TypeConfliced {
+                        t1: Box::new(callee_ty),
+                        t2: Box::new(caller_ty),
+                    })
                 }
             }
-            (Ty::LocGen(lgid), caller_ty) => match ctx.gen_assigns.entry(lgid) {
+            (TyKind::LocGen(lgid), _) => match ctx.gen_assigns.entry(lgid) {
                 Entry::Vacant(e) => {
                     e.insert(caller_ty.clone());
 
-                    Ok(caller_ty)
+                    Ok(caller_ty.kind)
                 }
                 Entry::Occupied(mut e) => {
                     // 両方 caller 由来の型であるため、unify() でよい
-                    let t = self.unify(e.get().clone(), caller_ty)?;
-                    e.insert(t.clone());
+                    let caller_ty_span = caller_ty.span.clone();
+                    let ty = Ty::new(self.unify(e.get().clone(), caller_ty)?, caller_ty_span);
+                    e.insert(ty.clone());
 
-                    Ok(t)
+                    Ok(ty.kind)
                 }
             },
-            (Ty::Gen(_), _) | (_, Ty::Gen(_)) => {
+            (TyKind::Gen(_), _) | (_, TyKind::Gen(_)) => {
                 // Ty::Gen(GenTyId) は型定義にしか現れない
                 panic!("compiler bug: unresolved generic type found")
             }
@@ -266,7 +313,10 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // WARN: really?
                     Ok(self.call_embody(x, ctx))
                 } else {
-                    Err(TyError::TypeConfliced(callee_ty, caller_ty))
+                    Err(TyError::TypeConfliced {
+                        t1: Box::new(callee_ty),
+                        t2: Box::new(caller_ty),
+                    })
                 }
             }
         }
@@ -280,23 +330,27 @@ impl<'tctx> FnTyCtx<'tctx> {
         definition_ty: Ty,
         user_ty: Ty,
         ctx: &mut DefinedTyCtx,
-    ) -> TyResult<Ty> {
-        let definition_ty = self.apply(definition_ty);
-        let user_ty = self.apply(user_ty);
+    ) -> TyResult<TyKind> {
+        let definition_ty = self.apply_ty(definition_ty);
+        let user_ty = self.apply_ty(user_ty);
 
         // FIXME: inefficient clone to return Err
-        match (definition_ty.clone(), user_ty.clone()) {
-            (Ty::Infer(i), t) | (t, Ty::Infer(i)) => {
-                let t = self.apply(t);
+        match (definition_ty.kind.clone(), user_ty.kind.clone()) {
+            (TyKind::Infer(i), tk) | (tk, TyKind::Infer(i)) => {
+                let tk = self.apply(tk);
                 let v = self.ty_var_of_infer_ty(i); // 型変数を取得(なければ新規割り当て)
-                if t == Ty::Infer(InferTy::Var(v)) {
-                    Ok(t)
-                } else if occurs(&v, &t) {
-                    Err(TyError::OccursCheckFailed(v, t))
+                let ty = Ty::new(tk.clone(), user_ty.span.clone()); // user 側のspanをとる
+                if tk == TyKind::Infer(InferTy::Var(v)) {
+                    Ok(tk)
+                } else if occurs(&v, &tk) {
+                    Err(TyError::OccursCheckFailed {
+                        tv: Box::new(v),
+                        ty: Box::new(ty),
+                    })
                 } else {
-                    self.substitutions.insert(v, t.clone());
+                    self.substitutions.insert(v, ty.clone());
 
-                    Ok(t)
+                    Ok(tk)
                 }
             }
             //  NOTE: FnTy について
@@ -305,7 +359,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             //  let f: (Int, Int -> Int) = (x, y) -> { x + y };
             //  ```
             //  など、単に型が等しい必要がある箇所について検査する
-            (Ty::Fn(fty1), Ty::Fn(fty2)) => {
+            (TyKind::Fn(fty1), TyKind::Fn(fty2)) => {
                 if fty1.args.len() != fty2.args.len() {
                     Err(TyError::FnArgLenMismatched(fty1, fty2))
                 } else if fty1.genargs.len() != fty2.genargs.len() {
@@ -315,12 +369,18 @@ impl<'tctx> FnTyCtx<'tctx> {
                         .args
                         .into_iter()
                         .zip(fty2.args.into_iter())
-                        .map(|(a1, a2)| self.defined_ty_unify(a1, a2, ctx))
+                        .map(|(a1, a2)| {
+                            let a2_span = a2.span.clone();
+                            Ok(Ty::new(self.defined_ty_unify(a1, a2, ctx)?, a2_span))
+                        })
                         .collect::<TyResult<_>>()?;
 
-                    let rty = self.defined_ty_unify(*fty1.rty, *fty2.rty, ctx)?;
+                    let rty = Ty::new(
+                        self.defined_ty_unify(*fty1.rty, *fty2.rty, ctx)?,
+                        user_ty.span,
+                    );
 
-                    Ok(Ty::Fn(FnTy {
+                    Ok(TyKind::Fn(FnTy {
                         args,
                         rty: Box::new(rty),
                         genargs: fty2.genargs,
@@ -328,17 +388,20 @@ impl<'tctx> FnTyCtx<'tctx> {
                     }))
                 }
             }
-            (Ty::Defined(defined_ty1), Ty::Defined(defined_ty2)) => {
+            (TyKind::Defined(defined_ty1), TyKind::Defined(defined_ty2)) => {
                 if defined_ty1.tid == defined_ty2.tid {
                     if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
                         let genargs = defined_ty1
                             .genargs
                             .into_iter()
                             .zip(defined_ty2.genargs.into_iter())
-                            .map(|(g1, g2)| self.defined_ty_unify(g1, g2, ctx))
+                            .map(|(g1, g2)| {
+                                let g1_span = g1.span.clone();
+                                Ok(Ty::new(self.defined_ty_unify(g1, g2, ctx)?, g1_span))
+                            })
                             .collect::<TyResult<_>>()?;
 
-                        Ok(Ty::Defined(DefinedTy {
+                        Ok(TyKind::Defined(DefinedTy {
                             tid: defined_ty1.tid,
                             genargs,
                         }))
@@ -347,28 +410,35 @@ impl<'tctx> FnTyCtx<'tctx> {
                         panic!("compiler bug: generic argument length mismatched")
                     }
                 } else {
-                    Err(TyError::TypeConfliced(definition_ty, user_ty))
+                    Err(TyError::TypeConfliced {
+                        t1: Box::new(definition_ty),
+                        t2: Box::new(user_ty),
+                    })
                 }
             }
-            (Ty::Gen(gid), user_ty) => match ctx.gen_assigns.entry(gid) {
+            (TyKind::Gen(gid), _) => match ctx.gen_assigns.entry(gid) {
                 Entry::Vacant(e) => {
                     e.insert(user_ty.clone());
 
-                    Ok(user_ty)
+                    Ok(user_ty.kind)
                 }
                 Entry::Occupied(mut e) => {
                     // 両方 user 由来の型であるため、unify() でよい
-                    let t = self.unify(e.get().clone(), user_ty)?;
-                    e.insert(t.clone());
+                    let user_ty_span = user_ty.span.clone();
+                    let ty = Ty::new(self.unify(e.get().clone(), user_ty)?, user_ty_span);
+                    e.insert(ty.clone());
 
-                    Ok(t)
+                    Ok(ty.kind)
                 }
             },
             (x, y) => {
                 if x == y {
                     Ok(x)
                 } else {
-                    Err(TyError::TypeConfliced(definition_ty, user_ty))
+                    Err(TyError::TypeConfliced {
+                        t1: Box::new(definition_ty),
+                        t2: Box::new(user_ty),
+                    })
                 }
             }
         }
@@ -406,10 +476,12 @@ impl<'tctx> FnTyCtx<'tctx> {
                         let ty = self.infer_expr(&u.right)?;
                         // NOTE: traitによる演算子オーバーロードが可能になれば
                         // このチェックは要らない
-                        match ty {
-                            Ty::Infer(_) | Ty::Int | Ty::Float => Ok(ty),
+                        match ty.kind {
+                            TyKind::Infer(_) | TyKind::Int | TyKind::Float => {
+                                Ok(Ty::new(ty.kind, expr.span()))
+                            }
                             _ => Err(TyError::InvalidUnaryOperationForType {
-                                ty,
+                                ty: Box::new(ty),
                                 op: u.op,
                                 expr: Box::new(expr.clone()),
                             }),
@@ -428,14 +500,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                     let left = self.infer_expr(&b.left)?;
                     let right = self.infer_expr(&b.right)?;
 
-                    let ty = self.unify(left.clone(), right.clone())?;
+                    let tk = self.unify(left.clone(), right.clone())?;
 
                     // NOTE: traitによる演算子オーバーロードが可能になれば
                     // このチェックは要らない
-                    match ty {
-                        Ty::Infer(_) | Ty::Int | Ty::Float => Ok(ty),
+                    match tk {
+                        TyKind::Infer(_) | TyKind::Int | TyKind::Float => {
+                            Ok(Ty::new(tk, expr.span()))
+                        }
                         _ => Err(TyError::InvalidBinaryOperationForType {
-                            ty,
+                            ty: Box::new(Ty::new(tk, left.span)),
                             op: b.op,
                             expr: Box::new(expr.clone()),
                         }),
@@ -447,14 +521,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                     let left = self.infer_expr(&b.left)?;
                     let right = self.infer_expr(&b.right)?;
 
-                    let ty = self.unify(left.clone(), right.clone())?;
+                    let tk = self.unify(left.clone(), right.clone())?;
 
                     // NOTE: traitによる演算子オーバーロードが可能になれば
                     // このチェックは要らない
-                    match ty {
-                        Ty::Infer(_) | Ty::Int | Ty::Float => Ok(Ty::Bool),
+                    match tk {
+                        TyKind::Infer(_) | TyKind::Int | TyKind::Float => {
+                            Ok(Ty::new(TyKind::Bool, expr.span()))
+                        }
                         _ => Err(TyError::InvalidBinaryOperationForType {
-                            ty,
+                            ty: Box::new(Ty::new(tk, left.span)),
                             op: b.op,
                             expr: Box::new(expr.clone()),
                         }),
@@ -466,14 +542,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                     let left = self.infer_expr(&b.left)?;
                     let right = self.infer_expr(&b.right)?;
 
-                    let ty = self.unify(left.clone(), right.clone())?;
+                    let tk = self.unify(left.clone(), right.clone())?;
 
                     // NOTE: traitによる演算子オーバーロードが可能になれば
                     // このチェックは要らない
-                    match ty {
-                        Ty::Infer(_) | Ty::Int | Ty::Float | Ty::Bool => Ok(Ty::Bool),
+                    match tk {
+                        TyKind::Infer(_) | TyKind::Int | TyKind::Float | TyKind::Bool => {
+                            Ok(Ty::new(TyKind::Bool, expr.span()))
+                        }
                         _ => Err(TyError::InvalidBinaryOperationForType {
-                            ty,
+                            ty: Box::new(Ty::new(tk, left.span)),
                             op: b.op,
                             expr: Box::new(expr.clone()),
                         }),
@@ -538,10 +616,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                     .collect();
 
                 if member_ids.is_empty() {
-                    Ok(Ty::Defined(DefinedTy {
-                        tid: tid.clone(),
-                        genargs,
-                    }))
+                    Ok(Ty::new(
+                        TyKind::Defined(DefinedTy {
+                            tid: tid.clone(),
+                            genargs,
+                        }),
+                        struct_literal.span.clone(),
+                    ))
                 } else {
                     // メンバ名の集合に残されているものが、
                     // 初期化されていないメンバ
@@ -554,25 +635,25 @@ impl<'tctx> FnTyCtx<'tctx> {
                     })
                 }
             }
-            TyDefContentKind::TypeAlias(alias) => match &alias.right {
-                Ty::Int | Ty::Float | Ty::Bool | Ty::Fn(_) | Ty::Void => {
+            TyDefContentKind::TypeAlias(alias) => match &alias.right.kind {
+                TyKind::Int | TyKind::Float | TyKind::Bool | TyKind::Fn(_) | TyKind::Void => {
                     Err(TyError::InvalidStructLiteralOnAliasType {
-                        ty: alias.right.clone(),
+                        ty: Box::new(alias.right.clone()),
                         sliteral: Box::new(struct_literal.clone()),
                     })
                 }
-                Ty::Infer(_) => panic!("compiler bug: type alias on unknown type"),
-                Ty::Gen(_) => {
-                    // Ty::Gen(GenTyId) は型定義にしか現れないため、
+                TyKind::Infer(_) => panic!("compiler bug: type alias on unknown type"),
+                TyKind::Gen(_) => {
+                    // TyKind::Gen(GenTyId) は型定義にしか現れないため、
                     // メンバアクセスの左辺地に現れる場合はバグ
                     panic!("compiler bug: generic type not resolved")
                 }
-                Ty::LocGen(_) => {
+                TyKind::LocGen(_) => {
                     // impl block や 関数 でローカルに宣言されたジェネリック型
                     // これがグローバルな type alias で現れることはないのでバグ
                     panic!("compiler bug: type alias on generic type")
                 }
-                Ty::Defined(defined_ty) => {
+                TyKind::Defined(defined_ty) => {
                     // alias された TyId で再試行
                     self.infer_struct_literal(&defined_ty.tid, struct_literal)
                 }
@@ -580,10 +661,19 @@ impl<'tctx> FnTyCtx<'tctx> {
             TyDefContentKind::NativeTypeAlias(alias) => {
                 // native type alias を構造体のように初期化することは出来ない
                 Err(TyError::InvalidStructLiteralOnAliasType {
-                    ty: Ty::Defined(DefinedTy {
-                        tid: tid.clone(),
-                        genargs: vec![Ty::Infer(InferTy::Unknown); alias.genargs.len()],
-                    }),
+                    ty: Box::new(Ty::new(
+                        TyKind::Defined(DefinedTy {
+                            tid: tid.clone(),
+                            genargs: vec![
+                                Ty::new(
+                                    TyKind::Infer(InferTy::Unknown),
+                                    struct_literal.span.clone() // 正しくないが、エラー表示には使われないため、良しとする
+                                );
+                                alias.genargs.len()
+                            ],
+                        }),
+                        struct_literal.span.clone(),
+                    )),
                     sliteral: Box::new(struct_literal.clone()),
                 })
             }
@@ -593,9 +683,9 @@ impl<'tctx> FnTyCtx<'tctx> {
     fn infer_primary_expr(&mut self, primary: &Primary) -> TyResult<Ty> {
         match primary {
             Primary::Literal(l) => match l {
-                Literal::Integer(_) => Ok(Ty::Int),
+                Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span())),
                 // Literal::Float(_) => Ok(Ty::Float),
-                Literal::Bool(_) => Ok(Ty::Bool),
+                Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span())),
                 Literal::String(_) => todo!(),
                 Literal::Struct(struct_literal) => {
                     self.infer_struct_literal(&struct_literal.tid, struct_literal)
@@ -613,9 +703,9 @@ impl<'tctx> FnTyCtx<'tctx> {
             Primary::FnCall(c) => match &c.callee {
                 Callee::Fn(vid) => {
                     let val = self.tctx.hir.vals.get(vid).unwrap();
-                    let callee_fty = match &val {
-                        ValDefContentKind::Fn(f) => FnTy::from(&f.signature),
-                        ValDefContentKind::Native(f) => FnTy::from(&f.signature),
+                    let callee_ty = match &val {
+                        ValDefContentKind::Fn(f) => f.signature.as_ty(),
+                        ValDefContentKind::Native(f) => f.signature.as_ty(),
                     };
 
                     let args = c
@@ -629,16 +719,19 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // unify で計算する
                     let mut cctx = CallCtx::default();
                     let unified_ty = self.call_unify(
-                        Ty::Fn(callee_fty),
-                        Ty::Fn(FnTy {
-                            args,
-                            rty: Box::new(rty),
-                            genargs: vec![],
-                        }),
+                        callee_ty,
+                        Ty::new(
+                            TyKind::Fn(FnTy {
+                                args,
+                                rty: Box::new(Ty::new(rty, primary.span())),
+                                genargs: vec![],
+                            }),
+                            primary.span(),
+                        ),
                         &mut cctx,
                     )?;
 
-                    let unified_fty = if let Ty::Fn(fty) = unified_ty {
+                    let unified_fty = if let TyKind::Fn(fty) = unified_ty {
                         fty
                     } else {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
@@ -657,46 +750,52 @@ impl<'tctx> FnTyCtx<'tctx> {
                         .iter()
                         .map(|a| self.infer_expr(a))
                         .collect::<Result<_, _>>()?;
-                    let rty = self.fresh();
+                    let rty = Ty::new(self.fresh(), primary.span());
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
                     let mut cctx = CallCtx::default();
                     self.call_unify(
                         callee_fty,
-                        Ty::Fn(FnTy {
-                            args,
-                            rty: Box::new(rty.clone()),
-                            genargs: vec![],
-                        }),
+                        Ty::new(
+                            TyKind::Fn(FnTy {
+                                args,
+                                rty: Box::new(rty.clone()),
+                                genargs: vec![],
+                            }),
+                            primary.span(),
+                        ),
                         &mut cctx,
                     )?;
 
                     Ok(rty)
                 }
                 Callee::Assoc(assoc_callee) => {
-                    let callee_fty = self.tctx.hir.get_assoc_of_type(assoc_callee)?;
+                    let callee_ty = self.tctx.hir.get_assoc_of_type(assoc_callee)?;
 
                     let args = c
                         .args
                         .iter()
                         .map(|a| self.infer_expr(a))
                         .collect::<Result<_, _>>()?;
-                    let rty = self.fresh();
+                    let rty = Ty::new(self.fresh(), primary.span());
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
                     let mut cctx = CallCtx::default();
                     let unified_ty = self.call_unify(
-                        Ty::Fn(callee_fty),
-                        Ty::Fn(FnTy {
-                            args,
-                            rty: Box::new(rty),
-                            genargs: vec![],
-                        }),
+                        callee_ty,
+                        Ty::new(
+                            TyKind::Fn(FnTy {
+                                args,
+                                rty: Box::new(rty),
+                                genargs: vec![],
+                            }),
+                            primary.span(),
+                        ),
                         &mut cctx,
                     )?;
-                    let unified_fty = if let Ty::Fn(fty) = unified_ty {
+                    let unified_fty = if let TyKind::Fn(fty) = unified_ty {
                         fty
                     } else {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
@@ -712,40 +811,42 @@ impl<'tctx> FnTyCtx<'tctx> {
             }
             Primary::IfExpr(if_expr) => {
                 let cond = self.infer_expr(&if_expr.cond)?;
-                self.unify(cond, Ty::Bool)?;
+                self.unify(cond, Ty::new(TyKind::Bool, primary.span()))?;
 
                 // TODO: else if に対応
                 let then_ty = self.infer_block_expr(&if_expr.then)?;
                 let els_ty = self.infer_block_expr(&if_expr.els)?;
 
-                self.unify(then_ty, els_ty)
+                Ok(Ty::new(self.unify(then_ty, els_ty)?, primary.span()))
             }
             Primary::Block(block) => self.infer_block_expr(block),
             Primary::MethodCall(m) => {
                 let left = self.infer_expr(&m.left)?;
 
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
-                if let Some(callee_fty) = self.tctx.hir.get_method_of_type(&left, &m.method)? {
+                if let Some(callee_ty) = self.tctx.hir.get_method_of_type(&left.kind, &m.method)? {
                     let args = m
                         .args
                         .iter()
                         .map(|a| self.infer_expr(a))
                         .collect::<TyResult<_>>()?;
 
-                    let rty = self.fresh();
+                    let rty = Ty::new(self.fresh(), primary.span());
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
                     let mut cctx = CallCtx::default();
-                    let caller_fty = FnTy {
-                        args,
-                        rty: Box::new(rty.clone()),
-                        genargs: vec![],
-                    };
-                    let unified_ty =
-                        self.call_unify(Ty::Fn(callee_fty), Ty::Fn(caller_fty), &mut cctx)?;
+                    let caller_ty = Ty::new(
+                        TyKind::Fn(FnTy {
+                            args,
+                            rty: Box::new(rty.clone()),
+                            genargs: vec![],
+                        }),
+                        primary.span(),
+                    );
+                    let unified_ty = self.call_unify(callee_ty, caller_ty, &mut cctx)?;
 
-                    let unified_fty = if let Ty::Fn(fty) = unified_ty {
+                    let unified_fty = if let TyKind::Fn(fty) = unified_ty {
                         fty
                     } else {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
@@ -754,7 +855,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     Ok(*unified_fty.rty)
                 } else {
                     Err(TyError::MethodNotImplemented {
-                        ty: left,
+                        ty: Box::new(left),
                         method: Box::new(m.method.clone()),
                     })
                 }
@@ -763,15 +864,15 @@ impl<'tctx> FnTyCtx<'tctx> {
     }
 
     fn infer_member_access(&mut self, left_ty: Ty, member_access: &MemberAccess) -> TyResult<Ty> {
-        match left_ty {
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Fn(_) | Ty::Void => {
+        match left_ty.kind {
+            TyKind::Int | TyKind::Float | TyKind::Bool | TyKind::Fn(_) | TyKind::Void => {
                 Err(TyError::ExprNotHasMember {
-                    ty: left_ty,
+                    ty: Box::new(left_ty),
                     access: Box::new(member_access.clone()),
                 })
             }
-            Ty::Infer(_) => Err(TyError::InsufficientContext),
-            Ty::Defined(defined_ty) => {
+            TyKind::Infer(_) => Err(TyError::InsufficientContext),
+            TyKind::Defined(defined_ty) => {
                 match self.tctx.hir.get_type_definition(&defined_ty.tid).unwrap() {
                     TyDefContentKind::Struct(struct_) => {
                         let ty = struct_
@@ -784,9 +885,9 @@ impl<'tctx> FnTyCtx<'tctx> {
                             .map(|(ty, _)| ty)
                             .cloned()?;
 
-                        // NOTE: ジェネリック型 Ty::Gen(GenTyId) の場合、
-                        // ジェネリック引数列の位置から GenTyId -> Ty を割り当て
-                        if let Ty::Gen(gid) = &ty {
+                        // NOTE: ジェネリック型 TyKind::Gen(GenTyId) の場合、
+                        // ジェネリック引数列の位置から GenTyId -> TyKind を割り当て
+                        if let TyKind::Gen(gid) = &ty.kind {
                             let idx = struct_.genargs.iter().position(|g| g == gid).expect(
                                 "compiler bug: undefined generic type found in struct member",
                             );
@@ -807,23 +908,23 @@ impl<'tctx> FnTyCtx<'tctx> {
                     TyDefContentKind::NativeTypeAlias(_) => {
                         // native type alias にはメンバアクセスできない
                         Err(TyError::ExprNotHasMember {
-                            ty: Ty::Defined(defined_ty),
+                            ty: Box::new(Ty::new(TyKind::Defined(defined_ty), left_ty.span)),
                             access: Box::new(member_access.clone()),
                         })
                     }
                 }
             }
-            Ty::Gen(_) => {
-                // Ty::Gen(GenTyId) は型定義にしか現れないため、
+            TyKind::Gen(_) => {
+                // TyKind::Gen(GenTyId) は型定義にしか現れないため、
                 // メンバアクセスの左辺地に現れる場合はバグ
                 panic!("compiler bug: generic type not resolved")
             }
-            Ty::LocGen(_) => {
+            TyKind::LocGen(_) => {
                 // impl block や 関数 でローカルに宣言されたジェネリック型
                 // これがメンバアクセス可能性を満たすことは判定できないため
                 // コンパイルエラー
                 Err(TyError::ExprNotHasMember {
-                    ty: left_ty,
+                    ty: Box::new(left_ty),
                     access: Box::new(member_access.clone()),
                 })
             }
@@ -838,19 +939,20 @@ impl<'tctx> FnTyCtx<'tctx> {
         self.infer_expr(&block.expr)
     }
 
-    fn infer_stmt(&mut self, stmt: &Stmt) -> TyResult<Ty> {
+    fn infer_stmt(&mut self, stmt: &Stmt) -> TyResult<Option<Ty>> {
         match stmt {
             Stmt::VarDecl(v) => {
                 let ty = self.infer_expr(&v.init)?;
-                let ty = self.apply(ty);
+                let ty = self.apply_ty(ty);
 
                 self.vars.insert(v.id, ty);
 
-                Ok(Ty::Void)
+                Ok(None)
             }
             Stmt::If(if_stmt) => {
                 let cond = self.infer_expr(&if_stmt.cond)?;
-                self.unify(cond, Ty::Bool)?;
+                let bool_ty = Ty::new(TyKind::Bool, cond.span.clone());
+                self.unify(cond, bool_ty)?;
 
                 // TODO: else if に対応
                 let then_ty = self.infer_block_stmt(&if_stmt.then)?;
@@ -861,20 +963,23 @@ impl<'tctx> FnTyCtx<'tctx> {
                     min_of_ty(&then_ty, &els_ty)
                 } else {
                     // elseが無いということは分岐の1つは何も返さない(= Voidを返す)ということである
-                    // したがって、thenの型に関係なく、全体の形はVoid
-                    Ok(Ty::Void)
+                    // したがって、thenの型に関係なく、全体の型はVoid
+                    Ok(None)
                 }
             }
             Stmt::Block(block) => self.infer_block_stmt(block),
             Stmt::Expr(expr) => {
                 self.infer_expr(&expr.expr)?;
 
-                Ok(Ty::Void)
+                Ok(None)
             }
             Stmt::Return(ret) => {
                 let rty = self.infer_expr(&ret.expr)?;
 
-                self.unify(rty, self.rty.clone())
+                Ok(Some(Ty::new(
+                    self.unify(rty, self.rty.clone())?,
+                    ret.expr.span(),
+                )))
             }
             Stmt::Assign(ass) => {
                 match &ass.dst {
@@ -891,55 +996,59 @@ impl<'tctx> FnTyCtx<'tctx> {
                     }
                 }
 
-                Ok(Ty::Void)
+                Ok(None)
             }
             Stmt::While(while_stmt) => {
                 let cond = self.infer_expr(&while_stmt.cond)?;
-                self.unify(cond, Ty::Bool)?;
+                let bool_ty = Ty::new(TyKind::Bool, cond.span.clone());
+                self.unify(cond, bool_ty)?;
 
                 self.infer_block_stmt(&while_stmt.stmts)?;
 
-                Ok(Ty::Void)
+                Ok(None)
             }
         }
     }
 
-    fn infer_block_stmt(&mut self, block: &BlockStmt) -> TyResult<Ty> {
-        let mut ty = Ty::Void;
+    fn infer_block_stmt(&mut self, block: &BlockStmt) -> TyResult<Option<Ty>> {
+        let mut opt_ty = None;
         for stmt in &block.stmts {
             let t = self.infer_stmt(stmt)?;
 
-            if t != Ty::Void {
-                ty = t;
+            if t.is_some() {
+                opt_ty = t;
             }
 
             // TODO: warn unreachable code after return
         }
 
-        Ok(ty)
+        Ok(opt_ty)
     }
 }
 
-fn occurs(v: &TyVar, t: &Ty) -> bool {
-    match t {
-        Ty::Infer(i) => match i {
+fn occurs(v: &TyVar, tk: &TyKind) -> bool {
+    match &tk {
+        TyKind::Infer(i) => match i {
             InferTy::Var(v2) => v == v2,
             InferTy::Unknown => false, // WARN: really?
         },
-        Ty::Fn(f) => f.args.iter().any(|a| occurs(v, a)) || occurs(v, &f.rty),
+        TyKind::Fn(f) => f.args.iter().any(|a| occurs(v, &a.kind)) || occurs(v, &f.rty.kind),
         _ => false,
     }
 }
 
-fn min_of_ty(t1: &Ty, t2: &Ty) -> TyResult<Ty> {
+fn min_of_ty(t1: &Option<Ty>, t2: &Option<Ty>) -> TyResult<Option<Ty>> {
     match (t1, t2) {
-        (Ty::Void, _) => Ok(Ty::Void),
-        (_, Ty::Void) => Ok(Ty::Void),
-        (x, y) => {
+        (None, _) => Ok(None),
+        (_, None) => Ok(None),
+        (Some(x), Some(y)) => {
             if x == y {
-                Ok(x.clone())
+                Ok(Some(x.clone()))
             } else {
-                Err(TyError::TypeConfliced(x.clone(), y.clone()))
+                Err(TyError::TypeConfliced {
+                    t1: Box::new(x.clone()),
+                    t2: Box::new(y.clone()),
+                })
             }
         }
     }
@@ -967,23 +1076,26 @@ impl TyCtx {
                     // 文は
                     // - 基本的にVoidを返すものとし、
                     // - return文はその式の型、
-                    // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                    // - 分岐文はすべての分岐で一致すればその型、そうでなければNoneとする
                     // これにより、最後の文の型の一致を検査可能になる
                     // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
-                    let mut stmt_last_ty = Ty::Void;
+                    let mut stmt_last_ty = None;
                     for stmt in &fn_body.stmts {
                         stmt_last_ty = fctx.infer_stmt(stmt)?;
                     }
 
                     // 最後の式があれば検査
-                    let rty = if let Some(expr) = &fn_body.expr {
-                        fctx.infer_expr(expr)?
-                    } else {
-                        stmt_last_ty
-                    };
-
                     // 戻り値の型の一致を検査
-                    fctx.unify(rty, fctx.rty.clone())?;
+                    if let Some(expr) = &fn_body.expr {
+                        let rty = fctx.infer_expr(expr)?;
+                        fctx.unify(rty, fctx.rty.clone())?;
+                    } else if let Some(rty) = stmt_last_ty {
+                        fctx.unify(rty, fctx.rty.clone())?;
+                    } else if fctx.rty.kind != TyKind::Void {
+                        return Err(TyError::ReturnTypeRequired {
+                            rty: Box::new(fctx.rty),
+                        });
+                    };
 
                     // 計算した型を記録
                     fn_ty_infos.push((
@@ -1040,23 +1152,26 @@ impl TyCtx {
                             // 文は
                             // - 基本的にVoidを返すものとし、
                             // - return文はその式の型、
-                            // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                            // - 分岐文はすべての分岐で一致すればその型、そうでなければNoneとする
                             // これにより、最後の文の型の一致を検査可能になる
                             // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
-                            let mut stmt_last_ty = Ty::Void;
+                            let mut stmt_last_ty = None;
                             for stmt in &fn_body.stmts {
                                 stmt_last_ty = fctx.infer_stmt(stmt)?;
                             }
 
                             // 最後の式があれば検査
-                            let rty = if let Some(expr) = &fn_body.expr {
-                                fctx.infer_expr(expr)?
-                            } else {
-                                stmt_last_ty
-                            };
-
                             // 戻り値の型の一致を検査
-                            fctx.unify(rty, fctx.rty.clone())?;
+                            if let Some(expr) = &fn_body.expr {
+                                let rty = fctx.infer_expr(expr)?;
+                                fctx.unify(rty, fctx.rty.clone())?;
+                            } else if let Some(rty) = stmt_last_ty {
+                                fctx.unify(rty, fctx.rty.clone())?;
+                            } else if fctx.rty.kind != TyKind::Void {
+                                return Err(TyError::ReturnTypeRequired {
+                                    rty: Box::new(fctx.rty),
+                                });
+                            };
 
                             // 計算した型を記録
                             impl_fn_ty_infos.push((
@@ -1084,23 +1199,26 @@ impl TyCtx {
                             // 文は
                             // - 基本的にVoidを返すものとし、
                             // - return文はその式の型、
-                            // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                            // - 分岐文はすべての分岐で一致すればその型、そうでなければNoneとする
                             // これにより、最後の文の型の一致を検査可能になる
                             // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
-                            let mut stmt_last_ty = Ty::Void;
+                            let mut stmt_last_ty = None;
                             for stmt in &fn_body.stmts {
                                 stmt_last_ty = fctx.infer_stmt(stmt)?;
                             }
 
                             // 最後の式があれば検査
-                            let rty = if let Some(expr) = &fn_body.expr {
-                                fctx.infer_expr(expr)?
-                            } else {
-                                stmt_last_ty
-                            };
-
                             // 戻り値の型の一致を検査
-                            fctx.unify(rty, fctx.rty.clone())?;
+                            if let Some(expr) = &fn_body.expr {
+                                let rty = fctx.infer_expr(expr)?;
+                                fctx.unify(rty, fctx.rty.clone())?;
+                            } else if let Some(rty) = stmt_last_ty {
+                                fctx.unify(rty, fctx.rty.clone())?;
+                            } else if fctx.rty.kind != TyKind::Void {
+                                return Err(TyError::ReturnTypeRequired {
+                                    rty: Box::new(fctx.rty),
+                                });
+                            };
 
                             // 計算した型を記録
                             impl_fn_ty_infos.push((
@@ -1173,23 +1291,26 @@ impl TyCtx {
                         // 文は
                         // - 基本的にVoidを返すものとし、
                         // - return文はその式の型、
-                        // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                        // - 分岐文はすべての分岐で一致すればその型、そうでなければNoneとする
                         // これにより、最後の文の型の一致を検査可能になる
                         // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
-                        let mut stmt_last_ty = Ty::Void;
+                        let mut stmt_last_ty = None;
                         for stmt in &fn_body.stmts {
                             stmt_last_ty = fctx.infer_stmt(stmt)?;
                         }
 
                         // 最後の式があれば検査
-                        let rty = if let Some(expr) = &fn_body.expr {
-                            fctx.infer_expr(expr)?
-                        } else {
-                            stmt_last_ty
-                        };
-
                         // 戻り値の型の一致を検査
-                        fctx.unify(rty, fctx.rty.clone())?;
+                        if let Some(expr) = &fn_body.expr {
+                            let rty = fctx.infer_expr(expr)?;
+                            fctx.unify(rty, fctx.rty.clone())?;
+                        } else if let Some(rty) = stmt_last_ty {
+                            fctx.unify(rty, fctx.rty.clone())?;
+                        } else if fctx.rty.kind != TyKind::Void {
+                            return Err(TyError::ReturnTypeRequired {
+                                rty: Box::new(fctx.rty),
+                            });
+                        };
 
                         // 計算した型を記録
                         special_impl_fn_ty_infos.push((
@@ -1216,23 +1337,26 @@ impl TyCtx {
                         // 文は
                         // - 基本的にVoidを返すものとし、
                         // - return文はその式の型、
-                        // - 分岐文はすべての分岐で一致すればその型、そうでなければVoidとする
+                        // - 分岐文はすべての分岐で一致すればその型、そうでなければNoneとする
                         // これにより、最後の文の型の一致を検査可能になる
                         // また、早期returnの型を検査するために、TyCtxに戻り値の型を含める
-                        let mut stmt_last_ty = Ty::Void;
+                        let mut stmt_last_ty = None;
                         for stmt in &fn_body.stmts {
                             stmt_last_ty = fctx.infer_stmt(stmt)?;
                         }
 
                         // 最後の式があれば検査
-                        let rty = if let Some(expr) = &fn_body.expr {
-                            fctx.infer_expr(expr)?
-                        } else {
-                            stmt_last_ty
-                        };
-
                         // 戻り値の型の一致を検査
-                        fctx.unify(rty, fctx.rty.clone())?;
+                        if let Some(expr) = &fn_body.expr {
+                            let rty = fctx.infer_expr(expr)?;
+                            fctx.unify(rty, fctx.rty.clone())?;
+                        } else if let Some(rty) = stmt_last_ty {
+                            fctx.unify(rty, fctx.rty.clone())?;
+                        } else if fctx.rty.kind != TyKind::Void {
+                            return Err(TyError::ReturnTypeRequired {
+                                rty: Box::new(fctx.rty),
+                            });
+                        };
 
                         // 計算した型を記録
                         special_impl_fn_ty_infos.push((

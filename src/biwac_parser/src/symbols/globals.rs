@@ -2,7 +2,7 @@ use biwac_base::Span;
 use biwac_lexer::token::{TkKind, TkVal};
 
 use crate::{
-    CompilerFlag, Exprs, Ident, ParseError, QualifiedId, Stmt, TypRepr, VarDecl,
+    CompilerFlag, Exprs, Ident, ParseError, QualifiedId, RetTypRepr, Stmt, TypRepr, VarDecl,
     parser::TokenStream, symbols::ExprOrStmt,
 };
 
@@ -64,10 +64,10 @@ pub struct ImportDecl {
 pub struct FnDef {
     pub impl_ctx: Option<ImplCtx>,
     pub id: Ident,
-    pub args: Vec<ArgDecl>,
+    pub args: ArgDeclList,
     pub stmts: Vec<Stmt>,
     pub expr: Option<Exprs>,
-    pub rtype: Option<TypRepr>, // None means void
+    pub rtype: RetTypRepr,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
     pub genargs: Vec<Ident>,
@@ -77,8 +77,8 @@ pub struct FnDef {
 pub struct NativeFnDef {
     pub impl_ctx: Option<ImplCtx>,
     pub id: Ident,
-    pub args: Vec<ArgDecl>,
-    pub rtype: Option<TypRepr>, // None means void
+    pub args: ArgDeclList,
+    pub rtype: RetTypRepr,
     pub native: String,
     pub native_span: Span,
     pub span: Span,
@@ -93,16 +93,22 @@ pub struct ArgDecl {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgDeclList {
+    pub args: Vec<ArgDecl>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub struct MethodDef {
     pub impl_genargs: Vec<Ident>,
     pub self_typ: TypRepr,
     pub self_ident: Ident,
     pub id: Ident,
-    pub args: Vec<ArgDecl>, // 第一引数がselfであるのは自明なので含まない
+    pub args: ArgDeclList, // 第一引数がselfであるのは自明なので含まない
     pub stmts: Vec<Stmt>,
     pub expr: Option<Exprs>,
-    pub rtype: Option<TypRepr>, // None means void
+    pub rtype: RetTypRepr,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
     pub genargs: Vec<Ident>,
@@ -114,8 +120,8 @@ pub struct NativeMethodDef {
     pub self_typ: TypRepr,
     pub self_ident: Ident,
     pub id: Ident,
-    pub args: Vec<ArgDecl>,     // 第一引数がselfであるのは自明なので含まない
-    pub rtype: Option<TypRepr>, // None means void
+    pub args: ArgDeclList, // 第一引数がselfであるのは自明なので含まない
+    pub rtype: RetTypRepr,
     pub native: String,
     pub native_span: Span,
     pub span: Span,
@@ -177,11 +183,15 @@ impl<'t> TokenStream<'t> {
 
         let rtype =
             if self.consume_next_if_match(vec![TkKind::Arrow]).is_some() {
-                Some(self.consume_type_representaion(
+                RetTypRepr::Typ(self.consume_type_representaion(
                     &impl_ctx.as_ref().map(|ctx| ctx.self_typ.clone()),
                 )?)
             } else {
-                None
+                RetTypRepr::Void(Span::new(
+                    args.span.module().clone(),
+                    args.span.end().clone(),
+                    args.span.end().clone(),
+                ))
             };
 
         if flags.iter().any(|f| &f.flag.id == "native") {
@@ -471,8 +481,8 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn consume_argsdec(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<Vec<ArgDecl>, ParseError> {
-        self.must_consume_next(vec![TkKind::LPare])?;
+    ) -> Result<ArgDeclList, ParseError> {
+        let begin = self.must_consume_next(vec![TkKind::LPare])?.span.clone();
 
         let mut args = vec![];
 
@@ -483,7 +493,10 @@ impl<'t> TokenStream<'t> {
                 .clone();
 
             if let TkKind::RPare = t.kind {
-                return Ok(args);
+                return Ok(ArgDeclList {
+                    args,
+                    span: Span::merge(&begin, &t.span),
+                });
             } else if let TkKind::Ident = &t.kind
                 && let Some(TkVal::String(arg)) = &t.val
             {
@@ -519,9 +532,9 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn consume_method_argsdec(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<(Vec<ArgDecl>, Option<Ident>), ParseError> {
+    ) -> Result<(ArgDeclList, Option<Ident>), ParseError> {
         // (args, self_ident)
-        self.must_consume_next(vec![TkKind::LPare])?;
+        let begin = self.must_consume_next(vec![TkKind::LPare])?.span.clone();
 
         let mut args = vec![];
 
@@ -534,9 +547,16 @@ impl<'t> TokenStream<'t> {
 
         let self_ident = match t.kind {
             TkKind::RPare => {
+                let end = t.span.clone();
                 self.next();
 
-                return Ok((args, None));
+                return Ok((
+                    ArgDeclList {
+                        args,
+                        span: Span::merge(&begin, &end),
+                    },
+                    None,
+                ));
             }
             TkKind::SelfVar => {
                 let span = t.span.clone();
@@ -557,7 +577,13 @@ impl<'t> TokenStream<'t> {
                 .clone();
 
             if let TkKind::RPare = t.kind {
-                return Ok((args, self_ident));
+                return Ok((
+                    ArgDeclList {
+                        args,
+                        span: Span::merge(&begin, &t.span),
+                    },
+                    self_ident,
+                ));
             } else if let TkKind::Ident = &t.kind
                 && let Some(TkVal::String(arg)) = &t.val
             {

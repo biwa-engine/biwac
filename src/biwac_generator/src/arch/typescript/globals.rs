@@ -81,6 +81,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, TyId> for StructDefContent
                                                 oxc_ast::ast::TSTypeAnnotation {
                                                     span: span(),
                                                     type_annotation: ty
+                                                        .kind
                                                         .clone()
                                                         .into_oxc(allocator, hir),
                                                 },
@@ -179,6 +180,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for FnDefCo
                                                 .var_tys
                                                 .get(var_id)
                                                 .unwrap()
+                                                .kind
                                                 .as_oxc(&mut env, allocator, hir),
                                         },
                                         allocator,
@@ -256,7 +258,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for FnDefCo
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
                     },
                     allocator,
                 )),
@@ -319,7 +321,10 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: ty.clone().into_oxc(allocator, hir),
+                                            type_annotation: ty
+                                                .kind
+                                                .clone()
+                                                .into_oxc(allocator, hir),
                                         },
                                         allocator,
                                     )),
@@ -396,7 +401,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
                     },
                     allocator,
                 )),
@@ -481,6 +486,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for MethodD
                                                 self.var_tys
                                                     .get(var_id)
                                                     .unwrap()
+                                                    .kind
                                                     .as_oxc(&mut env, allocator, hir)
                                             },
                                         },
@@ -559,7 +565,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for MethodD
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
                     },
                     allocator,
                 )),
@@ -695,6 +701,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeM
                                         span: span(),
                                         type_annotation: self
                                             .self_ty
+                                            .kind
                                             .clone()
                                             .into_oxc(allocator, hir),
                                     },
@@ -726,7 +733,10 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeM
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: ty.clone().into_oxc(allocator, hir),
+                                            type_annotation: ty
+                                                .kind
+                                                .clone()
+                                                .into_oxc(allocator, hir),
                                         },
                                         allocator,
                                     )),
@@ -803,7 +813,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeM
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
                     },
                     allocator,
                 )),

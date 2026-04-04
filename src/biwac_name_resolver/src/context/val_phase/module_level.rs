@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
-use biwac_base::ModPath;
+use biwac_base::{ModPath, Span};
 use biwac_hir::{
-    AssocCallee, DefinedTy, Hir, InferTy, Ty, TyDefContentKind, TyExistence, TyId,
+    AssocCallee, DefinedTy, Hir, InferTy, Ty, TyDefContentKind, TyExistence, TyId, TyKind,
     ValDefContentKind, ValId,
 };
 use biwac_parser::{DefTyp, ImportDecl, PrimTyp, QualifiedId, TypRepr, TypReprVal};
@@ -28,7 +28,7 @@ pub(crate) struct ModuleLevelResolveCtx {
 }
 
 impl ModuleLevelResolveCtx {
-    pub(crate) fn new(mctx: ModuleLevelTyResolveCtx, hir: &Hir) -> RsvResult<Self> {
+    pub(crate) fn new(mctx: ModuleLevelTyResolveCtx, _hir: &Hir) -> RsvResult<Self> {
         let modpath = mctx.modpath;
         let types = mctx.types;
         let vals = mctx.vals;
@@ -106,10 +106,11 @@ impl ModuleLevelResolveCtx {
     fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
         match &typ.val {
             TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::Int),
-                PrimTyp::Uint => Ok(Ty::Int), // TODO
-                PrimTyp::Float => Ok(Ty::Float),
-                PrimTyp::Bool => Ok(Ty::Bool),
+                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
+                // TODO: Uint
+                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
+                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
+                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
             },
             TypReprVal::Defined(deftyp) => self.try_resolve_defined_ty(deftyp, hir),
         }
@@ -209,17 +210,29 @@ impl ModuleLevelResolveCtx {
         // ジェネリック引数の数が合うか検査済み
         let (tid, ty_existence) = self.try_resolve_defined_tid(deftyp, hir)?;
 
-        Ok(Ty::Defined(DefinedTy {
-            tid,
-            genargs: if let Some(genargs) = &deftyp.genargs {
-                genargs
-                    .iter()
-                    .map(|typ| self.try_resolve_ty(typ, hir))
-                    .collect::<RsvResult<_>>()?
-            } else {
-                vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len]
-            },
-        }))
+        let garg_span = Span::new(
+            deftyp.qualid.span.module().clone(),
+            deftyp.qualid.span.end().clone(),
+            deftyp.qualid.span.end().clone(),
+        );
+
+        Ok(Ty::new(
+            TyKind::Defined(DefinedTy {
+                tid,
+                genargs: if let Some(genargs) = &deftyp.genargs {
+                    genargs
+                        .iter()
+                        .map(|typ| self.try_resolve_ty(typ, hir))
+                        .collect::<RsvResult<_>>()?
+                } else {
+                    vec![
+                        Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                        ty_existence.genarg_len
+                    ]
+                },
+            }),
+            deftyp.qualid.span.clone(),
+        ))
     }
 
     // 値を解決する
@@ -263,7 +276,7 @@ impl ModuleLevelResolveCtx {
                     qualid.id.clone(),
                 ))
             }
-        } else if let Some((i, sym)) = self.imports.get(qualid.quals.first().unwrap()) {
+        } else if let Some((_, sym)) = self.imports.get(qualid.quals.first().unwrap()) {
             // `import hoge::fuga; fuga::piyo::foo` の場合
             match sym {
                 ImportedSym::Mod(module) => {
@@ -279,12 +292,24 @@ impl ModuleLevelResolveCtx {
                     if qualid.quals.len() == 1 {
                         // TODO: hoge::fuga の関連値piyoを解決
                         let ty_existence = hir.get_type_existence(tid).unwrap();
-                        let ty = Ty::Defined(DefinedTy {
-                            tid: tid.clone(),
-                            genargs: vec![Ty::Infer(InferTy::Unknown); ty_existence.genarg_len],
-                        });
 
-                        let impl_vid = hir.get_impl_value_id_of_type(&ty, &qualid.id)?.ok_or(
+                        let garg_span = Span::new(
+                            qualid.span.module().clone(),
+                            qualid.span.end().clone(),
+                            qualid.span.end().clone(),
+                        );
+                        let ty = Ty::new(
+                            TyKind::Defined(DefinedTy {
+                                tid: tid.clone(),
+                                genargs: vec![
+                                    Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                                    ty_existence.genarg_len
+                                ],
+                            }),
+                            qualid.span.clone(),
+                        );
+
+                        let impl_vid = hir.get_impl_value_id_of_type(&ty.kind, &qualid.id)?.ok_or(
                             ResolveError::ImplementedValueNotFound {
                                 ty: Box::new(ty.clone()),
                                 val: qualid.id.clone(),
@@ -340,28 +365,58 @@ impl ModuleLevelResolveCtx {
                 // 明示的にジェネリック引数を記述している場合はそれを利用
                 // foo::bar[Foo, Bar]::baz()
                 // ない場合は、すべて推論が必要扱いで生成
+                let garg_span = Span::new(
+                    qualid.span.module().clone(),
+                    qualid.span.end().clone(),
+                    qualid.span.end().clone(),
+                );
+
                 let ty = match ty_content {
                     TyDefContentKind::Struct(struct_) => {
-                        let genargs = vec![Ty::Infer(InferTy::Unknown); struct_.genargs.len()];
-                        Ty::Defined(DefinedTy { tid, genargs })
+                        let genargs = vec![
+                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                            struct_.genargs.len()
+                        ];
+
+                        Ty::new(
+                            TyKind::Defined(DefinedTy { tid, genargs }),
+                            qualid.span.clone(),
+                        )
                     }
                     TyDefContentKind::NativeTypeAlias(native) => {
-                        let genargs = vec![Ty::Infer(InferTy::Unknown); native.genargs.len()];
-                        Ty::Defined(DefinedTy { tid, genargs })
+                        let genargs = vec![
+                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                            native.genargs.len()
+                        ];
+
+                        Ty::new(
+                            TyKind::Defined(DefinedTy { tid, genargs }),
+                            qualid.span.clone(),
+                        )
                     }
 
                     // alias は解決した型を返す
-                    TyDefContentKind::TypeAlias(alias) => match &alias.right {
-                        Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
-                            tid: defined_ty.tid.clone(),
-                            genargs: vec![Ty::Infer(InferTy::Unknown); alias.genargs.len()],
-                        }),
-                        x => x.clone(),
+                    TyDefContentKind::TypeAlias(alias) => match &alias.right.kind {
+                        TyKind::Defined(defined_ty) => {
+                            let genargs = vec![
+                                Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                                alias.genargs.len()
+                            ];
+
+                            Ty::new(
+                                TyKind::Defined(DefinedTy {
+                                    tid: defined_ty.tid.clone(),
+                                    genargs,
+                                }),
+                                qualid.span.clone(),
+                            )
+                        }
+                        _ => alias.right.clone(),
                     },
                 };
 
                 // 一意に取得できた場合のみ返す
-                if let Some(impl_vid) = hir.get_impl_value_id_of_type(&ty, &qualid.id)? {
+                if let Some(impl_vid) = hir.get_impl_value_id_of_type(&ty.kind, &qualid.id)? {
                     return Ok(ResolvedValue::Assoc(AssocCallee {
                         ty,
                         assoc: qualid.id.clone(),

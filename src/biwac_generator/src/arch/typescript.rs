@@ -6,8 +6,8 @@ mod types;
 use std::{cell::Cell, collections::HashMap};
 
 use biwac_hir::{
-    ExprId, Hir, ImplValDefContentKind, LocVarId, Ty, TyDefContentKind, TyId, ValDefContentKind,
-    ValId,
+    ExprId, Hir, ImplValDefContentKind, LocVarId, Ty, TyDefContentKind, TyId, TyKind,
+    ValDefContentKind, ValId,
 };
 
 pub fn generate(hir: &Hir) -> String {
@@ -194,18 +194,18 @@ impl Mangled for ValId {
     }
 }
 
-impl Mangled for (&Ty, &str) {
+impl Mangled for (&TyKind, &str) {
     fn mangled(&self) -> String {
         match self.0 {
-            Ty::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
-            Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
-            Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
-            Ty::Gen(_) => panic!(""),    // ローカルに出現し得ない
-            Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-            Ty::Int => format!("_ZN3Int{}{}E", self.1.len(), &self.1,),
-            Ty::Float => format!("_ZN5Float{}{}E", self.1.len(), &self.1,),
-            Ty::Bool => format!("_ZN4Bool{}{}E", self.1.len(), &self.1,),
-            Ty::Defined(_) => {
+            TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
+            TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
+            TyKind::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+            TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
+            TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+            TyKind::Int => format!("_ZN3Int{}{}E", self.1.len(), &self.1,),
+            TyKind::Float => format!("_ZN5Float{}{}E", self.1.len(), &self.1,),
+            TyKind::Bool => format!("_ZN4Bool{}{}E", self.1.len(), &self.1,),
+            TyKind::Defined(_) => {
                 panic!("compiler bug: must use (&TyId, &str, &ImplValId)")
             }
         }

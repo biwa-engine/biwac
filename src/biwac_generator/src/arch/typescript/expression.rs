@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use biwac_hir::{
-    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, Ty, TyId,
+    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, TyId, TyKind,
     VarIdKind,
 };
 use biwac_parser::{BinOperator, UnOperator};
@@ -48,16 +48,16 @@ impl Mangled for (&TyId, &str, &ImplValId) {
     }
 }
 
-impl Mangled for (&Ty, &str, &ImplValId) {
+impl Mangled for (&TyKind, &str, &ImplValId) {
     fn mangled(&self) -> String {
         match self.0 {
-            Ty::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
-            Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
-            Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
-            Ty::Gen(_) => panic!(""),    // ローカルに出現し得ない
-            Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-            Ty::Int | Ty::Float | Ty::Bool => (self.0, self.1).mangled(),
-            Ty::Defined(defined_ty) => (&defined_ty.tid, self.1, self.2).mangled(),
+            TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
+            TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
+            TyKind::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+            TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
+            TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+            TyKind::Int | TyKind::Float | TyKind::Bool => (self.0, self.1).mangled(),
+            TyKind::Defined(defined_ty) => (&defined_ty.tid, self.1, self.2).mangled(),
         }
     }
 }
@@ -75,7 +75,7 @@ impl<'a> AsOxc<'a, oxc_span::Ident<'a>> for Callee {
             Self::Assoc(assoc_callee) => oxc_span::Ident::new_const(
                 allocator.alloc_str(
                     &(
-                        &assoc_callee.ty,
+                        &assoc_callee.ty.kind,
                         assoc_callee.assoc.as_str(),
                         &assoc_callee.impl_vid,
                     )
@@ -312,21 +312,27 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 Primary::MethodCall(m) => {
                     let self_ty = env.expr_tys.get(&m.left.id).unwrap();
 
-                    let callee_mangled_name = match self_ty {
-                        Ty::Defined(defined_ty) => {
+                    let callee_mangled_name = match &self_ty.kind {
+                        TyKind::Defined(defined_ty) => {
                             let impl_valid = hir
-                                .get_impl_value_id_of_type(self_ty, &m.method.id)
+                                .get_impl_value_id_of_type(&self_ty.kind, &m.method.id)
                                 .unwrap()
                                 .unwrap();
 
                             (&defined_ty.tid, m.method.id.as_str(), &impl_valid).mangled()
                         }
-                        Ty::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
-                        Ty::Void => panic!("compiler bug: Void cannot be implemented method"),
-                        Ty::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
-                        Ty::Gen(_) => panic!(""), // ローカルに出現し得ない
-                        Ty::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-                        Ty::Int | Ty::Float | Ty::Bool => (self_ty, m.method.id.as_str()).mangled(),
+                        TyKind::Infer(_) => {
+                            panic!("compiler bug: failed to infer type of expression")
+                        }
+                        TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
+                        TyKind::Fn(_) => {
+                            panic!("compiler bug: function cannot be implemented method")
+                        }
+                        TyKind::Gen(_) => panic!(""), // ローカルに出現し得ない
+                        TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+                        TyKind::Int | TyKind::Float | TyKind::Bool => {
+                            (&self_ty.kind, m.method.id.as_str()).mangled()
+                        }
                     };
 
                     // selfは第一引数として与える

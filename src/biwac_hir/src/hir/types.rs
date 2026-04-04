@@ -1,14 +1,60 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+use biwac_base::Span;
 
 use crate::{FnDefContentSignature, GenTyId, LocGenTyId, TyId};
 
-// Ty はAST以降各種の検査を行う上での 型 を表す
-//  1. 名前解決(biwac_name_resolver)によって、はじめてTyの形で現れる
+// Ty は 型 を表す
+// ただし、型の種類そのものは TyKind が表し、
+// Ty は型エラー発生時にその場所を提示するために、
+// span を持つ
+//
+// span の位置は以下のようになる
+// - シグニチャやアノテーションで型が明示されている場合はその位置を
+// - 式の型について言及したい場合は、式そのもののspanを
+// 指す。
+//
+//  ```biwa
+//  fn foo[T](x: Int, y: T) -> Bool {
+//         ^     ^^^     ^     ^^^^
+//
+//      let a: Float = bar();
+//             ^^^^^   ^^^^^
+//
+//      baz(a)
+//          ^  // ここで型エラーの場合 fn baz() のシグニチャ側も指される
+//  }
+//  ```
+#[derive(Debug, Clone)]
+pub struct Ty {
+    pub kind: TyKind,
+    pub span: Span,
+}
+
+impl PartialEq for Ty {
+    // TyKind が一致していれば ==
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
+impl Eq for Ty {}
+
+impl Hash for Ty {
+    // TyKind のみhash計算に利用
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+    }
+}
+
+// TyKind はAST以降各種の検査を行う上での 型 の種類 を表す
+//  1. 名前解決(biwac_name_resolver)によって、はじめてTyKindの形で現れる
 //      この時点で本来明示的に型が書かれる部分は具体な型が(fnの定義, structのメンバの定義など)、
 //      そうでない部分は推論の必要性を表す型などが割り当てられる
-//  2. 型推論(biwac_type_inferrer)によって、すべてからTy::Infer(InferTy)が取り除かれる
+//  2. 型推論(biwac_type_inferrer)によって、すべてからTyKind::Infer(InferTy)が取り除かれる
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Ty {
+pub enum TyKind {
     Int,
     Float,
     Bool,
@@ -40,10 +86,10 @@ pub enum Ty {
     // Gen は型定義におけるジェネリック型を表す
     //
     // `Foo[T, Int]` のようにジェネリック引数列に型を代入している場合、
-    // GenTyId -> Ty のマップが作られ、メンバなど各種型はそれにより解決される
+    // GenTyId -> TyKind のマップが作られ、メンバなど各種型はそれにより解決される
     // これはその結果解決される型が`Int`のように完全に具体であるか、
-    // `T`のようにジェネリック型(`Ty::LocGen(LocGenTyId)`)であるか、
-    // 推論を必要とする型(`Ty::Infer(InferTy)`)であるか、
+    // `T`のようにジェネリック型(`TyKind::LocGen(LocGenTyId)`)であるか、
+    // 推論を必要とする型(`TyKind::Infer(InferTy)`)であるか、
     // にかかわらず機能する
     //
     // e.g.) `T`, `U`
@@ -110,7 +156,7 @@ pub struct FnTy {
     pub args: Vec<Ty>,
 
     // if the function does not return value ( = void function),
-    // Ty::Void
+    // TyKind::Void
     pub rty: Box<Ty>,
 
     pub genargs: Vec<LocGenTyId>,
@@ -120,7 +166,7 @@ pub struct FnTy {
     // 関数の引数または戻り値に一度以上登場することは保証されなければならない
 }
 
-impl Ty {
+impl TyKind {
     // ジェネリック引数列の重複検査のための重複判定
     //  ```
     //  struct Foo[T, U] { ... }
@@ -155,7 +201,7 @@ impl Ty {
     //         ^^^ 重複なし
     //  }
     //  ```
-    pub(crate) fn is_duplicated_for_impl_genarg(&self, other: &Ty) -> bool {
+    pub(crate) fn is_duplicated_for_impl_genarg(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Int, Self::Int) => true,
             (Self::Float, Self::Float) => true,
@@ -168,8 +214,8 @@ impl Ty {
                     f1.args
                         .iter()
                         .zip(f2.args.iter())
-                        .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
-                        && f1.rty.is_duplicated_for_impl_genarg(&f2.rty)
+                        .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+                        && f1.rty.kind.is_duplicated_for_impl_genarg(&f2.rty.kind)
                 } else {
                     false
                 }
@@ -181,7 +227,7 @@ impl Ty {
                             .genargs
                             .iter()
                             .zip(defined_ty2.genargs.iter())
-                            .all(|(t1, t2)| t1.is_duplicated_for_impl_genarg(t2))
+                            .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
                     } else {
                         panic!(
                             "compiler bug: generic arguments length mismatched for the same type"
@@ -203,16 +249,16 @@ impl Ty {
 
     // ジェネリック型の具体型への割り当て assigns を受け取り
     // 具体化した型を返す
-    pub fn embody_by_gen_ty_id(self, assigns: &HashMap<GenTyId, Self>) -> Self {
+    fn embody_by_gen_ty_id(self, assigns: &HashMap<GenTyId, Self>) -> Self {
         match self {
-            Ty::Gen(gid) => {
+            Self::Gen(gid) => {
                 if let Some(t) = assigns.get(&gid) {
                     t.clone()
                 } else {
                     self
                 }
             }
-            Ty::Fn(fty) => Ty::Fn(FnTy {
+            Self::Fn(fty) => Self::Fn(FnTy {
                 args: fty
                     .args
                     .into_iter()
@@ -221,7 +267,7 @@ impl Ty {
                 rty: Box::new(fty.rty.embody_by_gen_ty_id(assigns)),
                 genargs: fty.genargs,
             }),
-            Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+            Self::Defined(defined_ty) => Self::Defined(DefinedTy {
                 tid: defined_ty.tid,
                 genargs: defined_ty
                     .genargs
@@ -229,22 +275,27 @@ impl Ty {
                     .map(|aty| aty.embody_by_gen_ty_id(assigns))
                     .collect(),
             }),
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Infer(_) | Ty::LocGen(_) => self,
+            Self::Int
+            | Self::Float
+            | Self::Bool
+            | Self::Void
+            | Self::Infer(_)
+            | Self::LocGen(_) => self,
         }
     }
 
     // ジェネリック型の具体型への割り当て assigns を受け取り
     // 具体化した型を返す
-    pub fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocGenTyId, Self>) -> Self {
+    fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocGenTyId, Self>) -> Self {
         match self {
-            Ty::LocGen(lgid) => {
+            Self::LocGen(lgid) => {
                 if let Some(t) = assigns.get(&lgid) {
                     t.clone()
                 } else {
                     self
                 }
             }
-            Ty::Fn(fty) => Ty::Fn(FnTy {
+            Self::Fn(fty) => Self::Fn(FnTy {
                 args: fty
                     .args
                     .into_iter()
@@ -253,7 +304,7 @@ impl Ty {
                 rty: Box::new(fty.rty.embody_by_loc_gen_ty_id(assigns)),
                 genargs: fty.genargs,
             }),
-            Ty::Defined(defined_ty) => Ty::Defined(DefinedTy {
+            Self::Defined(defined_ty) => Self::Defined(DefinedTy {
                 tid: defined_ty.tid,
                 genargs: defined_ty
                     .genargs
@@ -261,18 +312,49 @@ impl Ty {
                     .map(|aty| aty.embody_by_loc_gen_ty_id(assigns))
                     .collect(),
             }),
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Void | Ty::Infer(_) | Ty::Gen(_) => self,
+            Self::Int | Self::Float | Self::Bool | Self::Void | Self::Infer(_) | Self::Gen(_) => {
+                self
+            }
         }
     }
 }
 
-impl From<&FnDefContentSignature> for FnTy {
-    fn from(value: &FnDefContentSignature) -> Self {
+impl Ty {
+    pub fn new(kind: TyKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+
+    // ジェネリック型の具体型への割り当て assigns を受け取り
+    // 具体化した型を返す
+    // span は元のまま、kind のみ具体化する
+    pub fn embody_by_gen_ty_id(self, assigns: &HashMap<GenTyId, TyKind>) -> Self {
         Self {
-            args: value.args.iter().map(|(_, ty)| ty.clone()).collect(),
-            rty: Box::new(value.rty.clone()),
-            genargs: value.genargs.iter().map(|(_, lgid)| *lgid).collect(),
+            kind: self.kind.embody_by_gen_ty_id(assigns),
+            span: self.span,
         }
+    }
+
+    // ジェネリック型の具体型への割り当て assigns を受け取り
+    // 具体化した型を返す
+    // span は元のまま、kind のみ具体化する
+    pub fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocGenTyId, TyKind>) -> Self {
+        Self {
+            kind: self.kind.embody_by_loc_gen_ty_id(assigns),
+            span: self.span,
+        }
+    }
+}
+
+impl FnDefContentSignature {
+    pub fn as_ty(&self) -> Ty {
+        Ty::new(
+            TyKind::Fn(FnTy {
+                args: self.args.iter().map(|(_, ty)| ty.clone()).collect(),
+                rty: Box::new(self.rty.clone()),
+                genargs: self.genargs.iter().map(|(_, lgid)| *lgid).collect(),
+            }),
+            self.span.clone(),
+        )
     }
 }
 
