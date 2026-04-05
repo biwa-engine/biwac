@@ -1,0 +1,9 @@
+[package]
+name = "biwac_novel_parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_parser = { path = "../biwac_parser"}
+biwac_hir = { path = "../biwac_hir"}
