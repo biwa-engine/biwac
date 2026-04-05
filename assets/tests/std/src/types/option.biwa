@@ -9,7 +9,7 @@ type Option[T] = {{
 impl[T] Option[T] {
   [[native(arch="typescript")]]
   fn is_some(self) -> Bool {{
-    self !== null
+    return self !== null;
   }}
 
   [[native(arch="typescript")]]

@@ -21,12 +21,14 @@ impl Window {
   
   [[native(arch="typescript")]]
   fn width(self) -> Uint {{
-    //
+    // TODO:
+    return 0;
   }}
   
   [[native(arch="typescript")]]
   fn height(self) -> Uint {{
-    //
+    // TODO:
+    return 0;
   }}
 }
 
@@ -35,7 +37,7 @@ struct Canvas {}
 impl Canvas {
   [[native(arch="typescript")]]
   fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]) {{
-    //
+    console.log("TODO");
   }}
 }
 
@@ -44,27 +46,27 @@ struct MessageWindow {}
 impl MessageWindow {
   [[native(arch="typescript")]]
   fn append(self, text: String, font: Font, size: Uint, speed: Uint) {{
-    //
+    console.log("TODO");
   }}
   
   [[native(arch="typescript")]]
   fn clear(self) {{
-    //
+    console.log("TODO");
   }}
   
   [[native(arch="typescript")]]
   fn flush(self) {{
-    //
+    console.log("TODO");
   }}
   
   [[native(arch="typescript")]]
   fn set_talker_name(self, name: String) {{
-    //
+    console.log("TODO");
   }}
   
   [[native(arch="typescript")]]
   fn set_talker_image(self, image: Image) {{
-    //
+    console.log("TODO");
   }}
 }
 
