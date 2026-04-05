@@ -8,7 +8,7 @@ use biwac_parser::Ident;
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind,
-    InferTy, LocGenTyId, Ty, TyDefContentKind, TyId, TyKind, ValDefContentKind, ValId,
+    InferTy, LocGenTyId, NativeCode, Ty, TyDefContentKind, TyId, TyKind, ValDefContentKind, ValId,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -77,6 +77,8 @@ pub struct Hir {
 
     // パッケージ内に存在するモジュールの集合
     pub modules: HashSet<ModPath>,
+
+    pub module_global_natives: HashMap<ModPath, Vec<NativeCode>>,
 }
 
 #[derive(Debug, Clone)]
@@ -824,6 +826,19 @@ impl Hir {
         match &self.tys.get(tid)?.ty_content {
             Progressive::NotYet(_) => panic!("compiler bug: type definition not registered yet"),
             Progressive::Completed(ty_content) => Some(ty_content),
+        }
+    }
+
+    pub fn register_module_native_code(
+        &mut self,
+        modpath: ModPath,
+        native: &biwac_parser::NativeCode,
+    ) {
+        if let Some(e) = self.module_global_natives.get_mut(&modpath) {
+            e.push(NativeCode::from(native));
+        } else {
+            self.module_global_natives
+                .insert(modpath, vec![NativeCode::from(native)]);
         }
     }
 }

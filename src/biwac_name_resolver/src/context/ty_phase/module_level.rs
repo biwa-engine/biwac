@@ -185,7 +185,7 @@ impl ModuleLevelTyResolveCtx {
                         });
                     }
                 },
-                Globals::MethodDef(_) | Globals::NativeMethodDef(_) => {
+                Globals::MethodDef(_) | Globals::NativeMethodDef(_) | Globals::NativeCode(_) => {
                     // nothing to do
                 }
             }

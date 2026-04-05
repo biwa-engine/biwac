@@ -17,8 +17,8 @@ pub use symbols::{
         if_expr::IfExpr,
     },
     globals::{
-        ArgDecl, ArgDeclList, FnDef, Globals, ImportDecl, MethodDef, NativeFnDef, StructDef,
-        TypeAlias, TypeDef,
+        ArgDecl, ArgDeclList, FnDef, Globals, ImportDecl, MethodDef, NativeCode, NativeFnDef,
+        StructDef, TypeAlias, TypeDef,
     },
     statements::{
         AssignStmt, ExprStmt, ReturnStmt, Stmt, block::BlockStmt, if_stmt::IfStmt,

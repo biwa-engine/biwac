@@ -463,6 +463,10 @@ impl ResolveCtx {
                     biwac_parser::Globals::TypeDef(_) => {
                         // nothing to do
                     }
+                    biwac_parser::Globals::NativeCode(native) => {
+                        self.hir
+                            .register_module_native_code(modpath.clone(), &native);
+                    }
                 }
             }
         }

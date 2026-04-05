@@ -218,6 +218,12 @@ pub struct NativeTypeAliasDefContent {
     pub native_span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct NativeCode {
+    pub native: String,
+    pub native_span: Span,
+}
+
 impl TyId {
     pub fn new(quals: Vec<String>, id: String) -> Self {
         Self { quals, id }
@@ -355,6 +361,15 @@ impl NativeMethodDefContent {
             span: method_def.span,
             self_ty,
             impl_genargs,
+        }
+    }
+}
+
+impl From<&biwac_parser::NativeCode> for NativeCode {
+    fn from(value: &biwac_parser::NativeCode) -> Self {
+        Self {
+            native: value.native.clone(),
+            native_span: value.native_span.clone(),
         }
     }
 }

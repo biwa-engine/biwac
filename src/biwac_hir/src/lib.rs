@@ -13,7 +13,7 @@ pub use crate::hir::{
         },
         globals::{
             DecledArg, FnDefContent, FnDefContentBody, FnDefContentSignature, GenTyId,
-            ImplValDefContentKind, LocGenTyId, MethodDefContent, NativeFnArgDecl,
+            ImplValDefContentKind, LocGenTyId, MethodDefContent, NativeCode, NativeFnArgDecl,
             NativeFnDefContent, NativeMethodDefContent, NativeTypeAliasDefContent,
             StructDefContent, TyDefContentKind, TyId, TypeAliasDefContent, ValDefContentKind,
             ValId,

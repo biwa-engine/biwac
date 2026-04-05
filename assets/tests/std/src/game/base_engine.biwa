@@ -1,3 +1,8 @@
+[[native(arch="typescript")]]
+{{
+  import { createImage } from "../engine/api/image.ts";
+}}
+
 import package::types::string::String;
 
 [[native(arch="typescript")]]

@@ -50,6 +50,7 @@ pub enum Globals {
     NativeFnDef(NativeFnDef),
     MethodDef(MethodDef),
     NativeMethodDef(NativeMethodDef),
+    NativeCode(NativeCode),
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +143,30 @@ pub enum TypeDef {
     // Enum(EnumType),
     TypeAlias(TypeAlias),
     NativeTypeAlias(NativeTypeAlias),
+}
+
+/// NativeCode
+/// 以下のようにネイティブコードを直接書きたく、
+/// かつそれが他のbiwaコード自体からは名前で参照されないようなもの
+/// の場合に使われる
+/// 元々のネイティブコードにおいて順序がどうなるべきか、
+/// biwaのレベルではわからないため、
+/// 必ずファイルの先頭に展開されることを保証する
+/// つまりimportなどに使用できることになる
+/// 逆にネイティブコードにおいて他のシンボルとの順序関係が重視されるものに関しては
+/// そもそもこの NativeCode 方式を使うべきでないし、
+/// 型や関数のnative実装はサポートされているためそれで事足りるはずである
+///  ```biwa
+///  [[native(arch="arch_name")]]
+///  {{
+///      ...
+///  }}
+///  ```
+#[derive(Debug, Clone)]
+pub struct NativeCode {
+    pub native: String,
+    pub native_span: Span,
+    pub flags: Vec<CompilerFlag>,
 }
 
 // FnParseCtx
@@ -467,6 +492,17 @@ impl<'t> TokenStream<'t> {
                             type_impls.push(f);
                         }
                     }
+                }
+                TkKind::DslLiteral => {
+                    let native = t.unwrap_string_value();
+                    let native_span = t.span.clone();
+                    self.next();
+
+                    Ok(vec![Globals::NativeCode(NativeCode {
+                        native,
+                        native_span,
+                        flags,
+                    })])
                 }
                 _ => Err(ParseError::InvalidToken(
                     vec![TkKind::Fn, TkKind::Let, TkKind::Struct],

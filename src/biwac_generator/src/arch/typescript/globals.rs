@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use biwac_hir::{
-    FnDefContent, Hir, MethodDefContent, NativeFnDefContent, NativeMethodDefContent,
+    FnDefContent, Hir, MethodDefContent, NativeCode, NativeFnDefContent, NativeMethodDefContent,
     NativeTypeAliasDefContent, StructDefContent, TyId,
 };
 
@@ -820,5 +820,22 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeM
             },
             allocator,
         ))
+    }
+}
+
+impl<'a> IntoOxc<'a, oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>>> for &'a NativeCode {
+    fn into_oxc(
+        self,
+        allocator: &'a oxc_allocator::Allocator,
+        _hir: &Hir,
+    ) -> oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>> {
+        // TODO: そもそもnativeのターゲットがTSかチェック
+
+        // TSをパースして取り込む
+        let ts =
+            oxc_parser::Parser::new(allocator, &self.native, oxc_span::SourceType::ts()).parse();
+        // TODO: ts.errors をチェック
+
+        ts.program.body
     }
 }
