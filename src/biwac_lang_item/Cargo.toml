@@ -1,0 +1,8 @@
+[package]
+name = "biwac_lang_item"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_hir = { path = "../biwac_hir"}
