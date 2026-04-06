@@ -3,6 +3,7 @@ use biwac_hir::{TyId, ValId};
 #[derive(Debug, Clone)]
 pub struct LangItem {
     pub kind: LangItemKind,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,46 +13,33 @@ pub enum LangItemKind {
 }
 
 impl LangItem {
-    fn new(kind: LangItemKind) -> Self {
-        Self { kind }
+    fn new(kind: LangItemKind, id: String) -> Self {
+        Self { kind, id }
     }
 }
 
-macro_rules! ty_id {
-    ( $( $qual:literal ),* ; $id:literal ) => {
-        TyId::new(
-            vec![
-                $(
-                    $qual.to_string()
-                ),*
-            ],
-            $id.to_string()
-        )
-    };
-}
-
-macro_rules! val_id {
-    ( $( $qual:literal ),* ; $id:literal ) => {
-        ValId::new(
-            vec![
-                $(
-                    $qual.to_string()
-                ),*
-            ],
-            $id.to_string()
+macro_rules! lang_item_ty {
+    ( $( $qual:literal ),* ; $id:literal ; $genarg_len:literal ) => {
+        LangItem::new(
+            LangItemKind::Ty {
+                tid: TyId::new(
+                    vec![
+                        $(
+                            $qual.to_string()
+                        ),*
+                    ],
+                    $id.to_string(),
+                ),
+                genarg_len: $genarg_len,
+            },
+            $id.to_string(),
         )
     };
 }
 
 pub fn default_lang_items() -> Vec<LangItem> {
     vec![
-        LangItem::new(LangItemKind::Ty {
-            tid: ty_id!("std", "game"; "Game"),
-            genarg_len: 2,
-        }),
-        LangItem::new(LangItemKind::Ty {
-            tid: ty_id!("std", "game"; "Character"),
-            genarg_len: 1,
-        }),
+        lang_item_ty!("std", "game"; "Game"; 2),
+        lang_item_ty!("std", "game"; "Character"; 1),
     ]
 }
