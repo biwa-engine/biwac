@@ -1,14 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{
-    ParseError,
-    parser::TokenStream,
-    symbols::{
-        expressions::{Exprs, UnOperator, UnaryExpr},
-        globals::FnParseCtx,
-    },
-};
+use biwac_ast::{Exprs, UnOperator, UnaryExpr};
+
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_unary_expression(

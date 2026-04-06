@@ -1,83 +1,227 @@
-use biwac_base::Span;
+use biwac_ast::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
+use biwac_lexer::TkKind;
 
-use crate::symbols::QualifiedId;
+use crate::{ParseError, TokenStream};
 
-// NOTE:
-// 以下のTypDeclなどはいずれも、
-// 変数などの型の宣言を表す(決してユーザ定義型そのものの定義を表すものではない)。
-// 型推論において、
-// 型Tは、型変数?Xであるか、型名Nであるかだが、
-// 任意の型名Nは多相パラメータ<>を持つと考える。
-// T = ?X
-//   | N<T1, ..., Tn>
-// しかし、このパースの段階においては
-// パラメータを持つのはユーザ定義型のみであるとわかっているので、
-// `struct DefTyp`のみ`genargs`を持つ
+impl<'t> TokenStream<'t> {
+    pub(crate) fn must_consume_type_annotation(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<TypRepr, ParseError> {
+        let t = self
+            .peek()
+            .ok_or(ParseError::InvalidEOF(vec![TkKind::Colon]))?
+            .to_owned();
 
-/// Type declaration, especially for variable declataion.
-/// Variables often do not have explicit type representation.
-/// If not, we mark as `Any` and must inter its type.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypDecl {
-    Any,
-    Typ(TypRepr),
-}
+        if let TkKind::Colon = t.kind {
+            self.next();
 
-/// Representation of type.
-/// fn foo[T](idx: Uint, vec: Vec[T]) -> T? { let b: Bool = FALSE; ... }
-///                ^^^^       ^^^^^^     ^^          ^^^^
-///                |          |          |           |
-/// All of them are representation of types.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypRepr {
-    pub val: TypReprVal,
-    pub span: Span,
-}
+            Ok(self.consume_type_representaion(self_typ)?)
+        } else {
+            Err(ParseError::InvalidToken(vec![TkKind::Colon], t.clone()))
+        }
+    }
 
-/// RetTypRepr は関数の戻り値の表明子
-/// 無い場合、つまり Void の場合、
-/// その位置を示すspanのみ持つ
-///  ```biwa
-///  fn foo() -> Int { ... }
-///              ^^^
-///  fn bar() { ... }
-///          ^
-///  ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RetTypRepr {
-    Typ(TypRepr),
-    Void(Span),
-}
+    pub(crate) fn opt_consume_type_annotation(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<Option<TypRepr>, ParseError> {
+        let t = self
+            .peek()
+            .ok_or(ParseError::InvalidEOF(vec![TkKind::Colon]))?
+            .to_owned();
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypReprVal {
-    Primitive(PrimTyp),
-    Defined(DefTyp),
-    // NOTE:
-    // `T`のようなジェネリクス型も、
-    // QualifiedIdがidのみのDefTypとしてパースされる
-    // (パース時にはその意味論は決定できない)
-}
+        if let TkKind::Colon = t.kind {
+            self.next();
 
-/// Primitive(built-in) types like `Int`, `Uint`, `Float`, `Bool` ...
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PrimTyp {
-    Uint,
-    Int,
-    Float,
-    Bool,
-    // String,
-}
+            Ok(Some(self.consume_type_representaion(self_typ)?))
+        } else {
+            Ok(None)
+        }
+    }
 
-/// User-defined types such as `struct Foo`, `enum Bar`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DefTyp {
-    pub qualid: QualifiedId,
-    pub genargs: Option<Vec<TypRepr>>,
-}
+    pub(crate) fn consume_type_representaion(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<TypRepr, ParseError> {
+        if let Some(t) = self.peek() {
+            if let TkKind::Uint = t.kind {
+                let span = t.span.clone();
+                self.next();
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Uint),
+                    span,
+                })
+            } else if let TkKind::Int = t.kind {
+                let span = t.span.clone();
+                self.next();
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Int),
+                    span,
+                })
+            } else if let TkKind::Float = t.kind {
+                let span = t.span.clone();
+                self.next();
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Float),
+                    span,
+                })
+            } else if let TkKind::Bool = t.kind {
+                let span = t.span.clone();
+                self.next();
+                Ok(TypRepr {
+                    val: TypReprVal::Primitive(PrimTyp::Bool),
+                    span,
+                })
+            } else if let TkKind::Ident = t.kind {
+                // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
+                let qualid = self.consume_qualified_identifier()?;
+                let genargs = self.opt_consume_generic_args(self_typ)?;
 
-/// Generic argument like `T`
-#[derive(Debug, Clone)]
-pub struct GenArg {
-    pub id: String,
+                Ok(TypRepr {
+                    span: qualid.span.clone(),
+                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
+                })
+            } else if let TkKind::Package = t.kind {
+                let qualid = self.consume_qualified_identifier()?;
+                let genargs = self.opt_consume_generic_args(self_typ)?;
+
+                Ok(TypRepr {
+                    span: qualid.span.clone(),
+                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
+                })
+            } else if let TkKind::SelfTyp = t.kind
+                && let Some(self_typ) = self_typ
+            {
+                // Self型がある場合のみSelfは有効
+                self.next();
+                Ok(self_typ.clone())
+            } else {
+                Err(ParseError::InvalidToken(
+                    vec![TkKind::Uint, TkKind::Int, TkKind::Bool, TkKind::Ident],
+                    t.to_owned().clone(),
+                ))
+            }
+        } else {
+            Err(ParseError::InvalidEOF(vec![
+                TkKind::Uint,
+                TkKind::Int,
+                TkKind::Bool,
+                TkKind::Ident,
+                TkKind::Package,
+            ]))
+        }
+    }
+
+    /// consume generic argument declaration
+    /// ```biwa
+    /// struct Hoge[T, U] { ... }
+    ///            ^^^^^^
+    ///
+    /// fn hoge[T, U](t: T, i: Int) -> U { ... }
+    ///        ^^^^^^
+    ///
+    /// impl[T, U] Hoge[T, U] { ... }
+    ///     ^^^^^^
+    /// ```
+    /// Generic argument declaration is declaration of generic type which appears for the first
+    /// time in the scope, so it only contains <identifier>.
+    /// It has diffinitly different meaning with generic argument assignment which makes generic
+    /// type argument concrete type.
+    ///
+    /// ジェネリック型引数宣言は、そのスコープで始めて現れるジェネリック型の宣言であり、
+    /// その引数列には<identifier>しか含まれない。
+    /// ジェネリック型を具体化するときのジェネリック型引数の代入列とは別の意味合いである。
+    pub(crate) fn opt_consume_generic_argument_declaration(
+        &mut self,
+    ) -> Result<Vec<Ident>, ParseError> {
+        let mut genargs = vec![];
+        if let Some(t) = self.peek()
+            && matches!(t.kind, TkKind::LBracket)
+        {
+            self.next();
+        } else {
+            return Ok(genargs);
+        }
+
+        loop {
+            if let Some(t) = self.peek()
+                && let TkKind::RBracket = t.kind
+            {
+                self.next();
+
+                return Ok(genargs);
+            } else {
+                genargs.push(self.consume_identifier()?);
+
+                if let Some(t) = self.next() {
+                    if let TkKind::RBracket = t.kind {
+                        return Ok(genargs);
+                    } else if let TkKind::Comma = t.kind {
+                        continue;
+                    } else {
+                        return Err(ParseError::InvalidToken(
+                            vec![TkKind::RBracket, TkKind::Comma],
+                            t.clone(),
+                        ));
+                    }
+                } else {
+                    return Err(ParseError::InvalidEOF(vec![
+                        TkKind::RBracket,
+                        TkKind::Comma,
+                    ]));
+                }
+            }
+        }
+    }
+
+    /// Optionaly consumes tokens and parses to get generic arguments.
+    /// We should use here:
+    /// let a: foo::bar[Int] = ...
+    ///                ^
+    ///                |
+    // pub(crate) fn opt_consume_generic_argument_assignment(
+    pub(crate) fn opt_consume_generic_args(
+        &mut self,
+        self_typ: &Option<TypRepr>,
+    ) -> Result<Option<Vec<TypRepr>>, ParseError> {
+        if let Some(t) = self.peek()
+            && matches!(t.kind, TkKind::LBracket)
+        {
+            self.next();
+        } else {
+            return Ok(None);
+        }
+
+        let mut genargs = vec![];
+        loop {
+            if let Some(t) = self.peek()
+                && let TkKind::RBracket = t.kind
+            {
+                self.next();
+
+                return Ok(Some(genargs));
+            } else {
+                genargs.push(self.consume_type_representaion(self_typ)?);
+
+                if let Some(t) = self.next() {
+                    if let TkKind::RBracket = t.kind {
+                        return Ok(Some(genargs));
+                    } else if let TkKind::Comma = t.kind {
+                        continue;
+                    } else {
+                        return Err(ParseError::InvalidToken(
+                            vec![TkKind::RBracket, TkKind::Comma],
+                            t.clone(),
+                        ));
+                    }
+                } else {
+                    return Err(ParseError::InvalidEOF(vec![
+                        TkKind::RBracket,
+                        TkKind::Comma,
+                    ]));
+                }
+            }
+        }
+    }
 }

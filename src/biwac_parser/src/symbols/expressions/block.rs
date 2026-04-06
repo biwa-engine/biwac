@@ -1,18 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{
-    Exprs, ParseError, Stmt,
-    parser::TokenStream,
-    symbols::{ExprOrStmt, globals::FnParseCtx},
-};
+use biwac_ast::{BlockExpr, Stmt};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockExpr {
-    pub stmts: Vec<Stmt>,
-    pub expr: Box<Exprs>,
-    pub span: Span,
-}
+use crate::{ExprOrStmt, ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     pub(crate) fn consume_block_expression(

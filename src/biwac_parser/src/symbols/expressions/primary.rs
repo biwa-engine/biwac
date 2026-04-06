@@ -1,17 +1,12 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{
-    Ident, MethodCall, ParseError, QualifiedId,
-    parser::TokenStream,
-    symbols::{
-        expressions::{
-            BoolLiteral, Exprs, FnCall, IntegerLiteral, Literal, Primary, StringLiteral,
-            StructLiteral,
-        },
-        globals::FnParseCtx,
-    },
+use biwac_ast::{
+    BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Primary, QualifiedId,
+    StringLiteral, StructLiteral,
 };
+
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 // Primary = Literal | Identifier ( "(" ")" )? | "(" Exprs ")"
 impl<'t> TokenStream<'t> {

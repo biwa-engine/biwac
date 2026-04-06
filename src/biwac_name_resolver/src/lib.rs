@@ -7,13 +7,13 @@ mod tests;
 
 use std::collections::HashMap;
 
+use biwac_ast::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
 use biwac_base::{ModPath, Span};
 use biwac_hir::{
     Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, StructDefContent, Ty,
     TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
 };
 use biwac_package_loader::Pkg;
-use biwac_parser::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
 
 use crate::context::{
     ty_phase::{
@@ -196,7 +196,7 @@ impl ResolveCtx {
             self.hir.register_module_existence(modpath.clone())?;
 
             for g in &modu.globals {
-                if let biwac_parser::Globals::TypeDef(t) = g {
+                if let biwac_ast::Globals::TypeDef(t) = g {
                     match t {
                         TypeDef::Struct(struct_) => {
                             let tid = TyId::from_modpath(modpath, struct_.id.id.clone());
@@ -259,7 +259,7 @@ impl ResolveCtx {
             let mctx = mctxes.get(modpath).unwrap();
 
             for g in &modu.globals {
-                if let biwac_parser::Globals::TypeDef(type_def) = g {
+                if let biwac_ast::Globals::TypeDef(type_def) = g {
                     match type_def {
                         TypeDef::Struct(struct_) => {
                             let tid = TyId::from_modpath(modpath, struct_.id.id.clone());
@@ -303,7 +303,7 @@ impl ResolveCtx {
 
             for g in modu.globals {
                 match g {
-                    biwac_parser::Globals::FnDef(fn_def) => {
+                    biwac_ast::Globals::FnDef(fn_def) => {
                         // 関連関数のとき
                         if let Some(impl_ctx) = &fn_def.impl_ctx {
                             let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
@@ -349,7 +349,7 @@ impl ResolveCtx {
                             )?;
                         }
                     }
-                    biwac_parser::Globals::NativeFnDef(fn_def) => {
+                    biwac_ast::Globals::NativeFnDef(fn_def) => {
                         // 関連関数のとき
                         if let Some(impl_ctx) = &fn_def.impl_ctx {
                             let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
@@ -399,7 +399,7 @@ impl ResolveCtx {
                             )?;
                         }
                     }
-                    biwac_parser::Globals::MethodDef(method_def) => {
+                    biwac_ast::Globals::MethodDef(method_def) => {
                         let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
                         let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
 
@@ -426,7 +426,7 @@ impl ResolveCtx {
                             )),
                         )?;
                     }
-                    biwac_parser::Globals::NativeMethodDef(method_def) => {
+                    biwac_ast::Globals::NativeMethodDef(method_def) => {
                         let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
                         let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
 
@@ -454,16 +454,16 @@ impl ResolveCtx {
                             )),
                         )?;
                     }
-                    biwac_parser::Globals::VarDecl(_var_decl) => {
+                    biwac_ast::Globals::VarDecl(_var_decl) => {
                         todo!()
                     }
-                    biwac_parser::Globals::Import(_) => {
+                    biwac_ast::Globals::Import(_) => {
                         // nothing to do
                     }
-                    biwac_parser::Globals::TypeDef(_) => {
+                    biwac_ast::Globals::TypeDef(_) => {
                         // nothing to do
                     }
-                    biwac_parser::Globals::NativeCode(native) => {
+                    biwac_ast::Globals::NativeCode(native) => {
                         self.hir
                             .register_module_native_code(modpath.clone(), &native);
                     }

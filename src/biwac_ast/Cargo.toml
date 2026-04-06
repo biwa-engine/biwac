@@ -1,9 +1,7 @@
 [package]
-name = "biwac_parser"
+name = "biwac_ast"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
-biwac_lexer = { path = "../biwac_lexer"}
-biwac_ast = { path = "../biwac_ast"}

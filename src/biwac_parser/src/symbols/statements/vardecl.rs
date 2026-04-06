@@ -1,17 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{
-    Exprs, Ident, ParseError, parser::TokenStream, symbols::globals::FnParseCtx, types::TypDecl,
-};
+use biwac_ast::{TypDecl, VarDecl};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VarDecl {
-    pub typ: TypDecl,
-    pub id: Ident,
-    pub init: Exprs,
-    pub span: Span,
-}
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"

@@ -1,14 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{BlockStmt, Exprs, ParseError, parser::TokenStream, symbols::globals::FnParseCtx};
+use biwac_ast::WhileStmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WhileStmt {
-    pub cond: Exprs,
-    pub stmts: BlockStmt,
-    pub span: Span,
-}
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     // "while" <expression> <block-statement>

@@ -1,8 +1,8 @@
 use biwac_lexer::TkKind;
 
-use crate::{
-    BinOperator, BinaryExpr, Exprs, ParseError, parser::TokenStream, symbols::globals::FnParseCtx,
-};
+use biwac_ast::{BinOperator, BinaryExpr, Exprs};
+
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_multiplication_expression(

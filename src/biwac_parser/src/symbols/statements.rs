@@ -5,42 +5,17 @@ pub mod while_stmt;
 
 use biwac_base::Span;
 use biwac_lexer::token::TkKind;
-use if_stmt::IfStmt;
-use while_stmt::WhileStmt;
 
-use crate::{
-    BlockStmt, ExprOrStmt, Exprs, ParseError, Primary, VarDecl, parser::TokenStream,
-    symbols::globals::FnParseCtx,
-};
+use biwac_ast::{AssignStmt, BlockExpr, BlockStmt, ExprStmt, Exprs, Primary, ReturnStmt, Stmt};
 
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+
+// パースすると判明する
+// statement か expression を保持する
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Stmt {
-    Block(BlockStmt),
-    Expr(ExprStmt),
-    Return(ReturnStmt),
-    If(IfStmt),
-    While(WhileStmt),
-    VarDecl(VarDecl),
-    Assign(AssignStmt),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExprStmt {
-    pub expr: Exprs,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReturnStmt {
-    pub expr: Exprs,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignStmt {
-    pub dst: Primary,
-    pub src: Exprs,
-    pub span: Span,
+pub(crate) enum ExprOrStmt<E, S> {
+    Expr(E),
+    Stmt(S),
 }
 
 impl<'t> TokenStream<'t> {
@@ -138,6 +113,43 @@ impl<'t> TokenStream<'t> {
                 TkKind::While,
                 TkKind::Return,
             ]))
+        }
+    }
+
+    pub(crate) fn consume_block_expression_or_statement(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<ExprOrStmt<BlockExpr, BlockStmt>, ParseError> {
+        let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
+
+        let mut stmts: Vec<Stmt> = vec![];
+
+        loop {
+            if let Some(t) = self.peek().copied()
+                && TkKind::RBrace == t.kind
+            {
+                self.next();
+
+                return Ok(ExprOrStmt::Stmt(BlockStmt {
+                    stmts,
+                    span: Span::merge(&begin, &t.span),
+                }));
+            } else {
+                match self.consume_expression_or_statement(ctx)? {
+                    ExprOrStmt::Expr(expr) => {
+                        let end = self.must_consume_next(vec![TkKind::RBrace])?.span.clone();
+
+                        return Ok(ExprOrStmt::Expr(BlockExpr {
+                            stmts,
+                            expr: Box::new(expr),
+                            span: Span::merge(&begin, &end),
+                        }));
+                    }
+                    ExprOrStmt::Stmt(stmt) => {
+                        stmts.push(stmt);
+                    }
+                }
+            }
         }
     }
 }

@@ -1,8 +1,7 @@
 use biwac_base::{ModPath, Pos, Span};
 
-use crate::{
-    Exprs, Globals, Ident, IntegerLiteral, Literal, ModAst, Primary, Stmt, StringLiteral, VarDecl,
-    types::TypDecl,
+use biwac_ast::{
+    Exprs, Globals, Ident, IntegerLiteral, Literal, Primary, Stmt, StringLiteral, TypDecl, VarDecl,
 };
 
 #[test]
@@ -21,7 +20,7 @@ fn foo() {
 
     let tokens = biwac_lexer::lex(modu.clone(), src).unwrap();
 
-    let module = ModAst::try_parse(tokens).unwrap();
+    let module = crate::Parser::new(tokens).try_parse().unwrap();
 
     let g0 = module.globals.first().unwrap();
 

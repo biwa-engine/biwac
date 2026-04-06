@@ -8,9 +8,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use biwac_ast::ModAst;
 use biwac_base::{BIWA_EXTENSION, ModPath};
 use biwac_lexer::TokenizeError;
-use biwac_parser::{ModAst, ParseError};
+use biwac_parser::ParseError;
 
 #[derive(Debug, Clone)]
 pub enum PkgLoadError {
@@ -110,9 +111,11 @@ impl Pkg {
                 }
             })?;
 
-            let module = ModAst::try_parse(tokens).map_err(|e| PkgLoadError::ParseError {
-                modpath: modpath.clone(),
-                err: Box::new(e),
+            let module = biwac_parser::Parser::new(tokens).try_parse().map_err(|e| {
+                PkgLoadError::ParseError {
+                    modpath: modpath.clone(),
+                    err: Box::new(e),
+                }
             })?;
 
             modules.insert(modpath.clone(), module);

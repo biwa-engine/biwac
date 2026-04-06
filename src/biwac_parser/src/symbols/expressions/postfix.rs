@@ -1,14 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{
-    MethodCall, ParseError,
-    parser::TokenStream,
-    symbols::{
-        expressions::{Exprs, MemberAccess, Primary},
-        globals::FnParseCtx,
-    },
-};
+use biwac_ast::{Exprs, MemberAccess, MethodCall, Primary};
+
+use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     pub(super) fn consume_postfix_expression(

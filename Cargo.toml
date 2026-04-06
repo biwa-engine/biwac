@@ -2,6 +2,7 @@
 members = [
   "src/biwac_base",
   "src/biwac_lexer",
+  "src/biwac_ast",
   "src/biwac_parser",
   "src/biwac_novel_parser",
   "src/biwac_package_loader",

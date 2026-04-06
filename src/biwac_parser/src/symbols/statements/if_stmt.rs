@@ -1,19 +1,9 @@
 use biwac_base::Span;
 use biwac_lexer::TkKind;
 
-use crate::{
-    BlockStmt, Exprs, IfExpr, ParseError,
-    parser::TokenStream,
-    symbols::{ExprOrStmt, globals::FnParseCtx},
-};
+use biwac_ast::{IfExpr, IfStmt};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IfStmt {
-    pub cond: Exprs,
-    pub then: BlockStmt,
-    pub els: Option<BlockStmt>,
-    pub span: Span,
-}
+use crate::{ExprOrStmt, ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 impl<'t> TokenStream<'t> {
     // "if" <expression> <block-statement> ("else" <block-statement>)?

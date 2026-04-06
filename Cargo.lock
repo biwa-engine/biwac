@@ -31,6 +31,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 
 [[package]]
+name = "biwac_ast"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]
+
+[[package]]
 name = "biwac_base"
 version = "0.1.0"
 
@@ -87,11 +94,11 @@ dependencies = [
 name = "biwac_name_resolver"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
  "biwac_hir",
  "biwac_lexer",
  "biwac_package_loader",
- "biwac_parser",
 ]
 
 [[package]]
@@ -107,6 +114,7 @@ dependencies = [
 name = "biwac_package_loader"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
  "biwac_lexer",
  "biwac_parser",
@@ -116,6 +124,7 @@ dependencies = [
 name = "biwac_parser"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
  "biwac_lexer",
 ]
