@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use biwac_ast::{FnDef, Ident, MethodDef, NativeFnDef, symbols::globals::NativeMethodDef};
 use biwac_base::{ModPath, Span};
-use biwac_parser::{FnDef, Ident, MethodDef, NativeFnDef, symbols::globals::NativeMethodDef};
 
 use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
 
@@ -365,8 +365,8 @@ impl NativeMethodDefContent {
     }
 }
 
-impl From<&biwac_parser::NativeCode> for NativeCode {
-    fn from(value: &biwac_parser::NativeCode) -> Self {
+impl From<&biwac_ast::NativeCode> for NativeCode {
+    fn from(value: &biwac_ast::NativeCode) -> Self {
         Self {
             native: value.native.clone(),
             native_span: value.native_span.clone(),

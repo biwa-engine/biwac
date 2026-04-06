@@ -1,10 +1,10 @@
 use std::cell::Cell;
 
+use biwac_ast::{BinOperator, UnOperator};
 use biwac_hir::{
     BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, TyId, TyKind,
     VarIdKind,
 };
-use biwac_parser::{BinOperator, UnOperator};
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, Mangled, span};

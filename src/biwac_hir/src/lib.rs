@@ -1,7 +1,7 @@
 pub mod hir;
 
+use biwac_ast::Ident;
 use biwac_base::Span;
-use biwac_parser::Ident;
 
 pub use crate::hir::{
     Hir, ImplValId, Progressive, TyExistence,

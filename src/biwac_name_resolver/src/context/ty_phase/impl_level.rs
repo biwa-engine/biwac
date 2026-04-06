@@ -1,8 +1,8 @@
 use std::collections::{HashMap, hash_map::Entry};
 
+use biwac_ast::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
 use biwac_base::Span;
 use biwac_hir::{DefinedTy, Hir, InferTy, LocGenTyId, Ty, TyKind};
-use biwac_parser::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
 
 use crate::{ResolveError, RsvResult, context::ty_phase::module_level::ModuleLevelTyResolveCtx};
 

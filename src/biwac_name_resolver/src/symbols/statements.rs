@@ -1,21 +1,21 @@
+use biwac_ast::types::TypDecl;
 use biwac_hir::{
     AssignStmt, BlockStmt, Expr, ExprStmt, IfStmt, InferTy, Primary, ReturnStmt, Stmt, Ty, TyKind,
     VarDecl, WhileStmt,
 };
-use biwac_parser::types::TypDecl;
 
 use crate::{RsvResult, TryResolve};
 
-impl TryResolve<&biwac_parser::Stmt> for Stmt {
+impl TryResolve<&biwac_ast::Stmt> for Stmt {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::Stmt,
+        value: &biwac_ast::Stmt,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
         match &value {
-            biwac_parser::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx, hir)?)),
-            biwac_parser::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx, hir)?)),
-            biwac_parser::Stmt::Block(b) => {
+            biwac_ast::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx, hir)?)),
+            biwac_ast::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx, hir)?)),
+            biwac_ast::Stmt::Block(b) => {
                 // ブロック文はスコープを作る
                 fctx.enter_scope();
 
@@ -32,18 +32,18 @@ impl TryResolve<&biwac_parser::Stmt> for Stmt {
                     stmts,
                 }))
             }
-            biwac_parser::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
+            biwac_ast::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
                 span: expr.span.clone(),
                 expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
             })),
-            biwac_parser::Stmt::Return(expr) => Ok(Self::Return(ReturnStmt {
+            biwac_ast::Stmt::Return(expr) => Ok(Self::Return(ReturnStmt {
                 span: expr.span.clone(),
                 expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
             })),
-            biwac_parser::Stmt::VarDecl(var) => {
+            biwac_ast::Stmt::VarDecl(var) => {
                 Ok(Self::VarDecl(VarDecl::try_resolve(var, fctx, hir)?))
             }
-            biwac_parser::Stmt::Assign(assign) => Ok(Self::Assign(AssignStmt {
+            biwac_ast::Stmt::Assign(assign) => Ok(Self::Assign(AssignStmt {
                 span: assign.span.clone(),
                 dst: Primary::try_resolve(&assign.dst, fctx, hir)?,
                 src: Expr::try_resolve(&assign.src, fctx, hir)?,
@@ -52,9 +52,9 @@ impl TryResolve<&biwac_parser::Stmt> for Stmt {
     }
 }
 
-impl TryResolve<&biwac_parser::IfStmt> for IfStmt {
+impl TryResolve<&biwac_ast::IfStmt> for IfStmt {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::IfStmt,
+        value: &biwac_ast::IfStmt,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -84,9 +84,9 @@ impl TryResolve<&biwac_parser::IfStmt> for IfStmt {
     }
 }
 
-impl TryResolve<&biwac_parser::WhileStmt> for WhileStmt {
+impl TryResolve<&biwac_ast::WhileStmt> for WhileStmt {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::WhileStmt,
+        value: &biwac_ast::WhileStmt,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -105,9 +105,9 @@ impl TryResolve<&biwac_parser::WhileStmt> for WhileStmt {
     }
 }
 
-impl TryResolve<&biwac_parser::VarDecl> for VarDecl {
+impl TryResolve<&biwac_ast::VarDecl> for VarDecl {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::VarDecl,
+        value: &biwac_ast::VarDecl,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {

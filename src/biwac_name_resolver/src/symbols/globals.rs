@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use biwac_ast::RetTypRepr;
 use biwac_base::Span;
 use biwac_hir::{Expr, FnDefContentBody, Hir, Stmt, Ty, TyKind};
-use biwac_parser::RetTypRepr;
 
 use crate::{
     ModuleLevelTryResolveTy, ResolveError, RsvResult, TryResolve, TryResolveTy,
@@ -11,9 +11,9 @@ use crate::{
     },
 };
 
-impl TryResolve<(&biwac_parser::FnDef, &biwac_hir::FnDefContentSignature)> for FnDefContentBody {
+impl TryResolve<(&biwac_ast::FnDef, &biwac_hir::FnDefContentSignature)> for FnDefContentBody {
     fn try_resolve<'mctx>(
-        (fn_def, fn_signature): (&biwac_parser::FnDef, &biwac_hir::FnDefContentSignature),
+        (fn_def, fn_signature): (&biwac_ast::FnDef, &biwac_hir::FnDefContentSignature),
         fctx: &mut FnLevelResolveCtx<'mctx>,
         hir: &Hir,
     ) -> RsvResult<Self> {
@@ -43,11 +43,9 @@ impl TryResolve<(&biwac_parser::FnDef, &biwac_hir::FnDefContentSignature)> for F
     }
 }
 
-impl TryResolve<(&biwac_parser::MethodDef, &biwac_hir::FnDefContentSignature)>
-    for FnDefContentBody
-{
+impl TryResolve<(&biwac_ast::MethodDef, &biwac_hir::FnDefContentSignature)> for FnDefContentBody {
     fn try_resolve<'mctx>(
-        (method_def, fn_signature): (&biwac_parser::MethodDef, &biwac_hir::FnDefContentSignature),
+        (method_def, fn_signature): (&biwac_ast::MethodDef, &biwac_hir::FnDefContentSignature),
         fctx: &mut FnLevelResolveCtx<'mctx>,
         hir: &Hir,
     ) -> RsvResult<Self> {
@@ -81,9 +79,9 @@ impl TryResolve<(&biwac_parser::MethodDef, &biwac_hir::FnDefContentSignature)>
     }
 }
 
-impl ModuleLevelTryResolveTy<&biwac_parser::StructDef> for biwac_hir::StructDefContent {
+impl ModuleLevelTryResolveTy<&biwac_ast::StructDef> for biwac_hir::StructDefContent {
     fn try_resolve_in_module(
-        struct_: &biwac_parser::StructDef,
+        struct_: &biwac_ast::StructDef,
         mctx: &crate::context::ty_phase::module_level::ModuleLevelTyResolveCtx,
         hir: &Hir,
     ) -> crate::RsvResult<Self> {
@@ -131,11 +129,11 @@ impl ModuleLevelTryResolveTy<&biwac_parser::StructDef> for biwac_hir::StructDefC
 //     }
 // }
 
-impl TryResolveTy<(&biwac_parser::ArgDeclList, &biwac_parser::RetTypRepr)>
+impl TryResolveTy<(&biwac_ast::ArgDeclList, &biwac_ast::RetTypRepr)>
     for biwac_hir::FnDefContentSignature
 {
     fn try_resolve<'mctx>(
-        value: (&biwac_parser::ArgDeclList, &biwac_parser::RetTypRepr),
+        value: (&biwac_ast::ArgDeclList, &biwac_ast::RetTypRepr),
         fctx: &crate::context::ty_phase::fn_level::FnLevelTyResolveCtx<'mctx>,
         hir: &Hir,
     ) -> crate::RsvResult<Self> {

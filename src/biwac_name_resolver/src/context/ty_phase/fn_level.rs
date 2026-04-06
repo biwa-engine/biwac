@@ -1,7 +1,7 @@
 use std::collections::{HashMap, hash_map::Entry};
 
+use biwac_ast::{Ident, PrimTyp, TypRepr, TypReprVal};
 use biwac_hir::{Hir, LocGenTyId, Ty, TyKind};
-use biwac_parser::{Ident, PrimTyp, TypRepr, TypReprVal};
 
 use crate::{ResolveError, RsvResult, context::ty_phase::impl_level::ImplLevelTyResolveCtx};
 

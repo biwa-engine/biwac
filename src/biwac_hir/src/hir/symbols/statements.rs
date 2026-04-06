@@ -1,5 +1,5 @@
+use biwac_ast::Ident;
 use biwac_base::Span;
-use biwac_parser::Ident;
 
 use crate::{Expr, Primary, Ty};
 

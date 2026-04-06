@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
+use biwac_ast::{DefTyp, ImportDecl, QualifiedId};
 use biwac_base::{ModPath, Span};
 use biwac_hir::{
     AssocCallee, DefinedTy, Hir, InferTy, Ty, TyDefContentKind, TyExistence, TyId, TyKind,
     ValDefContentKind, ValId,
 };
-use biwac_parser::{DefTyp, ImportDecl, QualifiedId};
 
 use crate::{
     ResolveError, RsvResult,

@@ -56,10 +56,10 @@ dependencies = [
 name = "biwac_generator"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
  "biwac_hir",
  "biwac_package_loader",
- "biwac_parser",
  "oxc_allocator",
  "oxc_ast",
  "oxc_codegen",
@@ -71,8 +71,8 @@ dependencies = [
 name = "biwac_hir"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
- "biwac_parser",
 ]
 
 [[package]]
@@ -133,11 +133,11 @@ dependencies = [
 name = "biwac_type_inferrer"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
  "biwac_hir",
  "biwac_name_resolver",
  "biwac_package_loader",
- "biwac_parser",
 ]
 
 [[package]]

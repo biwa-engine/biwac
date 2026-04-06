@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 pub(crate) mod symbols;
 pub(crate) mod types;
 
+use biwac_ast::Ident;
 use biwac_base::{ModPath, Pos, Span};
-use biwac_parser::Ident;
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind,
@@ -832,7 +832,7 @@ impl Hir {
     pub fn register_module_native_code(
         &mut self,
         modpath: ModPath,
-        native: &biwac_parser::NativeCode,
+        native: &biwac_ast::NativeCode,
     ) {
         if let Some(e) = self.module_global_natives.get_mut(&modpath) {
             e.push(NativeCode::from(native));

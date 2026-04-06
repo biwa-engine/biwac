@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
-biwac_parser = { path = "../biwac_parser"}
+biwac_ast = { path = "../biwac_ast"}
 biwac_package_loader = { path = "../biwac_package_loader"}
 biwac_hir = { path = "../biwac_hir"}
 oxc_codegen = { workspace = true, optional = true }

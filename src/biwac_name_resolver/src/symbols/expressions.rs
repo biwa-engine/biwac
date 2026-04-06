@@ -1,47 +1,41 @@
+use biwac_ast::Ident;
 use biwac_hir::{
     BinaryExpr, BlockExpr, Callee, Expr, ExprVal, FnCall, IfExpr, Literal, MemberAccess,
     MethodCall, Primary, Stmt, StructLiteral, TyKind, UnaryExpr, Variable,
 };
-use biwac_parser::Ident;
 
 use crate::{RsvResult, TryResolve, context::val_phase::ResolvedValue};
 
-impl TryResolve<&biwac_parser::Primary> for Primary {
+impl TryResolve<&biwac_ast::Primary> for Primary {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::Primary,
+        value: &biwac_ast::Primary,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
         match &value {
-            biwac_parser::Primary::Literal(l) => {
+            biwac_ast::Primary::Literal(l) => {
                 Ok(Self::Literal(Literal::try_resolve(l, fctx, hir)?))
             }
-            biwac_parser::Primary::Variable(v) => Ok(Self::Variable(Variable {
+            biwac_ast::Primary::Variable(v) => Ok(Self::Variable(Variable {
                 id: fctx.try_resolve_variable(v, hir)?,
                 span: v.span.clone(),
             })),
-            biwac_parser::Primary::FnCall(f) => {
-                Ok(Self::FnCall(FnCall::try_resolve(f, fctx, hir)?))
-            }
-            biwac_parser::Primary::MemberAccess(m) => {
+            biwac_ast::Primary::FnCall(f) => Ok(Self::FnCall(FnCall::try_resolve(f, fctx, hir)?)),
+            biwac_ast::Primary::MemberAccess(m) => {
                 Ok(Self::MemberAccess(MemberAccess::try_resolve(m, fctx, hir)?))
             }
-            biwac_parser::Primary::MethodCall(m) => {
+            biwac_ast::Primary::MethodCall(m) => {
                 Ok(Self::MethodCall(MethodCall::try_resolve(m, fctx, hir)?))
             }
-            biwac_parser::Primary::IfExpr(i) => {
-                Ok(Self::IfExpr(IfExpr::try_resolve(i, fctx, hir)?))
-            }
-            biwac_parser::Primary::Block(b) => {
-                Ok(Self::Block(BlockExpr::try_resolve(b, fctx, hir)?))
-            }
+            biwac_ast::Primary::IfExpr(i) => Ok(Self::IfExpr(IfExpr::try_resolve(i, fctx, hir)?)),
+            biwac_ast::Primary::Block(b) => Ok(Self::Block(BlockExpr::try_resolve(b, fctx, hir)?)),
         }
     }
 }
 
-impl TryResolve<&biwac_parser::IfExpr> for IfExpr {
+impl TryResolve<&biwac_ast::IfExpr> for IfExpr {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::IfExpr,
+        value: &biwac_ast::IfExpr,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -54,9 +48,9 @@ impl TryResolve<&biwac_parser::IfExpr> for IfExpr {
     }
 }
 
-impl TryResolve<&biwac_parser::BlockExpr> for BlockExpr {
+impl TryResolve<&biwac_ast::BlockExpr> for BlockExpr {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::BlockExpr,
+        value: &biwac_ast::BlockExpr,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -72,9 +66,9 @@ impl TryResolve<&biwac_parser::BlockExpr> for BlockExpr {
     }
 }
 
-impl TryResolve<&biwac_parser::FnCall> for FnCall {
+impl TryResolve<&biwac_ast::FnCall> for FnCall {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::FnCall,
+        value: &biwac_ast::FnCall,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -95,9 +89,9 @@ impl TryResolve<&biwac_parser::FnCall> for FnCall {
     }
 }
 
-impl TryResolve<&biwac_parser::MemberAccess> for MemberAccess {
+impl TryResolve<&biwac_ast::MemberAccess> for MemberAccess {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::MemberAccess,
+        value: &biwac_ast::MemberAccess,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -109,9 +103,9 @@ impl TryResolve<&biwac_parser::MemberAccess> for MemberAccess {
     }
 }
 
-impl TryResolve<&biwac_parser::MethodCall> for MethodCall {
+impl TryResolve<&biwac_ast::MethodCall> for MethodCall {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::MethodCall,
+        value: &biwac_ast::MethodCall,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
@@ -128,21 +122,21 @@ impl TryResolve<&biwac_parser::MethodCall> for MethodCall {
     }
 }
 
-impl TryResolve<&biwac_parser::Literal> for Literal {
+impl TryResolve<&biwac_ast::Literal> for Literal {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::Literal,
+        value: &biwac_ast::Literal,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
         match value {
-            biwac_parser::Literal::Integer(u) => Ok(Self::Integer(u.clone())),
-            biwac_parser::Literal::String(s) => Ok(Self::String(s.clone())),
-            biwac_parser::Literal::Bool(b) => Ok(Self::Bool(b.clone())),
-            biwac_parser::Literal::Struct(s) => Ok(Self::Struct(StructLiteral {
+            biwac_ast::Literal::Integer(u) => Ok(Self::Integer(u.clone())),
+            biwac_ast::Literal::String(s) => Ok(Self::String(s.clone())),
+            biwac_ast::Literal::Bool(b) => Ok(Self::Bool(b.clone())),
+            biwac_ast::Literal::Struct(s) => Ok(Self::Struct(StructLiteral {
                 // NOTE: struct リテラルにはジェネリック型注釈が必要か否か
                 tid: match fctx
                     .try_resolve_defined_ty(
-                        &biwac_parser::DefTyp {
+                        &biwac_ast::DefTyp {
                             qualid: s.qualid.clone(),
                             genargs: None, // ジェネリック引数列が明示されていない
                         },
@@ -167,18 +161,18 @@ impl TryResolve<&biwac_parser::Literal> for Literal {
     }
 }
 
-impl TryResolve<&biwac_parser::Exprs> for Expr {
+impl TryResolve<&biwac_ast::Exprs> for Expr {
     fn try_resolve<'mctx>(
-        value: &biwac_parser::Exprs,
+        value: &biwac_ast::Exprs,
         fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
         hir: &biwac_hir::Hir,
     ) -> RsvResult<Self> {
         match value {
-            biwac_parser::Exprs::Primary(prim) => Ok(Self {
+            biwac_ast::Exprs::Primary(prim) => Ok(Self {
                 expr: ExprVal::Primary(Primary::try_resolve(prim, fctx, hir)?),
                 id: fctx.new_expr_id(),
             }),
-            biwac_parser::Exprs::Unary(u) => Ok(Self {
+            biwac_ast::Exprs::Unary(u) => Ok(Self {
                 expr: ExprVal::Unary(UnaryExpr {
                     op: u.op,
                     right: Box::new(Self::try_resolve(&u.right, fctx, hir)?),
@@ -186,7 +180,7 @@ impl TryResolve<&biwac_parser::Exprs> for Expr {
                 }),
                 id: fctx.new_expr_id(),
             }),
-            biwac_parser::Exprs::Binary(b) => Ok(Self {
+            biwac_ast::Exprs::Binary(b) => Ok(Self {
                 expr: ExprVal::Binary(BinaryExpr {
                     op: b.op,
                     left: Box::new(Self::try_resolve(&b.left, fctx, hir)?),

@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 pub(crate) mod context;
 
+use biwac_ast::{BinOperator, Ident, UnOperator};
 use biwac_hir::{
     BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnTy, GenTyId, Hir,
     ImplValDefContentKind, InferTy, Literal, LocGenTyId, MemberAccess, Primary, Stmt,
     StructLiteral, Ty, TyDefContentKind, TyId, TyKind, TyVar, ValDefContentKind, VarIdKind,
 };
-use biwac_parser::{BinOperator, Ident, UnOperator};
 
 use crate::{
     TyCtx, TyError, TyResult,
