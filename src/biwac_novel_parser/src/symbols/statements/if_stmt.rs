@@ -10,7 +10,7 @@ impl<'src> NovelSourceStream<'src> {
     //  "}" ("else" "{" <END_OF_LINE>
     //      <statement>*
     //  "}" )?
-    pub(super) fn consume_if_statement(&mut self) -> Result<IfStmt, NovelParseError<'src>> {
+    pub(super) fn consume_if_statement(&mut self) -> Result<IfStmt, NovelParseError> {
         let begin = self
             .must_consume_next(vec![NCodeTkKindName::KwIf])?
             .span

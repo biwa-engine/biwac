@@ -7,71 +7,68 @@ use biwac_base::Span;
 use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 
 impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn consume_statement(&mut self) -> Result<Option<Stmt>, NovelParseError<'src>> {
+    pub(crate) fn consume_statement(&mut self) -> Result<Option<Stmt>, NovelParseError> {
         self.next_line()
             .map(|line_kind| {
                 match line_kind {
                     NovelLineKind::RawNovel => {
                         // TODO: ノベル
+                        todo!()
                     }
-                    NovelLineKind::GeneralCommand => {
-                        match self.peek_token()? {
-                            Some(t) => match t.kind {
-                                NCodeTkKind::KwIf => {
-                                    Ok(Some(Stmt::If(self.consume_if_statement()?)))
-                                }
-                                NCodeTkKind::KwLet => Ok(Some(Stmt::VarDecl(
-                                    self.consume_variable_declaration_statment()?,
-                                ))),
-                                // WARN: 意味のある式の実行(副作用のある関数の呼び出しなど)に限定するため、
-                                // パーサの段階で
-                                // - <identifier> 以外禁止とする
-                                // - <function-calling> のパースを試みる
-                                // としてもよい
-                                _ => {
-                                    let expr = self.consume_expression()?;
+                    NovelLineKind::GeneralCommand => match self.peek_token()? {
+                        Some(t) => match t.kind {
+                            NCodeTkKind::KwIf => Ok(Some(Stmt::If(self.consume_if_statement()?))),
+                            NCodeTkKind::KwLet => Ok(Some(Stmt::VarDecl(
+                                self.consume_variable_declaration_statment()?,
+                            ))),
+                            // WARN: 意味のある式の実行(副作用のある関数の呼び出しなど)に限定するため、
+                            // パーサの段階で
+                            // - <identifier> 以外禁止とする
+                            // - <function-calling> のパースを試みる
+                            // としてもよい
+                            _ => {
+                                let expr = self.consume_expression()?;
 
-                                    if let Some(t) = self.peek_token()?.clone()
-                                        && let NCodeTkKind::MarkAssign = t.kind
-                                    {
-                                        // <primary> "=" <expression>
-                                        self.next_token()?;
+                                if let Some(t) = self.peek_token()?.cloned()
+                                    && let NCodeTkKind::MarkAssign = t.kind
+                                {
+                                    // <primary> "=" <expression>
+                                    self.next_token()?;
 
-                                        if let Exprs::Primary(dst) = expr {
-                                            // <expression>
-                                            let src = self.consume_expression()?;
+                                    if let Exprs::Primary(dst) = expr {
+                                        // <expression>
+                                        let src = self.consume_expression()?;
 
-                                            // <END_OF_LINE>
-                                            self.must_be_line_end()?;
-
-                                            Ok(Stmt::Assign(AssignStmt {
-                                                span: Span::merge(&dst.span(), &src.span()),
-                                                dst,
-                                                src,
-                                            }))
-                                        } else {
-                                            Err(NovelParseError::LineEndExpected {
-                                                found: Box::new(t.to_owned()),
-                                            })
-                                        }
-                                    } else {
                                         // <END_OF_LINE>
                                         self.must_be_line_end()?;
 
-                                        Ok(Stmt::Expr(ExprStmt {
-                                            span: expr.span(),
-                                            expr,
-                                        }))
+                                        Ok(Some(Stmt::Assign(AssignStmt {
+                                            span: Span::merge(&dst.span(), &src.span()),
+                                            dst,
+                                            src,
+                                        })))
+                                    } else {
+                                        Err(NovelParseError::LineEndExpected {
+                                            found: Box::new(t.to_owned()),
+                                        })
                                     }
-                                }
-                            },
+                                } else {
+                                    // <END_OF_LINE>
+                                    self.must_be_line_end()?;
 
-                            // # 以降に何もないとき
-                            None => Err(NovelParseError::GeneralCommandLineOnlyPrefix {
-                                span: self.current_span(1),
-                            }),
-                        }
-                    }
+                                    Ok(Some(Stmt::Expr(ExprStmt {
+                                        span: expr.span(),
+                                        expr,
+                                    })))
+                                }
+                            }
+                        },
+
+                        // # 以降に何もないとき
+                        None => Err(NovelParseError::GeneralCommandLineOnlyPrefix {
+                            span: self.current_span(1),
+                        }),
+                    },
                     NovelLineKind::CharaCommand => {
                         todo!()
                     }
@@ -82,6 +79,7 @@ impl<'src> NovelSourceStream<'src> {
                 }
             })
             .transpose()
+            .map(|opt| opt.flatten())
     }
 
     pub(crate) fn must_be_line_end(&mut self) -> Result<(), NovelParseError> {

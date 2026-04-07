@@ -14,10 +14,13 @@ use crate::{
 impl<'src> NovelSourceStream<'src> {
     pub(super) fn consume_primary_expression(&mut self) -> Result<Exprs, NovelParseError> {
         // Primary = Literal | "(" Expr ")"
-        let t = self.peek_token()?.ok_or(NovelParseError::InvalidLineEnd {
-            expecteds: vec![NCodeTkKindName::Ident, NCodeTkKindName::LiteralInteger],
-            span: self.current_span(1),
-        })?;
+        let t = self
+            .peek_token()?
+            .cloned()
+            .ok_or(NovelParseError::InvalidLineEnd {
+                expecteds: vec![NCodeTkKindName::Ident, NCodeTkKindName::LiteralInteger],
+                span: self.current_span(1),
+            })?;
 
         match &t.kind {
             NCodeTkKind::LiteralInteger(int) => {
@@ -25,7 +28,7 @@ impl<'src> NovelSourceStream<'src> {
                 Ok(Exprs::Primary(Primary::Literal(Literal::Integer(
                     IntegerLiteral {
                         val: *int,
-                        span: t.span.clone(),
+                        span: t.span,
                     },
                 ))))
             }
@@ -34,7 +37,7 @@ impl<'src> NovelSourceStream<'src> {
                 Ok(Exprs::Primary(Primary::Literal(Literal::String(
                     StringLiteral {
                         val: str.to_string(),
-                        span: t.span.clone(),
+                        span: t.span,
                     },
                 ))))
             }
@@ -43,7 +46,7 @@ impl<'src> NovelSourceStream<'src> {
                 Ok(Exprs::Primary(Primary::Literal(Literal::Bool(
                     BoolLiteral {
                         val: true,
-                        span: t.span.clone(),
+                        span: t.span,
                     },
                 ))))
             }
@@ -52,7 +55,7 @@ impl<'src> NovelSourceStream<'src> {
                 Ok(Exprs::Primary(Primary::Literal(Literal::Bool(
                     BoolLiteral {
                         val: false,
-                        span: t.span.clone(),
+                        span: t.span,
                     },
                 ))))
             }
@@ -90,18 +93,18 @@ impl<'src> NovelSourceStream<'src> {
                     } else {
                         Ok(Exprs::Primary(Primary::Variable(Ident {
                             id: qualed_id.id,
-                            span: t.span.clone(),
+                            span: t.span,
                         })))
                     }
                 } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
                     Err(NovelParseError::InvalidLineEnd {
                         expecteds: vec![NCodeTkKindName::MarkLPare, NCodeTkKindName::MarkLBrace],
-                        span: t.span.clone(),
+                        span: t.span,
                     })
                 } else {
                     Ok(Exprs::Primary(Primary::Variable(Ident {
                         id: qualed_id.id,
-                        span: t.span.clone(),
+                        span: t.span,
                     })))
                 }
             }
@@ -115,7 +118,7 @@ impl<'src> NovelSourceStream<'src> {
             }
             _ => Err(NovelParseError::InvalidLineEnd {
                 expecteds: vec![NCodeTkKindName::Ident, NCodeTkKindName::LiteralInteger],
-                span: t.span.clone(),
+                span: t.span,
             }),
         }
     }

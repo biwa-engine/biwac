@@ -13,7 +13,7 @@ pub struct NovelScene {
 }
 
 impl<'src> NovelSourceStream<'src> {
-    pub fn parse(&mut self) -> Result<NovelScene, NovelParseError<'src>> {
+    pub fn parse(&mut self) -> Result<NovelScene, NovelParseError> {
         let mut stmts = Vec::new();
         while let Some(stmt) = self.consume_statement()? {
             stmts.push(stmt);

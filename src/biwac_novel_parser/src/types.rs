@@ -6,36 +6,12 @@ use crate::{
 };
 
 impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn must_consume_type_annotation(
-        &mut self,
-        self_typ: &Option<TypRepr>,
-    ) -> Result<TypRepr, NovelParseError> {
-        let t = self
-            .peek_token()?
-            .ok_or(NovelParseError::InvalidLineEnd {
-                expecteds: vec![NCodeTkKindName::MarkColon],
-                span: self.current_span(1),
-            })?
-            .to_owned();
-
-        if let NCodeTkKind::MarkColon = t.kind {
-            self.next_token()?;
-
-            Ok(self.consume_type_representaion(self_typ)?)
-        } else {
-            Err(NovelParseError::InvalidToken {
-                expecteds: vec![NCodeTkKindName::MarkColon],
-                found: Box::new(t.clone()),
-            })
-        }
-    }
-
     pub(crate) fn opt_consume_type_annotation(
         &mut self,
-        self_typ: &Option<TypRepr>,
     ) -> Result<Option<TypRepr>, NovelParseError> {
         let t = self
             .peek_token()?
+            .cloned()
             .ok_or(NovelParseError::InvalidLineEnd {
                 expecteds: vec![NCodeTkKindName::MarkColon],
                 span: self.current_span(1),
@@ -45,16 +21,13 @@ impl<'src> NovelSourceStream<'src> {
         if let NCodeTkKind::MarkColon = t.kind {
             self.next_token()?;
 
-            Ok(Some(self.consume_type_representaion(self_typ)?))
+            Ok(Some(self.consume_type_representaion()?))
         } else {
             Ok(None)
         }
     }
 
-    pub(crate) fn consume_type_representaion(
-        &mut self,
-        self_typ: &Option<TypRepr>,
-    ) -> Result<TypRepr, NovelParseError> {
+    pub(crate) fn consume_type_representaion(&mut self) -> Result<TypRepr, NovelParseError> {
         if let Some(t) = self.peek_token()? {
             if let NCodeTkKind::KwUint = t.kind {
                 let span = t.span.clone();
@@ -87,7 +60,7 @@ impl<'src> NovelSourceStream<'src> {
             } else if let NCodeTkKind::Ident(_) = t.kind {
                 // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
                 let qualid = self.consume_qualified_identifier()?;
-                let genargs = self.opt_consume_generic_args(self_typ)?;
+                let genargs = self.opt_consume_generic_args()?;
 
                 Ok(TypRepr {
                     span: qualid.span.clone(),
@@ -95,7 +68,7 @@ impl<'src> NovelSourceStream<'src> {
                 })
             } else if let NCodeTkKind::KwPackage = t.kind {
                 let qualid = self.consume_qualified_identifier()?;
-                let genargs = self.opt_consume_generic_args(self_typ)?;
+                let genargs = self.opt_consume_generic_args()?;
 
                 Ok(TypRepr {
                     span: qualid.span.clone(),
@@ -135,7 +108,6 @@ impl<'src> NovelSourceStream<'src> {
     // pub(crate) fn opt_consume_generic_argument_assignment(
     pub(crate) fn opt_consume_generic_args(
         &mut self,
-        self_typ: &Option<TypRepr>,
     ) -> Result<Option<Vec<TypRepr>>, NovelParseError> {
         if let Some(t) = self.peek_token()?
             && matches!(t.kind, NCodeTkKind::MarkLBracket)
@@ -154,7 +126,7 @@ impl<'src> NovelSourceStream<'src> {
 
                 return Ok(Some(genargs));
             } else {
-                genargs.push(self.consume_type_representaion(self_typ)?);
+                genargs.push(self.consume_type_representaion()?);
 
                 if let Some(t) = self.next_token()? {
                     if let NCodeTkKind::MarkRBracket = t.kind {

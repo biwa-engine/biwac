@@ -20,7 +20,7 @@ impl<'src> NovelSourceStream<'src> {
         let id = self.consume_identifier()?;
 
         // (":" <type-representation>)?
-        let typ = if let Some(t) = self.opt_consume_type_annotation(&None)? {
+        let typ = if let Some(t) = self.opt_consume_type_annotation()? {
             TypDecl::Typ(t)
         } else {
             TypDecl::Any
@@ -40,8 +40,8 @@ impl<'src> NovelSourceStream<'src> {
         Ok(VarDecl {
             id,
             typ,
-            init,
             span: Span::merge(&begin, &init.span()),
+            init,
         })
     }
 }

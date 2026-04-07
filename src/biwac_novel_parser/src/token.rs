@@ -4,54 +4,54 @@ use biwac_base::Span;
 use crate::{NovelParseError, NovelSourceStream};
 
 #[derive(Debug, Clone)]
-pub struct NCodeToken<'src> {
-    pub(crate) kind: NCodeTkKind<'src>,
+pub struct NCodeToken {
+    pub(crate) kind: NCodeTkKind,
     pub(crate) span: Span,
 }
 
 #[derive(Debug, Clone)]
-pub enum NCodeTkKind<'src> {
-    Ident(&'src str),         // <identifier>
-    LiteralInteger(u64),      // integer literal
-    LiteralString(&'src str), // string literal
-    KwTrue,                   // bool literal `TRUE`
-    KwFalse,                  // bool literal `FALSE`
-    KwPackage,                // package
-    KwLet,                    // let
-    KwIf,                     // if
-    KwElse,                   // else
-    KwWhile,                  // while
-    KwReturn,                 // return
-    KwUint,                   // Uint (reserved word of type)
-    KwInt,                    // Int (reserved word of type)
-    KwFloat,                  // Float (reserved word of type)
-    KwBool,                   // Bool (reserved word of type)
-    MarkLPare,                // (
-    MarkRPare,                // )
-    MarkLBrace,               // {
-    MarkRBrace,               // }
-    MarkLBracket,             // [
-    MarkRBracket,             // ]
-    MarkPlus,                 // +
-    MarkMinus,                // -
-    MarkAsterisk,             // *
-    MarkSlash,                // /
-    MarkPercent,              // %
-    MarkAmpersand,            // &
-    MarkLesser,               // <
-    MarkGreater,              // >
-    MarkLesEq,                // <=
-    MarkGrtEq,                // >=
-    MarkEqual,                // ==
-    MarkNotEq,                // !=
-    MarkAssign,               // =
-    MarkNot,                  // !
-    MarkComma,                // ,
-    MarkDot,                  // .
-    MarkArrow,                // ->
-    MarkColon,                // :
-    MarkSemiColon,            // ;
-    MarkDoubleColon,          // ::
+pub enum NCodeTkKind {
+    Ident(String),         // <identifier>
+    LiteralInteger(u64),   // integer literal
+    LiteralString(String), // string literal
+    KwTrue,                // bool literal `TRUE`
+    KwFalse,               // bool literal `FALSE`
+    KwPackage,             // package
+    KwLet,                 // let
+    KwIf,                  // if
+    KwElse,                // else
+    KwWhile,               // while
+    KwReturn,              // return
+    KwUint,                // Uint (reserved word of type)
+    KwInt,                 // Int (reserved word of type)
+    KwFloat,               // Float (reserved word of type)
+    KwBool,                // Bool (reserved word of type)
+    MarkLPare,             // (
+    MarkRPare,             // )
+    MarkLBrace,            // {
+    MarkRBrace,            // }
+    MarkLBracket,          // [
+    MarkRBracket,          // ]
+    MarkPlus,              // +
+    MarkMinus,             // -
+    MarkAsterisk,          // *
+    MarkSlash,             // /
+    MarkPercent,           // %
+    MarkAmpersand,         // &
+    MarkLesser,            // <
+    MarkGreater,           // >
+    MarkLesEq,             // <=
+    MarkGrtEq,             // >=
+    MarkEqual,             // ==
+    MarkNotEq,             // !=
+    MarkAssign,            // =
+    MarkNot,               // !
+    MarkComma,             // ,
+    MarkDot,               // .
+    MarkArrow,             // ->
+    MarkColon,             // :
+    MarkSemiColon,         // ;
+    MarkDoubleColon,       // ::
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +100,7 @@ pub enum NCodeTkKindName {
 }
 
 impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn next_token(&mut self) -> Result<Option<NCodeToken<'src>>, NovelParseError<'src>> {
+    pub(crate) fn next_token(&mut self) -> Result<Option<NCodeToken>, NovelParseError> {
         match self.peeked.take() {
             Some(t) => {
                 // カーソル位置を更新する
@@ -130,10 +130,13 @@ impl<'src> NovelSourceStream<'src> {
     // 多分LL(2)文法ということになる
     // ノベルモード中のコードについては、おそらく実際には変換すればLL(1)として表せるだろうが、
     // パーサの実装のしやすさからpeekは用いたい。
-    pub(crate) fn peek_token(
-        &mut self,
-    ) -> Result<Option<&NCodeToken<'src>>, NovelParseError<'src>> {
-        let line = self.current_line;
+    pub(crate) fn peek_token(&mut self) -> Result<Option<&NCodeToken>, NovelParseError> {
+        let line = match self.lines.get(self.cursor.lidx) {
+            Some(line) => line,
+            None => {
+                return Ok(None);
+            }
+        };
 
         // peeked にキャッシュがなければ先に更新する
         // NOTE: multiple mutable borrowing
@@ -284,7 +287,7 @@ impl<'src> NovelSourceStream<'src> {
                             "Int" => (Some(NCodeTkKind::KwInt), 3),
                             "Float" => (Some(NCodeTkKind::KwFloat), 5),
                             "Bool" => (Some(NCodeTkKind::KwBool), 4),
-                            x => (Some(NCodeTkKind::Ident(x)), x.chars().count()),
+                            x => (Some(NCodeTkKind::Ident(x.to_string())), x.chars().count()),
                         }
                     }
 
@@ -352,7 +355,7 @@ fn char_kind(c: char) -> CharKind {
     }
 }
 
-impl<'src> NCodeTkKind<'src> {
+impl NCodeTkKind {
     fn as_kind_name(&self) -> NCodeTkKindName {
         match self {
             Self::Ident(_) => NCodeTkKindName::Ident, // <identifier>
@@ -451,7 +454,7 @@ impl<'src> NovelSourceStream<'src> {
 
             ids.push(self.consume_identifier()?.id);
 
-            (true, t.span.clone(), t.span.clone())
+            (true, t.span.clone(), t.span)
         } else {
             let ident = self.consume_identifier()?;
             ids.push(ident.id);
