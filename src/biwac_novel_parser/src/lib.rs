@@ -5,10 +5,7 @@ use crate::token::{CharKind, NCodeTkKindName, NCodeToken};
 mod symbols;
 mod token;
 
-pub use crate::symbols::{
-    NovelScene,
-    statements::NStmt,
-};
+pub use crate::symbols::{NovelScene, statements::NStmt};
 
 pub enum NovelParseError<'src> {
     InvalidToken {
@@ -33,6 +30,7 @@ pub struct NovelSourceStream<'src> {
     indent_depth: usize,
     cursor: SourceStreamCursor,
     current_line: &'src str,
+    peeked: Option<Option<NCodeToken<'src>>>,
 }
 
 #[derive(Debug)]
@@ -53,6 +51,17 @@ enum NovelLineKind {
 }
 
 impl<'src> NovelSourceStream<'src> {
+    pub fn new(src: &'src str, span: Span) -> Self {
+        Self {
+            span,
+            lines: src.lines(),
+            indent_depth: 4,
+            cursor: SourceStreamCursor { lidx: 0, idx: 0 },
+            current_line: src,
+            peeked: None,
+        }
+    }
+
     //
     //  ```biwa
     //  scene foo(g: MyGame) -> MyGame {{
@@ -62,14 +71,13 @@ impl<'src> NovelSourceStream<'src> {
     //      }
     //  }}
     //  ```
-    //  
+    //
     //  次の行が存在すれば true を返す
     fn next_line(&mut self) -> Option<NovelLineKind> {
         self.lines.next().map(|next_line| {
             self.current_line = next_line;
             self.cursor.lidx += 1;
             self.cursor.idx = 0;
-
 
             // 現在のインデント位置または空白文字でなくなるまで、
             // 先頭をtrimする
@@ -89,7 +97,7 @@ impl<'src> NovelSourceStream<'src> {
     // 空白行は、改行のみのノベルテキストとみなす
     fn line_kind(&mut self) -> NovelLineKind {
         let line = self.current_line;
-        
+
         // 空白文字でない位置まで一時的に下げる
         let mut tmp_idx = self.cursor.idx;
         for (i, c) in line.char_indices() {
