@@ -4,8 +4,9 @@ use crate::token::{CharKind, NCodeTkKindName, NCodeToken};
 
 mod symbols;
 mod token;
+mod types;
 
-pub use crate::symbols::{NovelScene, statements::NStmt};
+pub use crate::symbols::NovelScene;
 
 pub enum NovelParseError<'src> {
     InvalidToken {
@@ -15,6 +16,16 @@ pub enum NovelParseError<'src> {
     InvalidChar {
         expecteds: Vec<CharKind>,
         found: CharKind,
+        span: Span,
+    },
+    InvalidLineEnd {
+        expecteds: Vec<NCodeTkKindName>,
+        span: Span,
+    },
+    LineEndExpected {
+        found: Box<NCodeToken<'src>>,
+    },
+    GeneralCommandLineOnlyPrefix {
         span: Span,
     },
 }

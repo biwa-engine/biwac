@@ -105,9 +105,9 @@ dependencies = [
 name = "biwac_novel_parser"
 version = "0.1.0"
 dependencies = [
+ "biwac_ast",
  "biwac_base",
  "biwac_hir",
- "biwac_parser",
 ]
 
 [[package]]

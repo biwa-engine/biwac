@@ -1,17 +1,18 @@
+use biwac_ast::{Ident, QualifiedId};
 use biwac_base::Span;
 
 use crate::{NovelParseError, NovelSourceStream};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NCodeToken<'src> {
     pub(crate) kind: NCodeTkKind<'src>,
     pub(crate) span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NCodeTkKind<'src> {
     Ident(&'src str),         // <identifier>
-    LiteralInteger(usize),    // integer literal
+    LiteralInteger(u64),      // integer literal
     LiteralString(&'src str), // string literal
     KwTrue,                   // bool literal `TRUE`
     KwFalse,                  // bool literal `FALSE`
@@ -53,6 +54,7 @@ pub enum NCodeTkKind<'src> {
     MarkDoubleColon,          // ::
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NCodeTkKindName {
     Ident,           // <identifier>
     LiteralInteger,  // integer literal
@@ -109,7 +111,7 @@ impl<'src> NovelSourceStream<'src> {
                 Ok(t)
             }
             None => {
-                self.next_peek()?;
+                self.peek_token()?;
 
                 // SAFETY: .next_peek() で .peeked は必ず Some になっている
                 Ok(self.peeked.take().unwrap())
@@ -117,7 +119,20 @@ impl<'src> NovelSourceStream<'src> {
         }
     }
 
-    pub(crate) fn next_peek(&mut self) -> Result<Option<&NCodeToken<'src>>, NovelParseError<'src>> {
+    // peek_token
+    // std::iter::Peekable のように、
+    // 次トークンをイテレート位置を進めずに取得できるようにする
+    // std::iter::Peekable がiterのラッパとして提供されているのに対し、
+    // ここでは NovelSourceStream の機能として提供されており、
+    // 1トークン先しか見られない。
+    // 複数回呼ばれても1トークン先が何度も返されるだけである
+    // syntax的にはそれで十分である。
+    // 多分LL(2)文法ということになる
+    // ノベルモード中のコードについては、おそらく実際には変換すればLL(1)として表せるだろうが、
+    // パーサの実装のしやすさからpeekは用いたい。
+    pub(crate) fn peek_token(
+        &mut self,
+    ) -> Result<Option<&NCodeToken<'src>>, NovelParseError<'src>> {
         let line = self.current_line;
 
         // peeked にキャッシュがなければ先に更新する
@@ -301,7 +316,7 @@ impl<'src> NovelSourceStream<'src> {
                         span: self.current_span(token_len),
                     }));
                 } else {
-                    self.next_peek()?;
+                    self.peek_token()?;
                 }
             };
         }
@@ -332,6 +347,140 @@ fn char_kind(c: char) -> CharKind {
                 CharKind::WhiteSpace
             } else {
                 CharKind::Others
+            }
+        }
+    }
+}
+
+impl<'src> NCodeTkKind<'src> {
+    fn as_kind_name(&self) -> NCodeTkKindName {
+        match self {
+            Self::Ident(_) => NCodeTkKindName::Ident, // <identifier>
+            Self::LiteralInteger(_) => NCodeTkKindName::LiteralInteger, // integer literal
+            Self::LiteralString(_) => NCodeTkKindName::LiteralString, // string literal
+            Self::KwTrue => NCodeTkKindName::KwTrue,  // bool literal `TRUE`
+            Self::KwFalse => NCodeTkKindName::KwFalse, // bool literal `FALSE`
+            Self::KwPackage => NCodeTkKindName::KwPackage, // package
+            Self::KwLet => NCodeTkKindName::KwLet,    // let
+            Self::KwIf => NCodeTkKindName::KwIf,      // if
+            Self::KwElse => NCodeTkKindName::KwElse,  // else
+            Self::KwWhile => NCodeTkKindName::KwWhile, // while
+            Self::KwReturn => NCodeTkKindName::KwReturn, // return
+            Self::KwUint => NCodeTkKindName::KwUint,  // Uint (reserved word of type)
+            Self::KwInt => NCodeTkKindName::KwInt,    // Int (reserved word of type)
+            Self::KwFloat => NCodeTkKindName::KwFloat, // Float (reserved word of type)
+            Self::KwBool => NCodeTkKindName::KwBool,  // Bool (reserved word of type)
+            Self::MarkLPare => NCodeTkKindName::MarkLPare, // (
+            Self::MarkRPare => NCodeTkKindName::MarkRPare, // )
+            Self::MarkLBrace => NCodeTkKindName::MarkLBrace, // {
+            Self::MarkRBrace => NCodeTkKindName::MarkRBrace, // }
+            Self::MarkLBracket => NCodeTkKindName::MarkLBracket, // [
+            Self::MarkRBracket => NCodeTkKindName::MarkRBracket, // ]
+            Self::MarkPlus => NCodeTkKindName::MarkPlus, // +
+            Self::MarkMinus => NCodeTkKindName::MarkMinus, // -
+            Self::MarkAsterisk => NCodeTkKindName::MarkAsterisk, // *
+            Self::MarkSlash => NCodeTkKindName::MarkSlash, // /
+            Self::MarkPercent => NCodeTkKindName::MarkPercent, // %
+            Self::MarkAmpersand => NCodeTkKindName::MarkAmpersand, // &
+            Self::MarkLesser => NCodeTkKindName::MarkLesser, // <
+            Self::MarkGreater => NCodeTkKindName::MarkGreater, // >
+            Self::MarkLesEq => NCodeTkKindName::MarkLesEq, // <=
+            Self::MarkGrtEq => NCodeTkKindName::MarkGrtEq, // >=
+            Self::MarkEqual => NCodeTkKindName::MarkEqual, // ==
+            Self::MarkNotEq => NCodeTkKindName::MarkNotEq, // !=
+            Self::MarkAssign => NCodeTkKindName::MarkAssign, // =
+            Self::MarkNot => NCodeTkKindName::MarkNot, // !
+            Self::MarkComma => NCodeTkKindName::MarkComma, // ,
+            Self::MarkDot => NCodeTkKindName::MarkDot, // .
+            Self::MarkArrow => NCodeTkKindName::MarkArrow, // ->
+            Self::MarkColon => NCodeTkKindName::MarkColon, // :
+            Self::MarkSemiColon => NCodeTkKindName::MarkSemiColon, // ;
+            Self::MarkDoubleColon => NCodeTkKindName::MarkDoubleColon, // ::
+        }
+    }
+}
+
+impl<'src> NovelSourceStream<'src> {
+    pub(crate) fn must_consume_next(
+        &mut self,
+        kinds: Vec<NCodeTkKindName>,
+    ) -> Result<NCodeToken, NovelParseError> {
+        let t: NCodeToken = self.next_token()?.ok_or(NovelParseError::InvalidLineEnd {
+            expecteds: kinds.clone(),
+            span: self.current_span(1),
+        })?;
+
+        for kind in &kinds {
+            if kind == &t.kind.as_kind_name() {
+                return Ok(t);
+            }
+        }
+
+        Err(NovelParseError::InvalidToken {
+            expecteds: kinds,
+            found: Box::new(t),
+        })
+    }
+
+    pub(crate) fn consume_identifier(&mut self) -> Result<Ident, NovelParseError> {
+        let t = self.next_token()?.ok_or(NovelParseError::InvalidLineEnd {
+            expecteds: vec![NCodeTkKindName::Ident],
+            span: self.current_span(1),
+        })?;
+
+        if let NCodeTkKind::Ident(ident) = &t.kind {
+            Ok(Ident {
+                id: ident.to_string(),
+                span: t.span.clone(),
+            })
+        } else {
+            Err(NovelParseError::InvalidToken {
+                expecteds: vec![NCodeTkKindName::Ident],
+                found: Box::new(t),
+            })
+        }
+    }
+
+    pub(crate) fn consume_qualified_identifier(&mut self) -> Result<QualifiedId, NovelParseError> {
+        let mut ids = vec![];
+        let (is_from_root, begin, mut end) = if let Some(t) = self.peek_token()?.cloned()
+            && matches!(t.kind.as_kind_name(), NCodeTkKindName::KwPackage)
+        {
+            self.next_token()?;
+            self.must_consume_next(vec![NCodeTkKindName::MarkDoubleColon])?;
+
+            ids.push(self.consume_identifier()?.id);
+
+            (true, t.span.clone(), t.span.clone())
+        } else {
+            let ident = self.consume_identifier()?;
+            ids.push(ident.id);
+
+            (false, ident.span.clone(), ident.span)
+        };
+
+        loop {
+            if let Some(t) = self.peek_token()? {
+                if let NCodeTkKind::MarkDoubleColon = t.kind {
+                    self.next_token()?;
+                    let ident = self.consume_identifier()?;
+                    ids.push(ident.id);
+                    end = ident.span;
+                } else {
+                    return Ok(QualifiedId {
+                        is_from_root,
+                        quals: ids[..ids.len() - 1].to_vec(),
+                        id: ids.last().expect("no identifier parsed").clone(),
+                        span: Span::merge(&begin, &end),
+                    });
+                }
+            } else {
+                return Ok(QualifiedId {
+                    is_from_root,
+                    quals: ids[..ids.len() - 1].to_vec(),
+                    id: ids.last().expect("no identifier parsed").clone(),
+                    span: Span::merge(&begin, &end),
+                });
             }
         }
     }
