@@ -6,8 +6,6 @@ mod symbols;
 mod token;
 mod types;
 
-pub use crate::symbols::NovelScene;
-
 pub enum NovelParseError {
     InvalidToken {
         expecteds: Vec<NCodeTkKindName>,

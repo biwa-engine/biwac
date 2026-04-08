@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use biwac_hir::{
     FnDefContent, Hir, MethodDefContent, NativeCode, NativeFnDefContent, NativeMethodDefContent,
-    NativeTypeAliasDefContent, StructDefContent, TyId,
+    NativeTypeAliasDefContent, NovelSceneDefContent, StructDefContent, TyId,
 };
 
 use oxc_allocator::CloneIn;
@@ -837,5 +837,109 @@ impl<'a> IntoOxc<'a, oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>>> for &'
         // TODO: ts.errors をチェック
 
         ts.program.body
+    }
+}
+
+impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NovelSceneDefContent {
+    fn as_oxc_global(
+        &'a self,
+        id: &I,
+        allocator: &'a oxc_allocator::Allocator,
+        hir: &Hir,
+    ) -> oxc_ast::ast::Statement<'a> {
+        let mut env = FnAstBuildEnv {
+            expr_tys: &self.expr_tys,
+            var_tys: &self.var_tys,
+            stmts: vec![],
+        };
+
+        let fn_body = &self.body.expect_completed();
+
+        for stmt in &fn_body.stmts {
+            let oxc_stmt = stmt.as_oxc(&mut env, allocator, hir);
+            env.stmts.push(oxc_stmt);
+        }
+
+        oxc_ast::ast::Statement::FunctionDeclaration(oxc_allocator::Box::new_in(
+            oxc_ast::ast::Function {
+                span: span(),
+                id: Some(oxc_ast::ast::BindingIdentifier {
+                    span: span(),
+                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    symbol_id: Cell::new(None),
+                }),
+                generator: false,
+                r#type: oxc_ast::ast::FunctionType::FunctionDeclaration,
+                r#async: false,
+                pure: false,
+                pife: false,
+                declare: false,
+                scope_id: Cell::new(None),
+                this_param: None,
+                params: oxc_allocator::Box::new_in(
+                    oxc_ast::ast::FormalParameters {
+                        span: span(),
+                        kind: oxc_ast::ast::FormalParameterKind::FormalParameter,
+                        items: oxc_allocator::Vec::from_iter_in(
+                            fn_body.arg_var_ids.iter().map(|var_id| {
+                                oxc_ast::ast::FormalParameter {
+                                    span: span(),
+                                    decorators: oxc_allocator::Vec::new_in(allocator),
+                                    pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
+                                        oxc_allocator::Box::new_in(
+                                            oxc_ast::ast::BindingIdentifier {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator.alloc_str(&var_id.mangled()),
+                                                ),
+                                                symbol_id: Cell::new(None),
+                                            },
+                                            allocator,
+                                        ),
+                                    ),
+                                    type_annotation: Some(oxc_allocator::Box::new_in(
+                                        oxc_ast::ast::TSTypeAnnotation {
+                                            span: span(),
+                                            type_annotation: self
+                                                .var_tys
+                                                .get(var_id)
+                                                .unwrap()
+                                                .kind
+                                                .as_oxc(&mut env, allocator, hir),
+                                        },
+                                        allocator,
+                                    )),
+                                    initializer: None,
+                                    optional: false,
+                                    accessibility: None,
+                                    readonly: false,
+                                    r#override: false,
+                                }
+                            }),
+                            allocator,
+                        ),
+                        rest: None,
+                    },
+                    allocator,
+                ),
+                body: Some(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::FunctionBody {
+                        span: span(),
+                        directives: oxc_allocator::Vec::new_in(allocator),
+                        statements: oxc_allocator::Vec::from_iter_in(env.stmts, allocator),
+                    },
+                    allocator,
+                )),
+                type_parameters: None, // scene にはジェネリック型引数列はない
+                return_type: Some(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::TSTypeAnnotation {
+                        span: span(),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
+                    },
+                    allocator,
+                )),
+            },
+            allocator,
+        ))
     }
 }

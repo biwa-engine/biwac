@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use biwac_ast::{FnDef, Ident, MethodDef, NativeFnDef, symbols::globals::NativeMethodDef};
+use biwac_ast::{
+    FnDef, Ident, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef,
+};
 use biwac_base::{ModPath, Span};
 
 use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
@@ -59,6 +61,7 @@ pub struct ValId {
 pub enum ValDefContentKind {
     Fn(Box<FnDefContent>),
     Native(Box<NativeFnDefContent>),
+    NovelScene(Box<NovelSceneDefContent>),
 }
 
 // impl block 内での
@@ -224,6 +227,26 @@ pub struct NativeCode {
     pub native_span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct NovelSceneDefContent {
+    pub scene_name_span: Span,
+
+    // signature
+    // ただし、
+    // (std::game::Game[_]) -> std::game::Game[_]
+    // である必要がある
+    // これは登録時に検査される
+    pub signature: FnDefContentSignature,
+
+    // body
+    // needs type inferrence
+    pub body: Progressive<NovelScene, FnDefContentBody>,
+
+    // 型推論された結果の式に対する型が記録される
+    pub expr_tys: HashMap<ExprId, Ty>,
+    pub var_tys: HashMap<LocVarId, Ty>,
+}
+
 impl TyId {
     pub fn new(quals: Vec<String>, id: String) -> Self {
         Self { quals, id }
@@ -370,6 +393,18 @@ impl From<&biwac_ast::NativeCode> for NativeCode {
         Self {
             native: value.native.clone(),
             native_span: value.native_span.clone(),
+        }
+    }
+}
+
+impl NovelSceneDefContent {
+    pub fn new(signature: FnDefContentSignature, scene_def: NovelScene) -> Self {
+        Self {
+            scene_name_span: scene_def.id.span.clone(),
+            signature,
+            body: Progressive::NotYet(scene_def),
+            expr_tys: HashMap::new(),
+            var_tys: HashMap::new(),
         }
     }
 }

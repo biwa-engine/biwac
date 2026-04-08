@@ -12,7 +12,7 @@ pub use symbols::{
     },
     globals::{
         ArgDecl, ArgDeclList, FnDef, Globals, ImplCtx, ImportDecl, MethodDef, NativeCode,
-        NativeFnDef, NativeMethodDef, NativeTypeAlias, StructDef, TypeAlias, TypeDef,
+        NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, StructDef, TypeAlias, TypeDef,
     },
     statements::{AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt},
 };

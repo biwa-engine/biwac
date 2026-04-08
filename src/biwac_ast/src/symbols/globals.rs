@@ -47,6 +47,7 @@ pub enum Globals {
     MethodDef(MethodDef),
     NativeMethodDef(NativeMethodDef),
     NativeCode(NativeCode),
+    NovelScene(NovelScene),
 }
 
 #[derive(Debug, Clone)]
@@ -169,4 +170,32 @@ pub struct NativeCode {
 pub struct ImplCtx {
     pub genargs: Vec<Ident>,
     pub self_typ: TypRepr,
+}
+
+// biwa言語がノベルゲーム記述用言語であるための
+// 最も特徴的な機能として scene がある。
+// scene 内では、
+// - 直接記述したテキストがメッセージウィンドウに出力され、
+// - プレフィックスに続いて通常のsyntaxに近いコードの制御命令が使える
+//
+//  ```biwa
+//  scene scene1(game: MyGame) -> MyGame {{
+//      Hello!
+//      #foo()
+//      #if cond {
+//          By the way...
+//      }
+//  }}
+//  ```
+// novel scene は通常のASTにおける 文 <statement>
+// の列と同様であり、
+// これはパース段階で変換できる
+#[derive(Debug, Clone)]
+pub struct NovelScene {
+    pub id: Ident,
+    pub args: ArgDeclList,
+    pub rtype: RetTypRepr,
+    pub stmts: Vec<Stmt>,
+    pub span: Span,
+    pub flags: Vec<CompilerFlag>,
 }

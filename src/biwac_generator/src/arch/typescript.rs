@@ -105,6 +105,7 @@ pub fn generate(hir: &Hir) -> String {
             .chain(hir.vals.iter().map(|(vid, val)| match val {
                 ValDefContentKind::Fn(f) => f.as_oxc_global(vid, &allocator, hir),
                 ValDefContentKind::Native(f) => f.as_oxc_global(vid, &allocator, hir),
+                ValDefContentKind::NovelScene(n) => n.as_oxc_global(vid, &allocator, hir),
             })),
         &allocator,
     ));

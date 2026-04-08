@@ -157,3 +157,31 @@ impl TryResolveTy<(&biwac_ast::ArgDeclList, &biwac_ast::RetTypRepr)>
         })
     }
 }
+
+impl TryResolve<(&biwac_ast::NovelScene, &biwac_hir::FnDefContentSignature)> for FnDefContentBody {
+    fn try_resolve<'mctx>(
+        (scene_def, fn_signature): (&biwac_ast::NovelScene, &biwac_hir::FnDefContentSignature),
+        fctx: &mut FnLevelResolveCtx<'mctx>,
+        hir: &Hir,
+    ) -> RsvResult<Self> {
+        // 関数のベースのスコープも初期化される
+
+        // 引数も変数の宣言として記録
+        let arg_var_ids = fn_signature
+            .args
+            .iter()
+            .map(|(ident, ty)| fctx.declare_variable(ident, ty.clone()))
+            .collect::<RsvResult<_>>()?;
+
+        Ok(Self {
+            stmts: scene_def
+                .stmts
+                .iter()
+                .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
+                .collect::<Result<Vec<Stmt>, ResolveError>>()?,
+            expr: None, // scene は式記法で戻り値を返さない
+            arg_var_ids,
+            vars: fctx.vars(), // 関数内で収集した変数宣言を保存
+        })
+    }
+}

@@ -467,6 +467,24 @@ impl ResolveCtx {
                         self.hir
                             .register_module_native_code(modpath.clone(), &native);
                     }
+                    biwac_ast::Globals::NovelScene(scene_def) => {
+                        let vid = ValId::from_modpath(&modpath, scene_def.id.id.clone());
+                        let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
+                        let fctx = FnLevelTyResolveCtx::new(&ictx, &Vec::new())?; // ジェネリック引数列は必ず空
+
+                        let signature = biwac_hir::FnDefContentSignature::try_resolve(
+                            (&scene_def.args, &scene_def.rtype),
+                            &fctx,
+                            &self.hir,
+                        )?;
+
+                        self.hir.register_value_existence(
+                            vid,
+                            ValDefContentKind::NovelScene(Box::new(
+                                biwac_hir::NovelSceneDefContent::new(signature, scene_def),
+                            )),
+                        )?;
+                    }
                 }
             }
         }
@@ -494,6 +512,28 @@ impl ResolveCtx {
 
                             let fn_body = biwac_hir::FnDefContentBody::try_resolve(
                                 (fn_def, &f.signature),
+                                &mut fctx,
+                                &self.hir,
+                            )?;
+
+                            fn_bodies.push((vid.clone(), fn_body));
+                        }
+                        biwac_hir::Progressive::Completed(_) => {
+                            // nothing to do
+                        }
+                    }
+                }
+                ValDefContentKind::NovelScene(scene) => {
+                    match &scene.body {
+                        biwac_hir::Progressive::NotYet(scene_def) => {
+                            let mctx = mctxes
+                                .get(scene_def.id.span.module())
+                                .expect("compiler bug: module not found");
+                            let ictx = ImplLevelResolveCtx::new_empty(mctx);
+                            let mut fctx = FnLevelResolveCtx::new(&ictx, &scene.signature.genargs)?;
+
+                            let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+                                (scene_def, &scene.signature),
                                 &mut fctx,
                                 &self.hir,
                             )?;

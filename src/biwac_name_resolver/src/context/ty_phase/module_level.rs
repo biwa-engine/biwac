@@ -185,6 +185,20 @@ impl ModuleLevelTyResolveCtx {
                         });
                     }
                 },
+                Globals::NovelScene(scene_def) => {
+                    // モジュール直下の値名前空間に登録
+                    match vals.entry(scene_def.id.id.clone()) {
+                        Entry::Vacant(e) => {
+                            e.insert(scene_def.id.clone());
+                        }
+                        Entry::Occupied(e) => {
+                            return Err(ResolveError::DuplicatedTypeName {
+                                tid1: Box::new(scene_def.id.clone()),
+                                tid2: Box::new(e.remove()),
+                            });
+                        }
+                    }
+                }
                 Globals::MethodDef(_) | Globals::NativeMethodDef(_) | Globals::NativeCode(_) => {
                     // nothing to do
                 }

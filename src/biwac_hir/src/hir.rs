@@ -229,10 +229,12 @@ impl Hir {
                 defined_position1: Box::new(match &e.get() {
                     ValDefContentKind::Fn(f) => f.fn_name_span.clone(),
                     ValDefContentKind::Native(f) => f.fn_name_span.clone(),
+                    ValDefContentKind::NovelScene(n) => n.scene_name_span.clone(),
                 }),
                 defined_position2: Box::new(match val_content {
                     ValDefContentKind::Fn(f) => f.fn_name_span.clone(),
                     ValDefContentKind::Native(f) => f.fn_name_span.clone(),
+                    ValDefContentKind::NovelScene(n) => n.scene_name_span.clone(),
                 }),
             }),
         }
@@ -252,6 +254,16 @@ impl Hir {
 
         match val_def_content_kind {
             ValDefContentKind::Fn(f) => match f.body {
+                Progressive::NotYet(_) => {
+                    f.body = Progressive::Completed(fn_body);
+
+                    Ok(())
+                }
+                Progressive::Completed(_) => {
+                    panic!("compiler bug: type content already registered")
+                }
+            },
+            ValDefContentKind::NovelScene(f) => match f.body {
                 Progressive::NotYet(_) => {
                     f.body = Progressive::Completed(fn_body);
 

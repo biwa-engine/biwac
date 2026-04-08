@@ -301,6 +301,7 @@ impl ModuleLevelResolveCtx {
         let err = if let Some(val) = hir.vals.get(&vid) {
             return match val {
                 ValDefContentKind::Fn(_) => Ok(ResolvedValue::Global(vid)),
+                ValDefContentKind::NovelScene(_) => Ok(ResolvedValue::Global(vid)),
                 ValDefContentKind::Native(_) => Ok(ResolvedValue::Global(vid)),
             };
         } else {
