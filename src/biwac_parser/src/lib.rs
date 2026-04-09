@@ -9,6 +9,7 @@ use biwac_ast::{Ident, QualifiedId};
 use biwac_base::Span;
 use biwac_lexer::{TkKind, Token};
 
+use biwac_novel_parser::NovelParseError;
 pub(crate) use symbols::statements::ExprOrStmt;
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,7 @@ pub enum ParseError {
     InvalidToken(Vec<TkKind>, Token), // expected TokenKind, ... or TokenKind, but found Token in Token.range
     InvalidEOF(Vec<TkKind>),          // expected TokenKind, ... or TokenKind, but found EOF
     StructMemberConflict(String, String, Box<Token>), // struct id, member id
+    NovelParseError(NovelParseError),
 }
 
 #[derive(Debug, Clone)]

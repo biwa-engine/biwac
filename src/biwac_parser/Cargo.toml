@@ -7,3 +7,4 @@ edition.workspace = true
 biwac_base = { path = "../biwac_base"}
 biwac_lexer = { path = "../biwac_lexer"}
 biwac_ast = { path = "../biwac_ast"}
+biwac_novel_parser = { path = "../biwac_novel_parser"}

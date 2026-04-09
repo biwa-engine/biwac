@@ -328,6 +328,7 @@ impl<'src> NovelSourceStream<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharKind {
     Mark,       // mark
     Numeric,    // 0 ..= 9

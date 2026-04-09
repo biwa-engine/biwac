@@ -127,6 +127,7 @@ dependencies = [
  "biwac_ast",
  "biwac_base",
  "biwac_lexer",
+ "biwac_novel_parser",
 ]
 
 [[package]]

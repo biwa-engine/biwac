@@ -48,6 +48,7 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                     "impl" => (TkKind::Impl, None),
                     "Self" => (TkKind::SelfTyp, None),
                     "self" => (TkKind::SelfVar, None),
+                    "scene" => (TkKind::Scene, None),
                     _ => {
                         if let Some(i) = try_get_dec_integer(w) {
                             (TkKind::IntegerLiteral, Some(TkVal::Integer(i)))

@@ -6,6 +6,7 @@ mod symbols;
 mod token;
 mod types;
 
+#[derive(Debug, Clone)]
 pub enum NovelParseError {
     InvalidToken {
         expecteds: Vec<NCodeTkKindName>,

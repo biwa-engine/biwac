@@ -3,8 +3,8 @@ use biwac_lexer::token::{TkKind, TkVal};
 
 use biwac_ast::{
     ArgDecl, ArgDeclList, CompilerFlag, FnDef, Globals, Ident, ImplCtx, ImportDecl, MethodDef,
-    NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias, RetTypRepr, StructDef, TypRepr,
-    TypeAlias, TypeDef,
+    NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, RetTypRepr, StructDef,
+    TypRepr, TypeAlias, TypeDef,
 };
 
 use crate::{ExprOrStmt, ParseError, TokenStream};
@@ -335,6 +335,41 @@ impl<'t> TokenStream<'t> {
                     Ok(vec![Globals::NativeCode(NativeCode {
                         native,
                         native_span,
+                        flags,
+                    })])
+                }
+                TkKind::Scene => {
+                    let begin = t.span.clone();
+                    self.next();
+
+                    let id = self.consume_identifier()?;
+
+                    let args = self.consume_argsdec(&None)?;
+
+                    let rtype = if self.consume_next_if_match(vec![TkKind::Arrow]).is_some() {
+                        RetTypRepr::Typ(self.consume_type_representaion(&None)?)
+                    } else {
+                        RetTypRepr::Void(Span::new(
+                            args.span.module().clone(),
+                            args.span.end().clone(),
+                            args.span.end().clone(),
+                        ))
+                    };
+
+                    let dsl = self.must_consume_next(vec![TkKind::DslLiteral])?;
+                    let novel_stmts = biwac_novel_parser::NovelSourceStream::new(
+                        &dsl.unwrap_string_value(),
+                        dsl.span.clone(),
+                    )
+                    .parse()
+                    .map_err(ParseError::NovelParseError)?;
+
+                    Ok(vec![Globals::NovelScene(NovelScene {
+                        id,
+                        args,
+                        rtype,
+                        stmts: novel_stmts,
+                        span: Span::merge(&begin, &dsl.span),
                         flags,
                     })])
                 }

@@ -55,6 +55,7 @@ pub enum TkKind {
     Impl,             // impl (reserved word of implementation for type)
     SelfTyp,          // Self (reserved word of type)
     SelfVar,          // self (reserved word of method value)
+    Scene,            // scene (reserved word of novel scene)
     LPare,            // (
     RPare,            // )
     LBrace,           // {
@@ -110,6 +111,7 @@ impl TkKind {
             Self::Impl => "impl".to_string(),
             Self::SelfTyp => "Self".to_string(),
             Self::SelfVar => "self".to_string(),
+            Self::Scene => "scene".to_string(),
             Self::LPare => "(".to_string(),
             Self::RPare => ")".to_string(),
             Self::LBrace => "{".to_string(),
