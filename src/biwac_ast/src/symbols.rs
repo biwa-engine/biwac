@@ -1,5 +1,6 @@
 pub mod expressions;
 pub mod globals;
+pub mod novel;
 pub mod statements;
 
 use biwac_base::Span;

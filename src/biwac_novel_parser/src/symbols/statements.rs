@@ -1,24 +1,34 @@
 mod if_stmt;
 mod vardecl;
 
-use biwac_ast::{AssignStmt, ExprStmt, Exprs, Stmt};
+use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelMessage, NovelStmt};
 use biwac_base::Span;
 
 use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 
 impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn consume_statement(&mut self) -> Result<Option<Stmt>, NovelParseError> {
+    pub(crate) fn consume_statement(&mut self) -> Result<Option<NovelStmt>, NovelParseError> {
         self.next_line()
             .map(|line_kind| {
                 match line_kind {
                     NovelLineKind::RawNovel => {
-                        // TODO: ノベル
-                        todo!()
+                        // TODO:
+                        // - 埋め込み式 $(expr) をパース
+                        // - wait コマンド >> をパース
+
+                        let line = self.lines.get(self.cursor.lidx).unwrap();
+
+                        Ok(Some(NovelStmt::NovelWrite(NovelMessage {
+                            msg: line.to_string(),
+                            span: self.current_span(line.len()), // FIXME
+                        })))
                     }
                     NovelLineKind::GeneralCommand => match self.peek_token()? {
                         Some(t) => match t.kind {
-                            NCodeTkKind::KwIf => Ok(Some(Stmt::If(self.consume_if_statement()?))),
-                            NCodeTkKind::KwLet => Ok(Some(Stmt::VarDecl(
+                            NCodeTkKind::KwIf => {
+                                Ok(Some(NovelStmt::If(self.consume_if_statement()?)))
+                            }
+                            NCodeTkKind::KwLet => Ok(Some(NovelStmt::VarDecl(
                                 self.consume_variable_declaration_statment()?,
                             ))),
                             // WARN: 意味のある式の実行(副作用のある関数の呼び出しなど)に限定するため、
@@ -42,7 +52,7 @@ impl<'src> NovelSourceStream<'src> {
                                         // <END_OF_LINE>
                                         self.must_be_line_end()?;
 
-                                        Ok(Some(Stmt::Assign(AssignStmt {
+                                        Ok(Some(NovelStmt::Assign(AssignStmt {
                                             span: Span::merge(&dst.span(), &src.span()),
                                             dst,
                                             src,
@@ -56,7 +66,7 @@ impl<'src> NovelSourceStream<'src> {
                                     // <END_OF_LINE>
                                     self.must_be_line_end()?;
 
-                                    Ok(Some(Stmt::Expr(ExprStmt {
+                                    Ok(Some(NovelStmt::Expr(ExprStmt {
                                         span: expr.span(),
                                         expr,
                                     })))
@@ -73,7 +83,7 @@ impl<'src> NovelSourceStream<'src> {
                         todo!()
                     }
                     NovelLineKind::BlockClose => {
-                        // TODO: 残りは空白文字のみであることを検査
+                        // TODO: error
                         todo!()
                     }
                 }

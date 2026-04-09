@@ -1,6 +1,8 @@
 use biwac_base::Span;
 
-use crate::{CompilerFlag, Exprs, Ident, QualifiedId, RetTypRepr, Stmt, TypRepr, VarDecl};
+use crate::{
+    CompilerFlag, Exprs, Ident, NovelStmt, QualifiedId, RetTypRepr, Stmt, TypRepr, VarDecl,
+};
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
@@ -195,7 +197,7 @@ pub struct NovelScene {
     pub id: Ident,
     pub args: ArgDeclList,
     pub rtype: RetTypRepr,
-    pub stmts: Vec<Stmt>,
+    pub stmts: Vec<NovelStmt>,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
 }

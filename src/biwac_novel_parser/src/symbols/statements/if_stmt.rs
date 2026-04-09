@@ -1,6 +1,6 @@
 use biwac_base::Span;
 
-use biwac_ast::{BlockStmt, IfStmt};
+use biwac_ast::{NovelBlockStmt, NovelIfStmt};
 
 use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKindName};
 
@@ -10,7 +10,7 @@ impl<'src> NovelSourceStream<'src> {
     //  "}" ("else" "{" <END_OF_LINE>
     //      <statement>*
     //  "}" )?
-    pub(super) fn consume_if_statement(&mut self) -> Result<IfStmt, NovelParseError> {
+    pub(super) fn consume_if_statement(&mut self) -> Result<NovelIfStmt, NovelParseError> {
         let begin = self
             .must_consume_next(vec![NCodeTkKindName::KwIf])?
             .span
@@ -35,10 +35,10 @@ impl<'src> NovelSourceStream<'src> {
 
                     let then_end = self.current_span(1);
 
-                    return Ok(IfStmt {
+                    return Ok(NovelIfStmt {
                         span: Span::merge(&begin, &then_end),
                         cond,
-                        then: BlockStmt {
+                        then: NovelBlockStmt {
                             stmts,
                             span: Span::merge(&then_begin, &then_end),
                         },

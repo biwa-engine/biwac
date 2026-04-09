@@ -1,4 +1,4 @@
-use biwac_ast::types::TypDecl;
+use biwac_ast::TypDecl;
 use biwac_hir::{
     AssignStmt, BlockStmt, Expr, ExprStmt, IfStmt, InferTy, Primary, ReturnStmt, Stmt, Ty, TyKind,
     VarDecl, WhileStmt,
@@ -15,23 +15,7 @@ impl TryResolve<&biwac_ast::Stmt> for Stmt {
         match &value {
             biwac_ast::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx, hir)?)),
             biwac_ast::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx, hir)?)),
-            biwac_ast::Stmt::Block(b) => {
-                // ブロック文はスコープを作る
-                fctx.enter_scope();
-
-                let stmts = b
-                    .stmts
-                    .iter()
-                    .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
-                    .collect::<RsvResult<Vec<Stmt>>>()?;
-
-                fctx.exit_scope();
-
-                Ok(Self::Block(BlockStmt {
-                    span: b.span.clone(),
-                    stmts,
-                }))
-            }
+            biwac_ast::Stmt::Block(b) => Ok(Self::Block(BlockStmt::try_resolve(b, fctx, hir)?)),
             biwac_ast::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
                 span: expr.span.clone(),
                 expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
@@ -52,6 +36,30 @@ impl TryResolve<&biwac_ast::Stmt> for Stmt {
     }
 }
 
+impl TryResolve<&biwac_ast::BlockStmt> for BlockStmt {
+    fn try_resolve<'mctx>(
+        value: &biwac_ast::BlockStmt,
+        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
+        hir: &biwac_hir::Hir,
+    ) -> RsvResult<Self> {
+        // ブロック文はスコープを作る
+        fctx.enter_scope();
+
+        let stmts = value
+            .stmts
+            .iter()
+            .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
+            .collect::<RsvResult<Vec<Stmt>>>()?;
+
+        fctx.exit_scope();
+
+        Ok(BlockStmt {
+            span: value.span.clone(),
+            stmts,
+        })
+    }
+}
+
 impl TryResolve<&biwac_ast::IfStmt> for IfStmt {
     fn try_resolve<'mctx>(
         value: &biwac_ast::IfStmt,
@@ -60,24 +68,9 @@ impl TryResolve<&biwac_ast::IfStmt> for IfStmt {
     ) -> RsvResult<Self> {
         Ok(Self {
             cond: Expr::try_resolve(&value.cond, fctx, hir)?,
-            then: BlockStmt {
-                stmts: value
-                    .then
-                    .stmts
-                    .iter()
-                    .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
-                    .collect::<RsvResult<Vec<Stmt>>>()?,
-                span: value.then.span.clone(),
-            },
+            then: BlockStmt::try_resolve(&value.then, fctx, hir)?,
             els: match &value.els {
-                Some(els) => Some(BlockStmt {
-                    stmts: els
-                        .stmts
-                        .iter()
-                        .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
-                        .collect::<RsvResult<_>>()?,
-                    span: els.span.clone(),
-                }),
+                Some(els) => Some(BlockStmt::try_resolve(els, fctx, hir)?),
                 None => None,
             },
         })
@@ -92,15 +85,7 @@ impl TryResolve<&biwac_ast::WhileStmt> for WhileStmt {
     ) -> RsvResult<Self> {
         Ok(Self {
             cond: Expr::try_resolve(&value.cond, fctx, hir)?,
-            stmts: BlockStmt {
-                stmts: value
-                    .stmts
-                    .stmts
-                    .iter()
-                    .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
-                    .collect::<RsvResult<Vec<Stmt>>>()?,
-                span: value.span.clone(),
-            },
+            stmts: BlockStmt::try_resolve(&value.stmts, fctx, hir)?,
         })
     }
 }
