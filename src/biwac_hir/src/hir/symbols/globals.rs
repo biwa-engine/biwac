@@ -3,15 +3,21 @@ use std::collections::HashMap;
 use biwac_ast::{
     FnDef, Ident, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef,
 };
-use biwac_base::{ModPath, Span};
+use biwac_base::{ModPath, PackageName, Span};
 
 use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PkgId {
+    Internal,
+    External(PackageName),
+}
 
 // 型名前空間のシンボルを
 // 識別するid
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TyId {
-    // pub pkg: enum Package { Internal, External(String)}
+    pub(crate) pkg: PkgId,
     pub(crate) quals: Vec<String>,
     pub(crate) id: String,
 }
@@ -51,7 +57,7 @@ pub struct LocGenTyId(usize);
 // を識別するid
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ValId {
-    // pub pkg: enum Package { Internal, External(String)}
+    pub(crate) pkg: PkgId,
     pub(crate) quals: Vec<String>,
     pub(crate) id: String,
 }
@@ -248,12 +254,13 @@ pub struct NovelSceneDefContent {
 }
 
 impl TyId {
-    pub fn new(quals: Vec<String>, id: String) -> Self {
-        Self { quals, id }
+    pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
+        Self { pkg, quals, id }
     }
 
-    pub fn from_modpath(modpath: &ModPath, id: String) -> Self {
+    pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
         Self {
+            pkg,
             quals: match modpath {
                 ModPath::Main => vec![],
                 ModPath::Lib => vec![],
@@ -261,6 +268,10 @@ impl TyId {
             },
             id,
         }
+    }
+
+    pub fn pkg(&self) -> &PkgId {
+        &self.pkg
     }
 
     pub fn quals(&self) -> &[String] {
@@ -273,12 +284,13 @@ impl TyId {
 }
 
 impl ValId {
-    pub fn new(quals: Vec<String>, id: String) -> Self {
-        Self { quals, id }
+    pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
+        Self { pkg, quals, id }
     }
 
-    pub fn from_modpath(modpath: &ModPath, id: String) -> Self {
+    pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
         Self {
+            pkg,
             quals: match modpath {
                 ModPath::Main => vec![],
                 ModPath::Lib => vec![],
@@ -286,6 +298,10 @@ impl ValId {
             },
             id,
         }
+    }
+
+    pub fn pkg(&self) -> &PkgId {
+        &self.pkg
     }
 
     pub fn quals(&self) -> &[String] {

@@ -1,7 +1,10 @@
+use std::str::FromStr;
+
 use biwac_ast::StringLiteral;
+use biwac_base::PackageName;
 use biwac_hir::{
-    AssignStmt, BlockStmt, Callee, Expr, ExprStmt, ExprVal, FnCall, IfStmt, Literal, Primary,
-    ReturnStmt, Stmt, ValId, VarDecl,
+    AssignStmt, BlockStmt, Callee, Expr, ExprStmt, ExprVal, FnCall, IfStmt, Literal, PkgId,
+    Primary, ReturnStmt, Stmt, ValId, VarDecl,
 };
 
 use crate::{RsvResult, TryResolve};
@@ -35,7 +38,8 @@ impl TryResolve<&biwac_ast::NovelStmt> for Stmt {
                 expr: Expr {
                     expr: ExprVal::Primary(Primary::FnCall(FnCall {
                         callee: Callee::Fn(ValId::new(
-                            vec!["std".into(), "game".into(), "base_engine".into()],
+                            PkgId::External(PackageName::from_str("std").unwrap()),
+                            vec!["game".into(), "base_engine".into()],
                             "write".into(),
                         )),
                         args: vec![Expr {
@@ -61,7 +65,8 @@ impl TryResolve<&biwac_ast::NovelStmt> for Stmt {
                 expr: Expr {
                     expr: ExprVal::Primary(Primary::FnCall(FnCall {
                         callee: Callee::Fn(ValId::new(
-                            vec!["std".into(), "game".into(), "base_engine".into()],
+                            PkgId::External(PackageName::from_str("std").unwrap()),
+                            vec!["game".into(), "base_engine".into()],
                             "wait".into(),
                         )),
                         args: Vec::new(),

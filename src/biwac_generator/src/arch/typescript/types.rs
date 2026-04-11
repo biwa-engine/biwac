@@ -50,7 +50,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&defined_ty.tid.mangled()),
+                                        allocator
+                                            .alloc_str(&(&hir.pkg_name, &defined_ty.tid).mangled()),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
@@ -127,7 +128,7 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
     fn into_oxc(
         self,
         allocator: &'a oxc_allocator::Allocator,
-        _hir: &Hir,
+        hir: &Hir,
     ) -> oxc_ast::ast::TSType<'a> {
         match self {
             Self::Infer(_) => panic!("compiler bug, type inferrence failed for type variable"),
@@ -156,7 +157,8 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&defined_ty.tid.mangled()),
+                                        allocator
+                                            .alloc_str(&(&hir.pkg_name, &defined_ty.tid).mangled()),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
@@ -171,7 +173,7 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                         defined_ty
                                             .genargs
                                             .into_iter()
-                                            .map(|ty| ty.kind.into_oxc(allocator, _hir)),
+                                            .map(|ty| ty.kind.into_oxc(allocator, hir)),
                                         allocator,
                                     ),
                                 },

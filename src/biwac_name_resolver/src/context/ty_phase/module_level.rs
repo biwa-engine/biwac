@@ -1,8 +1,11 @@
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry},
+    str::FromStr,
+};
 
 use biwac_ast::{DefTyp, Globals, Ident, ImportDecl, ModAst, TypeDef};
-use biwac_base::ModPath;
-use biwac_hir::{Hir, TyExistence, TyId};
+use biwac_base::{ModPath, PackageName};
+use biwac_hir::{Hir, PkgId, TyExistence, TyId};
 
 use crate::{ResolveError, RsvResult};
 
@@ -51,6 +54,7 @@ impl ModuleLevelTyResolveCtx {
                                     e.insert((import_decl.clone(), ImportedSym::Mod(module)));
                                 } else {
                                     let tid = TyId::new(
+                                        PkgId::Internal,
                                         import_decl.qualid.quals.clone(),
                                         import_decl.qualid.id.clone(),
                                     );
@@ -81,6 +85,7 @@ impl ModuleLevelTyResolveCtx {
                                     e.insert((import_decl.clone(), ImportedSym::Mod(module)));
                                 } else {
                                     let tid = TyId::new(
+                                        PkgId::Internal,
                                         [modpath.clone().into(), import_decl.qualid.quals.clone()]
                                             .concat(),
                                         import_decl.qualid.id.clone(),
@@ -222,11 +227,15 @@ impl ModuleLevelTyResolveCtx {
     ) -> RsvResult<(TyId, TyExistence)> {
         let tid = if deftyp.qualid.is_from_root {
             // `package::hoge::fuga` の場合、直ちにOk
-            TyId::new(deftyp.qualid.quals.clone(), deftyp.qualid.id.clone())
+            TyId::new(
+                PkgId::Internal,
+                deftyp.qualid.quals.clone(),
+                deftyp.qualid.id.clone(),
+            )
         } else if deftyp.qualid.quals.is_empty() {
             // `hoge` の場合
             if self.types.contains(&deftyp.qualid.id) {
-                TyId::from_modpath(&self.modpath, deftyp.qualid.id.clone())
+                TyId::from_modpath(PkgId::Internal, &self.modpath, deftyp.qualid.id.clone())
             } else if let Some((_, sym)) = self.imports.get(&deftyp.qualid.id) {
                 match sym {
                     ImportedSym::Ty(tid) => tid.clone(),
@@ -235,13 +244,37 @@ impl ModuleLevelTyResolveCtx {
                         todo!()
                     }
                 }
-            } else {
+            } else if hir
+                .modules
+                .contains(&self.modpath.clone().extend(deftyp.qualid.quals.clone()))
+            {
                 // 現在のモジュールからの相対パス
-                // TODO: 外部packageとの区別
                 TyId::new(
+                    PkgId::Internal,
                     [self.modpath.clone().into(), deftyp.qualid.quals.clone()].concat(),
                     deftyp.qualid.id.clone(),
                 )
+            } else {
+                // 外部 package であると仮定
+                if deftyp.qualid.quals.len() == 1 {
+                    TyId::new(
+                        PkgId::External(
+                            PackageName::from_str(&deftyp.qualid.quals[0])
+                                .map_err(ResolveError::PackageNameError)?,
+                        ),
+                        Vec::new(),
+                        deftyp.qualid.id.clone(),
+                    )
+                } else {
+                    TyId::new(
+                        PkgId::External(
+                            PackageName::from_str(&deftyp.qualid.quals[0])
+                                .map_err(ResolveError::PackageNameError)?,
+                        ),
+                        deftyp.qualid.quals[1..].to_vec(),
+                        deftyp.qualid.id.clone(),
+                    )
+                }
             }
         } else if let Some((_, sym)) = self.imports.get(deftyp.qualid.quals.first().unwrap()) {
             // `import hoge::fuga; fuga::piyo::foo` の場合
@@ -252,20 +285,44 @@ impl ModuleLevelTyResolveCtx {
                     module.pop(); // hoge::fuga -> hoge
                     let quals: Vec<String> = [module, deftyp.qualid.quals.clone()].concat();
 
-                    TyId::new(quals, deftyp.qualid.id.clone())
+                    TyId::new(PkgId::Internal, quals, deftyp.qualid.id.clone())
                 }
                 ImportedSym::Ty(_) => {
                     // error
                     todo!()
                 }
             }
-        } else {
+        } else if hir
+            .modules
+            .contains(&self.modpath.clone().extend(deftyp.qualid.quals.clone()))
+        {
             // 現在のモジュールからの相対パス
-            // TODO: 外部packageとの区別
             TyId::new(
+                PkgId::Internal,
                 [self.modpath.clone().into(), deftyp.qualid.quals.clone()].concat(),
                 deftyp.qualid.id.clone(),
             )
+        } else {
+            // 外部 package であると仮定
+            if deftyp.qualid.quals.len() == 1 {
+                TyId::new(
+                    PkgId::External(
+                        PackageName::from_str(&deftyp.qualid.quals[0])
+                            .map_err(ResolveError::PackageNameError)?,
+                    ),
+                    Vec::new(),
+                    deftyp.qualid.id.clone(),
+                )
+            } else {
+                TyId::new(
+                    PkgId::External(
+                        PackageName::from_str(&deftyp.qualid.quals[0])
+                            .map_err(ResolveError::PackageNameError)?,
+                    ),
+                    deftyp.qualid.quals[1..].to_vec(),
+                    deftyp.qualid.id.clone(),
+                )
+            }
         };
 
         if let Some(ty_existence) = hir.get_type_existence(&tid) {

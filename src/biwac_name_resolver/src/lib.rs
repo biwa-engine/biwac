@@ -8,9 +8,9 @@ mod tests;
 use std::collections::HashMap;
 
 use biwac_ast::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
-use biwac_base::{ModPath, Span};
+use biwac_base::{ModPath, PackageName, PackageNameError, Span};
 use biwac_hir::{
-    Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, StructDefContent, Ty,
+    Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId, StructDefContent, Ty,
     TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
 };
 use biwac_package_loader::Pkg;
@@ -113,9 +113,15 @@ pub enum ResolveError {
         tid: Box<TyId>,
         detected_position: Box<Span>,
     },
-    // CanNotBeImplementedForType {
-    //     typ: Typ,
-    // },
+    InsufficientDependencyPackageData {
+        pkg: PackageName,
+    },
+    DependsOnSamePackageName {
+        pkg: PackageName,
+    },
+    PackageNameError(PackageNameError), // CanNotBeImplementedForType {
+                                        //     typ: Typ,
+                                        // },
 }
 
 pub type RsvResult<T> = Result<T, ResolveError>;
@@ -178,14 +184,41 @@ impl From<HirError> for ResolveError {
     }
 }
 
-#[derive(Default)]
 pub struct ResolveCtx {
     hir: Hir,
+    pkg_name: PackageName,
 }
 
 impl ResolveCtx {
-    pub fn new() -> Self {
-        Self { hir: Hir::new() }
+    pub fn new(
+        metadata: &biwac_base::PackageMetadata,
+        deps: &biwac_dependency_loader::Deps,
+    ) -> Result<Self, ResolveError> {
+        // dependency list file にすべての依存パッケージが記述されていることを検査
+        let deps_pkgs: HashMap<_, _> = deps
+            .deps_pkgs
+            .iter()
+            .map(|pkg| (pkg.name.value(), &pkg.symbols))
+            .collect();
+
+        for pkg in &metadata.dependencies {
+            if !deps_pkgs.contains_key(pkg.name.value()) {
+                return Err(ResolveError::InsufficientDependencyPackageData {
+                    pkg: pkg.name.clone(),
+                });
+            }
+        }
+
+        if deps_pkgs.contains_key(metadata.name.value()) {
+            return Err(ResolveError::DependsOnSamePackageName {
+                pkg: metadata.name.clone(),
+            });
+        }
+
+        Ok(Self {
+            hir: Hir::new(metadata.name.clone()),
+            pkg_name: metadata.name.clone(),
+        })
     }
 
     pub fn try_resolve(mut self, pkg: Pkg) -> RsvResult<Hir> {
@@ -199,7 +232,8 @@ impl ResolveCtx {
                 if let biwac_ast::Globals::TypeDef(t) = g {
                     match t {
                         TypeDef::Struct(struct_) => {
-                            let tid = TyId::from_modpath(modpath, struct_.id.id.clone());
+                            let tid =
+                                TyId::from_modpath(PkgId::Internal, modpath, struct_.id.id.clone());
                             self.hir.register_type_existence(
                                 tid,
                                 TyExistence {
@@ -209,7 +243,11 @@ impl ResolveCtx {
                             )?;
                         }
                         TypeDef::TypeAlias(alias) => {
-                            let tid = TyId::from_modpath(modpath, alias.ident.id.clone());
+                            let tid = TyId::from_modpath(
+                                PkgId::Internal,
+                                modpath,
+                                alias.ident.id.clone(),
+                            );
                             self.hir.register_type_existence(
                                 tid.clone(),
                                 TyExistence {
@@ -221,7 +259,11 @@ impl ResolveCtx {
                             alias_defs.insert(tid, alias);
                         }
                         TypeDef::NativeTypeAlias(native) => {
-                            let tid = TyId::from_modpath(modpath, native.ident.id.clone());
+                            let tid = TyId::from_modpath(
+                                PkgId::Internal,
+                                modpath,
+                                native.ident.id.clone(),
+                            );
                             self.hir.register_type_existence(
                                 tid.clone(),
                                 TyExistence {
@@ -262,7 +304,8 @@ impl ResolveCtx {
                 if let biwac_ast::Globals::TypeDef(type_def) = g {
                     match type_def {
                         TypeDef::Struct(struct_) => {
-                            let tid = TyId::from_modpath(modpath, struct_.id.id.clone());
+                            let tid =
+                                TyId::from_modpath(PkgId::Internal, modpath, struct_.id.id.clone());
 
                             self.hir.register_type_content(
                                 &tid,
@@ -277,7 +320,11 @@ impl ResolveCtx {
                             // すでに解決済み
                         }
                         TypeDef::NativeTypeAlias(native) => {
-                            let tid = TyId::from_modpath(modpath, native.ident.id.clone());
+                            let tid = TyId::from_modpath(
+                                PkgId::Internal,
+                                modpath,
+                                native.ident.id.clone(),
+                            );
 
                             self.hir.register_type_content(
                                 &tid,
@@ -329,7 +376,11 @@ impl ResolveCtx {
                             )?;
                         } else {
                             // 通常の関数のとき
-                            let vid = ValId::from_modpath(&modpath, fn_def.id.id.clone());
+                            let vid = ValId::from_modpath(
+                                PkgId::Internal,
+                                &modpath,
+                                fn_def.id.id.clone(),
+                            );
                             let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
                             let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
 
@@ -377,7 +428,11 @@ impl ResolveCtx {
                             )?;
                         } else {
                             // 通常の関数のとき
-                            let vid = ValId::from_modpath(&modpath, fn_def.id.id.clone());
+                            let vid = ValId::from_modpath(
+                                PkgId::Internal,
+                                &modpath,
+                                fn_def.id.id.clone(),
+                            );
                             let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
                             let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
 
@@ -468,7 +523,8 @@ impl ResolveCtx {
                             .register_module_native_code(modpath.clone(), &native);
                     }
                     biwac_ast::Globals::NovelScene(scene_def) => {
-                        let vid = ValId::from_modpath(&modpath, scene_def.id.id.clone());
+                        let vid =
+                            ValId::from_modpath(PkgId::Internal, &modpath, scene_def.id.id.clone());
                         let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
                         let fctx = FnLevelTyResolveCtx::new(&ictx, &Vec::new())?; // ジェネリック引数列は必ず空
 

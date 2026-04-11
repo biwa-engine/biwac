@@ -10,7 +10,7 @@ pub struct PackageMetadata {
     pub dependencies: Vec<DependedPackage>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageName(String);
 
 #[derive(Debug)]

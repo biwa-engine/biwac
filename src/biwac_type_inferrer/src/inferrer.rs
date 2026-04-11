@@ -1,12 +1,16 @@
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry},
+    str::FromStr,
+};
 
 pub(crate) mod context;
 
 use biwac_ast::{BinOperator, Ident, UnOperator};
+use biwac_base::PackageName;
 use biwac_hir::{
     BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnDefContentBody,
     FnDefContentSignature, FnTy, GenTyId, Hir, ImplValDefContentKind, InferTy, Literal, LocGenTyId,
-    MemberAccess, Primary, Stmt, StructLiteral, Ty, TyDefContentKind, TyId, TyKind, TyVar,
+    MemberAccess, PkgId, Primary, Stmt, StructLiteral, Ty, TyDefContentKind, TyId, TyKind, TyVar,
     ValDefContentKind, VarIdKind,
 };
 
@@ -694,7 +698,8 @@ impl<'tctx> FnTyCtx<'tctx> {
                 Literal::String(_) => Ok(Ty::new(
                     TyKind::Defined(DefinedTy {
                         tid: TyId::new(
-                            vec!["std".into(), "types".into(), "string".into()],
+                            PkgId::External(PackageName::from_str("std").unwrap()),
+                            vec!["types".into(), "string".into()],
                             "String".into(),
                         ),
                         genargs: Vec::new(),

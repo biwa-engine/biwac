@@ -46,7 +46,8 @@ fn main() {
             biwac_dependency_loader::try_load_dependencies(build_dir_path.to_path_buf()).unwrap();
         println!("deps: {deps:#?}");
 
-        let hir = biwac_name_resolver::ResolveCtx::new()
+        let hir = biwac_name_resolver::ResolveCtx::new(&metadata, &deps)
+            .unwrap()
             .try_resolve(pkg)
             .unwrap();
         // println!("pkg: {pkg:#?}");

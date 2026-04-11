@@ -4,7 +4,7 @@ pub(crate) mod symbols;
 pub(crate) mod types;
 
 use biwac_ast::Ident;
-use biwac_base::{ModPath, Pos, Span};
+use biwac_base::{ModPath, PackageName, Pos, Span};
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, GenTyId, HirError,
@@ -49,8 +49,9 @@ pub enum Progressive<Y, C> {
 //  2. 各種関数類の関数内の型推論
 //      1. 関連関数、メソッドについて、実装対象の型についてimplの重複を検査する(変更は加えない)
 //      2. 各種関数、関連関数、メソッドについて、内部の型推論を行う
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Hir {
+    pub pkg_name: PackageName,
     // 値名前空間 value namespace 内の一意なシンボルの集合
     // - 関数
     // - グローバル変数(const)
@@ -141,7 +142,7 @@ pub struct TyExistence {
 }
 
 impl Hir {
-    pub fn new() -> Self {
+    pub fn new(pkg_name: PackageName) -> Self {
         let mut lang_item_vals = HashMap::new();
         let mut lang_item_tys = HashMap::new();
 
@@ -149,7 +150,7 @@ impl Hir {
             match item.kind {
                 crate::lang_item::LangItemKind::Ty { tid, genarg_len } => {
                     lang_item_tys.insert(
-                        TyId::new(tid.quals, tid.id),
+                        tid,
                         DefinedTyImpl {
                             // TODO: とりあえず struct ということにしている
                             // lang item 側により情報をもたせ、struct 以外も作れるようにする
@@ -173,6 +174,7 @@ impl Hir {
         }
 
         Self {
+            pkg_name,
             vals: HashMap::new(),
             tys: HashMap::new(),
             special_ty_impls: HashMap::new(),

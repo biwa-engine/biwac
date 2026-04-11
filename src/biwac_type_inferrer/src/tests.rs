@@ -1,17 +1,26 @@
 use std::path::Path;
 
-use biwac_hir::{DefinedTy, ImplValDefContentKind, TyId, TyKind, ValDefContentKind, ValId};
+use biwac_hir::{DefinedTy, ImplValDefContentKind, PkgId, TyId, TyKind, ValDefContentKind, ValId};
 
 #[test]
 fn test1() {
     // assets/tests/test1
     // 以下にbiwaのパッケージのディレクトリがあることを前提とする
 
-    let pkg =
-        biwac_package_loader::Pkg::try_load(Path::new("../../assets/tests/test1").to_path_buf())
-            .unwrap();
+    let pkg_root_path = Path::new("../../assets/tests/test1");
 
-    let hir = biwac_name_resolver::ResolveCtx::new()
+    let metadata =
+        biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
+
+    let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
+
+    let pkg = biwac_package_loader::Pkg::try_load(pkg_root_path.to_path_buf()).unwrap();
+
+    let deps =
+        biwac_dependency_loader::try_load_dependencies(build_dir_path.to_path_buf()).unwrap();
+
+    let hir = biwac_name_resolver::ResolveCtx::new(&metadata, &deps)
+        .unwrap()
         .try_resolve(pkg)
         .unwrap();
 
@@ -19,7 +28,7 @@ fn test1() {
 
     let fn_main = if let ValDefContentKind::Fn(f) = hir
         .vals
-        .get(&ValId::new(vec![], "main".to_string()))
+        .get(&ValId::new(PkgId::Internal, vec![], "main".to_string()))
         .unwrap()
     {
         f
@@ -29,7 +38,7 @@ fn test1() {
 
     let fn_add = if let ValDefContentKind::Fn(f) = hir
         .vals
-        .get(&ValId::new(vec![], "add".to_string()))
+        .get(&ValId::new(PkgId::Internal, vec![], "add".to_string()))
         .unwrap()
     {
         f
@@ -39,7 +48,11 @@ fn test1() {
 
     let fn_math_fact = if let ValDefContentKind::Fn(f) = hir
         .vals
-        .get(&ValId::new(vec!["math".to_string()], "fact".to_string()))
+        .get(&ValId::new(
+            PkgId::Internal,
+            vec!["math".to_string()],
+            "fact".to_string(),
+        ))
         .unwrap()
     {
         f
@@ -48,6 +61,7 @@ fn test1() {
     };
 
     let struct_math_pos_pos_tid = TyId::new(
+        PkgId::Internal,
         vec!["math".to_string(), "pos".to_string()],
         "Pos".to_string(),
     );
@@ -91,6 +105,7 @@ fn test1() {
     assert_eq!(
         TyKind::Defined(DefinedTy {
             tid: TyId::new(
+                PkgId::Internal,
                 vec!["math".to_string(), "pos".to_string()],
                 "Pos".to_string()
             ),
@@ -104,6 +119,7 @@ fn test1() {
     assert_eq!(
         TyKind::Defined(DefinedTy {
             tid: TyId::new(
+                PkgId::Internal,
                 vec!["math".to_string(), "pos".to_string()],
                 "Pos".to_string()
             ),
@@ -115,6 +131,7 @@ fn test1() {
     assert_eq!(
         TyKind::Defined(DefinedTy {
             tid: TyId::new(
+                PkgId::Internal,
                 vec!["math".to_string(), "line".to_string()],
                 "Line".to_string()
             ),
@@ -152,6 +169,7 @@ fn test1() {
     assert_eq!(
         TyKind::Defined(DefinedTy {
             tid: TyId::new(
+                PkgId::Internal,
                 vec!["math".to_string(), "pos".to_string()],
                 "Pos".to_string()
             ),

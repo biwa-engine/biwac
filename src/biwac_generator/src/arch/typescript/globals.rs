@@ -2,17 +2,17 @@ use std::cell::Cell;
 
 use biwac_hir::{
     FnDefContent, Hir, MethodDefContent, NativeCode, NativeFnDefContent, NativeMethodDefContent,
-    NativeTypeAliasDefContent, NovelSceneDefContent, StructDefContent, TyId,
+    NativeTypeAliasDefContent, NovelSceneDefContent, StructDefContent,
 };
 
 use oxc_allocator::CloneIn;
 
 use crate::arch::typescript::{AsOxc, AsOxcGlobal, FnAstBuildEnv, IntoOxc, Mangled, span};
 
-impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, TyId> for StructDefContent {
+impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructDefContent {
     fn as_oxc_global(
         &'a self,
-        id: &TyId,
+        id: &I,
         allocator: &'a oxc_allocator::Allocator,
         hir: &Hir,
     ) -> oxc_ast::ast::Statement<'a> {
@@ -575,12 +575,12 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for MethodD
     }
 }
 
-impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, TyId>
+impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I>
     for (&'a NativeTypeAliasDefContent, String)
 {
     fn as_oxc_global(
         &'a self,
-        id: &TyId,
+        id: &I,
         allocator: &'a oxc_allocator::Allocator,
         _hir: &Hir,
     ) -> oxc_ast::ast::Statement<'a> {

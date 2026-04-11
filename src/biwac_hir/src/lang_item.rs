@@ -1,5 +1,6 @@
-use biwac_ast::Ident;
-use biwac_base::{ModPath, Pos, Span};
+use std::str::FromStr;
+
+use biwac_base::{ModPath, PackageName, Pos, Span};
 
 use crate::{DefinedTy, FnDefContentSignature, Ty, TyId, TyKind, ValId};
 
@@ -50,10 +51,11 @@ fn dummy_span(kind: &LangItemKind) -> Span {
 }
 
 macro_rules! lang_item_ty {
-    ( $( $qual:literal ),* ; $id:literal ; $genarg_len:literal ) => {
+    ( $pkg:literal ; $( $qual:literal ),* ; $id:literal ; $genarg_len:literal ) => {
         LangItem::new(
             LangItemKind::Ty {
                 tid: TyId {
+                    pkg: crate::PkgId::External(biwac_base::PackageName::from_str($pkg).unwrap()),
                     quals: vec![
                         $(
                             $qual.to_string()
@@ -69,9 +71,10 @@ macro_rules! lang_item_ty {
 }
 
 macro_rules! lang_item_fn {
-    ( $( $qual:literal ),* ; $id:literal ; [ $( $genarg:expr ),* ] ( $( $a:literal : $aty:expr ),* ) -> $rty:expr ) => {
+    ( $pkg:literal ; $( $qual:literal ),* ; $id:literal ; [ $( $genarg:expr ),* ] ( $( $a:literal : $aty:expr ),* ) -> $rty:expr ) => {
         {
             let vid = ValId::new(
+                crate::PkgId::External(biwac_base::PackageName::from_str($pkg).unwrap()),
                 vec![
                     $(
                         $qual.to_string()
@@ -129,16 +132,19 @@ macro_rules! lang_item_fn {
 
 pub(crate) fn default_lang_items() -> Vec<LangItem> {
     vec![
-        lang_item_ty!("std", "game"; "Game"; 2),
-        lang_item_ty!("std", "game"; "Character"; 1),
-        lang_item_fn!("std", "game", "base_engine"; "write"; 
+        lang_item_ty!("std"; "game"; "Game"; 2),
+        lang_item_ty!("std"; "game"; "Character"; 1),
+        lang_item_fn!("std"; "game", "base_engine"; "write"; 
             [] (
                 "msg": TyKind::Defined(DefinedTy {
-                    tid: TyId::new(vec!["std".into(), "types".into(), "string".into(), ], "String".into()),
+                    tid: TyId::new(
+                        crate::PkgId::External(PackageName::from_str("std").unwrap()),
+                        vec!["types".into(), "string".into(), ], "String".into()
+                    ),
                     genargs: Vec::new() 
                 })
             ) -> TyKind::Void),
-        lang_item_fn!("std", "game", "base_engine"; "wait"; 
+        lang_item_fn!("std"; "game", "base_engine"; "wait"; 
             [] () -> TyKind::Void),
     ]
 }
