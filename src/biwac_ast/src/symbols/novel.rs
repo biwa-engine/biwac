@@ -10,6 +10,7 @@ pub enum NovelStmt {
     Assign(AssignStmt),
     NovelWrite(NovelMessage),
     NovelWait(NovelWait),
+    NovelEndScene(NovelEndSceneStmt),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,5 +35,11 @@ pub struct NovelIfStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NovelBlockStmt {
     pub stmts: Vec<NovelStmt>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NovelEndSceneStmt {
+    pub expr: Exprs,
     pub span: Span,
 }

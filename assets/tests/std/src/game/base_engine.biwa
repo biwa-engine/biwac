@@ -1,6 +1,7 @@
 [[native(arch="typescript")]]
 {{
   import { createImage } from "../engine/api/image.ts";
+  import { showMessage } from "../engine/api/message.ts";
 }}
 
 import package::types::string::String;
@@ -11,4 +12,9 @@ fn create_image(path: String, x: Int, y: Int) {{
     dx: (_) => 0,
     dy: (_) => 0,
   });
+}}
+
+[[native(arch="typescript")]]
+fn write(msg: String) {{
+  showMessage(msg);
 }}

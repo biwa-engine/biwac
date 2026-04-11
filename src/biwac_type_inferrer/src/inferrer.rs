@@ -691,7 +691,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                 Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span())),
                 // Literal::Float(_) => Ok(Ty::Float),
                 Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span())),
-                Literal::String(_) => todo!(),
+                Literal::String(_) => Ok(Ty::new(
+                    TyKind::Defined(DefinedTy {
+                        tid: TyId::new(
+                            vec!["std".into(), "types".into(), "string".into()],
+                            "String".into(),
+                        ),
+                        genargs: Vec::new(),
+                    }),
+                    primary.span(),
+                )),
                 Literal::Struct(struct_literal) => {
                     self.infer_struct_literal(&struct_literal.tid, struct_literal)
                 }

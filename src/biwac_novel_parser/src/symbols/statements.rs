@@ -1,3 +1,4 @@
+mod end_scene;
 mod if_stmt;
 mod vardecl;
 
@@ -30,6 +31,9 @@ impl<'src> NovelSourceStream<'src> {
                             }
                             NCodeTkKind::KwLet => Ok(Some(NovelStmt::VarDecl(
                                 self.consume_variable_declaration_statment()?,
+                            ))),
+                            NCodeTkKind::KwEndScene => Ok(Some(NovelStmt::NovelEndScene(
+                                self.consume_end_scene_statment()?,
                             ))),
                             // WARN: 意味のある式の実行(副作用のある関数の呼び出しなど)に限定するため、
                             // パーサの段階で

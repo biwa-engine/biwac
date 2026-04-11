@@ -1,6 +1,7 @@
+use biwac_ast::Ident;
 use biwac_base::{ModPath, Pos, Span};
 
-use crate::{FnDefContentSignature, Ty, TyId, TyKind, ValId};
+use crate::{DefinedTy, FnDefContentSignature, Ty, TyId, TyKind, ValId};
 
 #[derive(Debug, Clone)]
 pub struct LangItem {
@@ -68,7 +69,7 @@ macro_rules! lang_item_ty {
 }
 
 macro_rules! lang_item_fn {
-    ( $( $qual:literal ),* ; $id:literal ; [ $( $genarg:expr ),* ] ( $( $arg:expr ),* ) -> $rty:expr ) => {
+    ( $( $qual:literal ),* ; $id:literal ; [ $( $genarg:expr ),* ] ( $( $a:literal : $aty:expr ),* ) -> $rty:expr ) => {
         {
             let vid = ValId::new(
                 vec![
@@ -89,11 +90,21 @@ macro_rules! lang_item_fn {
                     vid,
                     val: LangItemVal::Fn{
                         signature: Box::new(FnDefContentSignature {
-                            args: vec![
+                            args: [
                                 $(
-                                    $arg
+                                    ($a, $aty)
                                 ),*
-                            ],
+                            ].into_iter()
+                            .map(|(id, kind): (&str, _)| (biwac_ast::Ident {
+                                    id: id.to_string(),
+                                    span: span.clone(),
+                                },
+                                Ty {
+                                    kind,
+                                    span: span.clone(),
+                                }
+                            ))
+                            .collect(),
                             rty: Ty {
                                 kind: $rty,
                                 span: span.clone(),
@@ -121,7 +132,12 @@ pub(crate) fn default_lang_items() -> Vec<LangItem> {
         lang_item_ty!("std", "game"; "Game"; 2),
         lang_item_ty!("std", "game"; "Character"; 1),
         lang_item_fn!("std", "game", "base_engine"; "write"; 
-            [] () -> TyKind::Void),
+            [] (
+                "msg": TyKind::Defined(DefinedTy {
+                    tid: TyId::new(vec!["std".into(), "types".into(), "string".into(), ], "String".into()),
+                    genargs: Vec::new() 
+                })
+            ) -> TyKind::Void),
         lang_item_fn!("std", "game", "base_engine"; "wait"; 
             [] () -> TyKind::Void),
     ]

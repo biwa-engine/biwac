@@ -6,4 +6,5 @@ scene scene1(
     g: package::game::Game[MyGameCharacters, MyGameState]
   ) -> package::game::Game[MyGameCharacters, MyGameState] {{
   Hello, World!
+  #endscene g
 }}

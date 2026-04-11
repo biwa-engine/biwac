@@ -1,7 +1,7 @@
 use biwac_ast::StringLiteral;
 use biwac_hir::{
-    AssignStmt, BlockStmt, Callee, Expr, ExprStmt, ExprVal, FnCall, IfStmt, Literal, Primary, Stmt,
-    ValId, VarDecl,
+    AssignStmt, BlockStmt, Callee, Expr, ExprStmt, ExprVal, FnCall, IfStmt, Literal, Primary,
+    ReturnStmt, Stmt, ValId, VarDecl,
 };
 
 use crate::{RsvResult, TryResolve};
@@ -69,6 +69,10 @@ impl TryResolve<&biwac_ast::NovelStmt> for Stmt {
                     })),
                     id: fctx.new_expr_id(),
                 },
+            })),
+            biwac_ast::NovelStmt::NovelEndScene(end) => Ok(Self::Return(ReturnStmt {
+                expr: Expr::try_resolve(&end.expr, fctx, hir)?,
+                span: end.span.clone(),
             })),
         }
     }

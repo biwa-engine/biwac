@@ -21,7 +21,7 @@ pub enum NCodeTkKind {
     KwIf,                  // if
     KwElse,                // else
     KwWhile,               // while
-    KwReturn,              // return
+    KwEndScene,            // endscene
     KwUint,                // Uint (reserved word of type)
     KwInt,                 // Int (reserved word of type)
     KwFloat,               // Float (reserved word of type)
@@ -66,7 +66,7 @@ pub enum NCodeTkKindName {
     KwIf,            // if
     KwElse,          // else
     KwWhile,         // while
-    KwReturn,        // return
+    KwEndScene,      // endscene
     KwUint,          // Uint (reserved word of type)
     KwInt,           // Int (reserved word of type)
     KwFloat,         // Float (reserved word of type)
@@ -142,7 +142,7 @@ impl<'src> NovelSourceStream<'src> {
         // NOTE: multiple mutable borrowing
         // を回避するために、予めis_noneなら更新する方法を取らざるを得ない
         if self.peeked.is_none() {
-            if self.cursor.idx >= line.len() {
+            if self.cursor.idx >= line.chars().count() {
                 self.peeked = Some(None);
             } else {
                 let mut remain_chars = line[self.cursor.idx..].chars().peekable();
@@ -282,7 +282,7 @@ impl<'src> NovelSourceStream<'src> {
                             "if" => (Some(NCodeTkKind::KwIf), 2),
                             "else" => (Some(NCodeTkKind::KwElse), 4),
                             "while" => (Some(NCodeTkKind::KwWhile), 5),
-                            "return" => (Some(NCodeTkKind::KwReturn), 6),
+                            "endscene" => (Some(NCodeTkKind::KwEndScene), 8),
                             "Uint" => (Some(NCodeTkKind::KwUint), 4),
                             "Int" => (Some(NCodeTkKind::KwInt), 3),
                             "Float" => (Some(NCodeTkKind::KwFloat), 5),
@@ -311,14 +311,15 @@ impl<'src> NovelSourceStream<'src> {
                     }
                 };
 
-                self.cursor.idx += token_len;
-
                 if let Some(kind) = kind {
                     self.peeked = Some(Some(NCodeToken {
                         kind,
                         span: self.current_span(token_len),
                     }));
                 } else {
+                    // NOTE: 空白文字のときは次トークンを探すために、peek内でもcursor.idxを進める
+                    // そうでないとスタックオーバーフローする
+                    self.cursor.idx += token_len;
                     self.peek_token()?;
                 }
             };
@@ -369,7 +370,7 @@ impl NCodeTkKind {
             Self::KwIf => NCodeTkKindName::KwIf,      // if
             Self::KwElse => NCodeTkKindName::KwElse,  // else
             Self::KwWhile => NCodeTkKindName::KwWhile, // while
-            Self::KwReturn => NCodeTkKindName::KwReturn, // return
+            Self::KwEndScene => NCodeTkKindName::KwEndScene, // endscene
             Self::KwUint => NCodeTkKindName::KwUint,  // Uint (reserved word of type)
             Self::KwInt => NCodeTkKindName::KwInt,    // Int (reserved word of type)
             Self::KwFloat => NCodeTkKindName::KwFloat, // Float (reserved word of type)
