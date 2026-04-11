@@ -12,8 +12,8 @@ use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TyId {
     // pub pkg: enum Package { Internal, External(String)}
-    quals: Vec<String>,
-    id: String,
+    pub(crate) quals: Vec<String>,
+    pub(crate) id: String,
 }
 
 // 型定義側で
@@ -52,8 +52,8 @@ pub struct LocGenTyId(usize);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ValId {
     // pub pkg: enum Package { Internal, External(String)}
-    quals: Vec<String>,
-    id: String,
+    pub(crate) quals: Vec<String>,
+    pub(crate) id: String,
 }
 
 // 値名前空間のシンボル

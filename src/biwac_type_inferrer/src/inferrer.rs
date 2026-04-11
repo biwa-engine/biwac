@@ -707,12 +707,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             }
             Primary::FnCall(c) => match &c.callee {
                 Callee::Fn(vid) => {
-                    let val = self.tctx.hir.vals.get(vid).unwrap();
-                    let callee_ty = match &val {
-                        ValDefContentKind::Fn(f) => f.signature.as_ty(),
-                        ValDefContentKind::Native(f) => f.signature.as_ty(),
-                        ValDefContentKind::NovelScene(n) => n.signature.as_ty(),
-                    };
+                    let callee_ty = self.tctx.hir.get_fn_sign(vid).unwrap().as_ty();
 
                     let args = c
                         .args

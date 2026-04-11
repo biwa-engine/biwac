@@ -1,4 +1,5 @@
 pub mod hir;
+mod lang_item;
 
 use biwac_ast::Ident;
 use biwac_base::Span;

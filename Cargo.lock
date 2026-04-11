@@ -76,14 +76,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "biwac_lang_item"
-version = "0.1.0"
-dependencies = [
- "biwac_base",
- "biwac_hir",
-]
-
-[[package]]
 name = "biwac_lexer"
 version = "0.1.0"
 dependencies = [

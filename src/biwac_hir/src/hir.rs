@@ -7,8 +7,9 @@ use biwac_ast::Ident;
 use biwac_base::{ModPath, Pos, Span};
 
 use crate::{
-    AssocCallee, DefinedTy, FnDefContentBody, FnTy, HirError, HirResult, ImplValDefContentKind,
-    InferTy, LocGenTyId, NativeCode, Ty, TyDefContentKind, TyId, TyKind, ValDefContentKind, ValId,
+    AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, GenTyId, HirError,
+    HirResult, ImplValDefContentKind, InferTy, LocGenTyId, NativeCode, StructDefContent, Ty,
+    TyDefContentKind, TyId, TyKind, ValDefContentKind, ValId,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -79,6 +80,12 @@ pub struct Hir {
     pub modules: HashSet<ModPath>,
 
     pub module_global_natives: HashMap<ModPath, Vec<NativeCode>>,
+
+    // lang item (package std などに定義された値)
+    lang_item_vals: HashMap<ValId, FnDefContentSignature>,
+
+    // lang item (package std などに定義された型)
+    lang_item_tys: HashMap<TyId, DefinedTyImpl>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,9 +141,46 @@ pub struct TyExistence {
 }
 
 impl Hir {
-    #[inline]
     pub fn new() -> Self {
-        Self::default()
+        let mut lang_item_vals = HashMap::new();
+        let mut lang_item_tys = HashMap::new();
+
+        for item in crate::lang_item::default_lang_items() {
+            match item.kind {
+                crate::lang_item::LangItemKind::Ty { tid, genarg_len } => {
+                    lang_item_tys.insert(
+                        TyId::new(tid.quals, tid.id),
+                        DefinedTyImpl {
+                            // TODO: とりあえず struct ということにしている
+                            // lang item 側により情報をもたせ、struct 以外も作れるようにする
+                            ty_content: Progressive::Completed(TyDefContentKind::Struct(Box::new(
+                                StructDefContent {
+                                    members: HashMap::new(),
+                                    genargs: (0..genarg_len).map(GenTyId::new).collect(),
+                                    struct_name_span: item.span,
+                                },
+                            ))),
+                            vals: HashMap::new(),
+                        },
+                    );
+                }
+                crate::lang_item::LangItemKind::Val { vid, val } => match val {
+                    crate::lang_item::LangItemVal::Fn { signature } => {
+                        lang_item_vals.insert(vid, *signature);
+                    }
+                },
+            }
+        }
+
+        Self {
+            vals: HashMap::new(),
+            tys: HashMap::new(),
+            special_ty_impls: HashMap::new(),
+            modules: HashSet::new(),
+            module_global_natives: HashMap::new(),
+            lang_item_tys,
+            lang_item_vals,
+        }
     }
 
     // モジュールの存在を登録する
@@ -851,6 +895,20 @@ impl Hir {
         } else {
             self.module_global_natives
                 .insert(modpath, vec![NativeCode::from(native)]);
+        }
+    }
+
+    pub fn get_fn_sign(&self, vid: &ValId) -> Option<&FnDefContentSignature> {
+        match self.vals.get(vid) {
+            Some(val) => match &val {
+                ValDefContentKind::Fn(f) => Some(&f.signature),
+                ValDefContentKind::Native(f) => Some(&f.signature),
+                ValDefContentKind::NovelScene(n) => Some(&n.signature),
+            },
+
+            // コンパイル対象の vals の中になければ
+            // lang item にフォールバック
+            None => self.lang_item_vals.get(vid),
         }
     }
 }
