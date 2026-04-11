@@ -8,6 +8,7 @@ members = [
   "src/biwac_metadata_loader",
   "src/biwac_package_loader",
   "src/biwac_hir",
+  "src/biwac_dependency_loader",
   "src/biwac_name_resolver",
   "src/biwac_type_inferrer",
   "src/biwac_generator",

@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use biwac_base::{
@@ -35,9 +36,9 @@ pub fn try_load_package_metadata(
             .map_err(|e| PkgMetadataLoadError::InvalidFormat(e.to_string()))?;
 
         Ok(PackageMetadata {
-            name: PackageName::new(metadata.name)
+            name: PackageName::from_str(&metadata.name)
                 .map_err(PkgMetadataLoadError::PackageNameError)?,
-            version: PackageVersion::try_from(metadata.version.as_str())
+            version: PackageVersion::from_str(metadata.version.as_str())
                 .map_err(PkgMetadataLoadError::PackageVersionError)?,
             description: metadata.description,
             dependencies: metadata
@@ -45,14 +46,14 @@ pub fn try_load_package_metadata(
                 .into_iter()
                 .map(|d| {
                     Ok(DependedPackage {
-                        name: PackageName::new(d.name)
+                        name: PackageName::from_str(&d.name)
                             .map_err(PkgMetadataLoadError::PackageNameError)?,
-                        min_version: PackageVersion::try_from(d.version.min.as_str())
+                        min_version: PackageVersion::from_str(d.version.min.as_str())
                             .map_err(PkgMetadataLoadError::PackageVersionError)?,
                         max_version: d
                             .version
                             .max
-                            .map(|v| PackageVersion::try_from(v.as_str()))
+                            .map(|v| PackageVersion::from_str(v.as_str()))
                             .transpose()
                             .map_err(PkgMetadataLoadError::PackageVersionError)?,
                     })

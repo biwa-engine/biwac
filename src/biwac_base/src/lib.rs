@@ -13,3 +13,5 @@ pub use span::{ModPath, Pos, Span};
 pub const BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME: &str = "main";
 pub const BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME: &str = "lib";
 pub const BIWA_EXTENSION: &str = "biwa";
+
+pub const BIWA_BUILD_DIRECTORY_NAME: &str = ".biwa_build";

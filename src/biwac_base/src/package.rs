@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::BiwacError;
 
 #[derive(Debug)]
@@ -35,17 +37,20 @@ pub enum PackageVersionError {
     InvalidPackageVersion(String),
 }
 
-impl PackageName {
-    // TODO: バリデーションして、エラーならエラーを返す
-    pub fn new(name: String) -> Result<Self, PackageNameError> {
+impl FromStr for PackageName {
+    type Err = PackageNameError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let re = regex::Regex::new("[a-z][0-9a-z_]*").unwrap();
-        if re.is_match(&name) {
-            Ok(Self(name))
+        if re.is_match(s) {
+            Ok(Self(s.into()))
         } else {
-            Err(PackageNameError::InvalidPackageName(name))
+            Err(PackageNameError::InvalidPackageName(s.into()))
         }
     }
+}
 
+impl PackageName {
     pub fn value(&self) -> &str {
         &self.0
     }
@@ -64,26 +69,24 @@ Package name must be `[a-z][0-9a-z_]*`"#,
     }
 }
 
-impl TryFrom<&str> for PackageVersion {
-    type Error = PackageVersionError;
+impl FromStr for PackageVersion {
+    type Err = PackageVersionError;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let tokens: Vec<&str> = value.split(".").collect();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let tokens: Vec<&str> = s.split(".").collect();
 
         if tokens.len() != 3 {
-            Err(PackageVersionError::InvalidPackageVersion(
-                value.to_string(),
-            ))
+            Err(PackageVersionError::InvalidPackageVersion(s.to_string()))
         } else {
             let major = tokens[0]
                 .parse()
-                .map_err(|_| PackageVersionError::InvalidPackageVersion(value.to_string()))?;
+                .map_err(|_| PackageVersionError::InvalidPackageVersion(s.to_string()))?;
             let minor = tokens[1]
                 .parse()
-                .map_err(|_| PackageVersionError::InvalidPackageVersion(value.to_string()))?;
+                .map_err(|_| PackageVersionError::InvalidPackageVersion(s.to_string()))?;
             let patch = tokens[2]
                 .parse()
-                .map_err(|_| PackageVersionError::InvalidPackageVersion(value.to_string()))?;
+                .map_err(|_| PackageVersionError::InvalidPackageVersion(s.to_string()))?;
 
             Ok(Self {
                 major,

@@ -1,0 +1,11 @@
+[package]
+name = "biwac_dependency_loader"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_hir = { path = "../biwac_hir"}
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true

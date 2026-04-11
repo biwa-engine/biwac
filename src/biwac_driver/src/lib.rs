@@ -3,11 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// pkg_root_path はdirであることが保証されている必要がある
-pub fn write_bin(pkg_root_path: PathBuf, bin: &str) -> Result<(), std::io::Error> {
+// build_dir_path はdirであることが保証されている必要がある
+pub fn write_bin(build_dir_path: PathBuf, bin: &str) -> Result<(), std::io::Error> {
     if cfg!(feature = "typescript") {
-        let dstpath = pkg_root_path
-            .join(Path::new(".biwa_build"))
+        let dstpath = build_dir_path
             .join(Path::new("typescript"))
             .join(Path::new("src"))
             .join(Path::new("generated"));
@@ -17,7 +16,13 @@ pub fn write_bin(pkg_root_path: PathBuf, bin: &str) -> Result<(), std::io::Error
                 .create(dstpath.clone())
                 .unwrap();
         } else if !dstpath.is_dir() {
-            panic!("Destination directory broken, conflicted file found: `{dstpath:?}`");
+            panic!(
+                "Destination directory broken, conflicted file found: `{}`",
+                dstpath
+                    .as_os_str()
+                    .to_str()
+                    .expect("broken build directory path")
+            );
         }
 
         let binpath = dstpath.join(Path::new("dst.ts"));
