@@ -5,6 +5,7 @@ members = [
   "src/biwac_ast",
   "src/biwac_parser",
   "src/biwac_novel_parser",
+  "src/biwac_metadata_loader",
   "src/biwac_package_loader",
   "src/biwac_hir",
   "src/biwac_name_resolver",
@@ -24,6 +25,9 @@ oxc_ast = "0.113.0"
 oxc_span = "0.113.0"
 oxc_allocator = "0.113.0"
 oxc_parser = "0.113.0"
+serde = "1.0.228"
+serde_json = "1.0.149"
+regex = "1.12.3"
 
 [workspace.features]
 default = [ "typescript" ]

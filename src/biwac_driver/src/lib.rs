@@ -1,14 +1,12 @@
-use std::{io::Write, path::Path};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
-pub fn write_bin(rootpath: &str, bin: &str) -> Result<(), std::io::Error> {
-    let root = Path::new(rootpath);
-
-    if !root.is_dir() {
-        panic!("Directory expected, but got file: `{rootpath}`");
-    }
-
+// pkg_root_path はdirであることが保証されている必要がある
+pub fn write_bin(pkg_root_path: PathBuf, bin: &str) -> Result<(), std::io::Error> {
     if cfg!(feature = "typescript") {
-        let dstpath = root
+        let dstpath = pkg_root_path
             .join(Path::new(".biwa_build"))
             .join(Path::new("typescript"))
             .join(Path::new("src"))

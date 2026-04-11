@@ -1,0 +1,9 @@
+[package]
+name = "biwac_metadata_loader"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+serde.workspace = true
+serde_json.workspace = true

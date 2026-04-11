@@ -1,0 +1,6 @@
+{
+  "name": "std",
+  "version": "0.1.0",
+  "description": "biwa language standard library",
+  "dependencies": []
+}

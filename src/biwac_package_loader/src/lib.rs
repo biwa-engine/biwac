@@ -32,14 +32,9 @@ pub struct Pkg {
 }
 
 impl Pkg {
-    pub fn try_load(rootpath: &str) -> Result<Self, PkgLoadError> {
-        let root = Path::new(rootpath);
-
-        if !root.is_dir() {
-            panic!("Directory expected, but got file: `{rootpath}`");
-        }
-
-        let srcpath = root.join(Path::new("src"));
+    // pkg_root_path はdirであることが保証されている必要がある
+    pub fn try_load(pkg_root_path: PathBuf) -> Result<Self, PkgLoadError> {
+        let srcpath = pkg_root_path.join(Path::new("src"));
 
         // トップレベルモジュールを起点にロードする
         // それにはMainを指定する
