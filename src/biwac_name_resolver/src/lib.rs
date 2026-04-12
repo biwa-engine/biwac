@@ -244,7 +244,7 @@ impl ResolveCtx {
                     DepsSymbolKind::Struct(struct_) => {
                         external_tys.insert(
                             TyId::new(
-                                PkgId::External(pkg.name.clone()),
+                                PkgId::new(pkg.name.clone()),
                                 sym.id.modu.clone().into(),
                                 sym.id.id.clone(),
                             ),
@@ -254,7 +254,7 @@ impl ResolveCtx {
                     DepsSymbolKind::Function(fn_sign) => {
                         external_vals.insert(
                             ValId::new(
-                                PkgId::External(pkg.name.clone()),
+                                PkgId::new(pkg.name.clone()),
                                 sym.id.modu.clone().into(),
                                 sym.id.id.clone(),
                             ),
@@ -282,8 +282,11 @@ impl ResolveCtx {
                 if let biwac_ast::Globals::TypeDef(t) = g {
                     match t {
                         TypeDef::Struct(struct_) => {
-                            let tid =
-                                TyId::from_modpath(PkgId::Internal, modpath, struct_.id.id.clone());
+                            let tid = TyId::from_modpath(
+                                PkgId::new(self.pkg_name.clone()),
+                                modpath,
+                                struct_.id.id.clone(),
+                            );
                             self.hir.register_type_existence(
                                 tid,
                                 TyExistence {
@@ -294,7 +297,7 @@ impl ResolveCtx {
                         }
                         TypeDef::TypeAlias(alias) => {
                             let tid = TyId::from_modpath(
-                                PkgId::Internal,
+                                PkgId::new(self.pkg_name.clone()),
                                 modpath,
                                 alias.ident.id.clone(),
                             );
@@ -310,7 +313,7 @@ impl ResolveCtx {
                         }
                         TypeDef::NativeTypeAlias(native) => {
                             let tid = TyId::from_modpath(
-                                PkgId::Internal,
+                                PkgId::new(self.pkg_name.clone()),
                                 modpath,
                                 native.ident.id.clone(),
                             );
@@ -333,7 +336,12 @@ impl ResolveCtx {
             .modules
             .iter()
             .map(|(modpath, modu)| {
-                let mctx = ModuleLevelTyResolveCtx::new(modpath.clone(), modu, &self.hir)?;
+                let mctx = ModuleLevelTyResolveCtx::new(
+                    self.pkg_name.clone(),
+                    modpath.clone(),
+                    modu,
+                    &self.hir,
+                )?;
 
                 Ok((modpath.clone(), mctx))
             })
@@ -354,8 +362,11 @@ impl ResolveCtx {
                 if let biwac_ast::Globals::TypeDef(type_def) = g {
                     match type_def {
                         TypeDef::Struct(struct_) => {
-                            let tid =
-                                TyId::from_modpath(PkgId::Internal, modpath, struct_.id.id.clone());
+                            let tid = TyId::from_modpath(
+                                PkgId::new(self.pkg_name.clone()),
+                                modpath,
+                                struct_.id.id.clone(),
+                            );
 
                             self.hir.register_type_content(
                                 &tid,
@@ -371,7 +382,7 @@ impl ResolveCtx {
                         }
                         TypeDef::NativeTypeAlias(native) => {
                             let tid = TyId::from_modpath(
-                                PkgId::Internal,
+                                PkgId::new(self.pkg_name.clone()),
                                 modpath,
                                 native.ident.id.clone(),
                             );
@@ -432,7 +443,7 @@ impl ResolveCtx {
                         } else {
                             // 通常の関数のとき
                             let vid = ValId::from_modpath(
-                                PkgId::Internal,
+                                PkgId::new(self.pkg_name.clone()),
                                 &modpath,
                                 fn_def.id.id.clone(),
                             );
@@ -484,7 +495,7 @@ impl ResolveCtx {
                         } else {
                             // 通常の関数のとき
                             let vid = ValId::from_modpath(
-                                PkgId::Internal,
+                                PkgId::new(self.pkg_name.clone()),
                                 &modpath,
                                 fn_def.id.id.clone(),
                             );
@@ -578,8 +589,11 @@ impl ResolveCtx {
                             .register_module_native_code(modpath.clone(), &native);
                     }
                     biwac_ast::Globals::NovelScene(scene_def) => {
-                        let vid =
-                            ValId::from_modpath(PkgId::Internal, &modpath, scene_def.id.id.clone());
+                        let vid = ValId::from_modpath(
+                            PkgId::new(self.pkg_name.clone()),
+                            &modpath,
+                            scene_def.id.id.clone(),
+                        );
                         let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
                         let fctx = FnLevelTyResolveCtx::new(&ictx, &Vec::new())?; // ジェネリック引数列は必ず空
 

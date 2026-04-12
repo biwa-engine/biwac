@@ -1,15 +1,9 @@
 use std::collections::HashMap;
 
 use biwac_ast::{FnDef, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef};
-use biwac_base::{ModPath, PackageName, SSpan, Span};
+use biwac_base::{ModPath, SSpan, Span};
 
-use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, Progressive, Stmt, Ty};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PkgId {
-    Internal,
-    External(PackageName),
-}
+use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, PkgId, Progressive, Stmt, Ty};
 
 // 型名前空間のシンボルを
 // 識別するid

@@ -5,9 +5,8 @@ mod types;
 
 use std::{cell::Cell, collections::HashMap};
 
-use biwac_base::PackageName;
 use biwac_hir::{
-    ExprId, Hir, ImplValDefContentKind, LocVarId, PkgId, Ty, TyDefContentKind, TyId, TyKind,
+    ExprId, Hir, ImplValDefContentKind, LocVarId, Ty, TyDefContentKind, TyId, TyKind,
     ValDefContentKind, ValId,
 };
 
@@ -47,16 +46,15 @@ pub fn generate(hir: &Hir) -> String {
             .flat_map(
                 |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
                     TyDefContentKind::Struct(struct_) => {
-                        Some(struct_.as_oxc_global(&(&hir.pkg_name, tid), &allocator, hir))
+                        Some(struct_.as_oxc_global(tid, &allocator, hir))
                     }
                     TyDefContentKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
-                    TyDefContentKind::NativeTypeAlias(_) => {
-                        Some(native_tys.get(tid).unwrap().as_oxc_global(
-                            &(&hir.pkg_name, tid),
-                            &allocator,
-                            hir,
-                        ))
-                    }
+                    TyDefContentKind::NativeTypeAlias(_) => Some(
+                        native_tys
+                            .get(tid)
+                            .unwrap()
+                            .as_oxc_global(tid, &allocator, hir),
+                    ),
                 },
             )
             .chain(hir.tys.iter().flat_map(|(tid, ty_impl)| {
@@ -66,22 +64,22 @@ pub fn generate(hir: &Hir) -> String {
                         .iter()
                         .map(|(impl_valid, impl_)| match &impl_.val_content {
                             ImplValDefContentKind::Fn(f) => f.as_oxc_global(
-                                &(&hir.pkg_name, &tid.clone(), val_name.as_str(), impl_valid),
+                                &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
                                 hir,
                             ),
                             ImplValDefContentKind::Method(m) => m.as_oxc_global(
-                                &(&hir.pkg_name, &tid.clone(), val_name.as_str(), impl_valid),
+                                &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
                                 hir,
                             ),
                             ImplValDefContentKind::NativeFn(f) => f.as_oxc_global(
-                                &(&hir.pkg_name, &tid.clone(), val_name.as_str(), impl_valid),
+                                &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
                                 hir,
                             ),
                             ImplValDefContentKind::NativeMethod(m) => m.as_oxc_global(
-                                &(&hir.pkg_name, &tid.clone(), val_name.as_str(), impl_valid),
+                                &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
                                 hir,
                             ),
@@ -105,15 +103,9 @@ pub fn generate(hir: &Hir) -> String {
                 })
             }))
             .chain(hir.vals.iter().flat_map(|(vid, val)| match val {
-                ValDefContentKind::Fn(f) => {
-                    Some(f.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir))
-                }
-                ValDefContentKind::Native(f) => {
-                    Some(f.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir))
-                }
-                ValDefContentKind::NovelScene(n) => {
-                    Some(n.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir))
-                }
+                ValDefContentKind::Fn(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
+                ValDefContentKind::Native(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
+                ValDefContentKind::NovelScene(n) => Some(n.as_oxc_global(vid, &allocator, hir)),
                 ValDefContentKind::ExternalFn(_) => None,
             })),
         &allocator,
@@ -170,54 +162,42 @@ trait Mangled {
     fn mangled(&self) -> String;
 }
 
-impl Mangled for (&PackageName, &TyId) {
+impl Mangled for TyId {
     fn mangled(&self) -> String {
         let mut result = String::from("_Z");
 
         // ネストがある場合は N ... E で囲む
         result.push('N');
 
-        match self.1.pkg() {
-            PkgId::Internal => {
-                result.push_str(&format!("{}{}", self.0.value().len(), self.0.value()));
-            }
-            PkgId::External(pkg) => {
-                result.push_str(&format!("{}{}", pkg.value().len(), pkg.value()));
-            }
-        }
+        let pkg_name_str = self.pkg().name().value();
+        result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
 
-        for q in self.1.quals() {
+        for q in self.quals() {
             result.push_str(&format!("{}{}", q.len(), q));
         }
 
-        result.push_str(&format!("{}{}", self.1.id().len(), self.1.id()));
+        result.push_str(&format!("{}{}", self.id().len(), self.id()));
         result.push('E');
 
         result
     }
 }
 
-impl Mangled for (&PackageName, &ValId) {
+impl Mangled for ValId {
     fn mangled(&self) -> String {
         let mut result = String::from("_Z");
 
         // ネストがある場合は N ... E で囲む
         result.push('N');
 
-        match self.1.pkg() {
-            PkgId::Internal => {
-                result.push_str(&format!("{}{}", self.0.value().len(), self.0.value()));
-            }
-            PkgId::External(pkg) => {
-                result.push_str(&format!("{}{}", pkg.value().len(), pkg.value()));
-            }
-        }
+        let pkg_name_str = self.pkg().name().value();
+        result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
 
-        for q in self.1.quals() {
+        for q in self.quals() {
             result.push_str(&format!("{}{}", q.len(), q));
         }
 
-        result.push_str(&format!("{}{}", self.1.id().len(), self.1.id()));
+        result.push_str(&format!("{}{}", self.id().len(), self.id()));
         result.push('E');
 
         result

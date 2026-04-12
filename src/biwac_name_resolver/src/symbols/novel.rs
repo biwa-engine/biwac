@@ -38,7 +38,7 @@ impl TryResolve<&biwac_ast::NovelStmt> for Stmt {
                 expr: Expr {
                     expr: ExprVal::Primary(Primary::FnCall(FnCall {
                         callee: Callee::Fn(ValId::new(
-                            PkgId::External(PackageName::from_str("std").unwrap()),
+                            PkgId::new(PackageName::from_str("std").unwrap()),
                             vec!["game".into(), "base_engine".into()],
                             "write".into(),
                         )),
@@ -65,7 +65,7 @@ impl TryResolve<&biwac_ast::NovelStmt> for Stmt {
                 expr: Expr {
                     expr: ExprVal::Primary(Primary::FnCall(FnCall {
                         callee: Callee::Fn(ValId::new(
-                            PkgId::External(PackageName::from_str("std").unwrap()),
+                            PkgId::new(PackageName::from_str("std").unwrap()),
                             vec!["game".into(), "base_engine".into()],
                             "wait".into(),
                         )),

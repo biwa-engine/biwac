@@ -4,7 +4,7 @@ mod lang_item;
 use biwac_base::SSpan;
 
 pub use crate::hir::{
-    Hir, ImplValId, Progressive, TyExistence,
+    Hir, ImplValId, PkgId, Progressive, TyExistence,
     symbols::{
         Ident,
         expressions::{
@@ -16,8 +16,8 @@ pub use crate::hir::{
             DecledArg, FnDefContent, FnDefContentBody, FnDefContentSignature, GenTyId,
             ImplValDefContentKind, LocGenTyId, MethodDefContent, NativeCode, NativeFnArgDecl,
             NativeFnDefContent, NativeMethodDefContent, NativeTypeAliasDefContent,
-            NovelSceneDefContent, PkgId, StructDefContent, TyDefContentKind, TyId,
-            TypeAliasDefContent, ValDefContentKind, ValId,
+            NovelSceneDefContent, StructDefContent, TyDefContentKind, TyId, TypeAliasDefContent,
+            ValDefContentKind, ValId,
         },
         statements::{
             AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, LocVarId, ReturnStmt, Stmt,

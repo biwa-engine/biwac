@@ -24,6 +24,7 @@ pub(crate) enum ImportedSym {
 
 #[derive(Debug)]
 pub(crate) struct ModuleLevelResolveCtx {
+    pkg_name: PackageName,
     modpath: ModPath,
     imports: HashMap<String, (ImportDecl, ImportedSym)>,
     types: HashSet<String>, // 型は型のみのネームスペースで内側から解決
@@ -32,6 +33,7 @@ pub(crate) struct ModuleLevelResolveCtx {
 
 impl ModuleLevelResolveCtx {
     pub(crate) fn new(mctx: ModuleLevelTyResolveCtx, _hir: &Hir) -> RsvResult<Self> {
+        let pkg_name = mctx.pkg_name;
         let modpath = mctx.modpath;
         let types = mctx.types;
         let vals = mctx.vals;
@@ -66,7 +68,7 @@ impl ModuleLevelResolveCtx {
                     // import package::foo::bar; の場合
                     let vid = if import_decl.qualid.is_from_root {
                         ValId::new(
-                            PkgId::Internal,
+                            PkgId::new(pkg_name.clone()),
                             import_decl.qualid.quals.clone(),
                             import_decl.qualid.id.clone(),
                         )
@@ -75,7 +77,7 @@ impl ModuleLevelResolveCtx {
                         // モジュール自身が package::baz::qux.biwa ならば
                         // package::baz::qux::foo::bar に解決
                         ValId::new(
-                            PkgId::Internal,
+                            PkgId::new(pkg_name.clone()),
                             [modpath.clone().into(), import_decl.qualid.quals.clone()].concat(),
                             import_decl.qualid.id.clone(),
                         )
@@ -101,6 +103,7 @@ impl ModuleLevelResolveCtx {
         }
 
         Ok(Self {
+            pkg_name,
             modpath,
             imports,
             types,
@@ -116,14 +119,18 @@ impl ModuleLevelResolveCtx {
         let tid = if deftyp.qualid.is_from_root {
             // `package::hoge::fuga` の場合、直ちにOk
             TyId::new(
-                PkgId::Internal,
+                PkgId::new(self.pkg_name.clone()),
                 deftyp.qualid.quals.clone(),
                 deftyp.qualid.id.clone(),
             )
         } else if deftyp.qualid.quals.is_empty() {
             // `hoge` の場合
             if self.types.contains(&deftyp.qualid.id) {
-                TyId::from_modpath(PkgId::Internal, &self.modpath, deftyp.qualid.id.clone())
+                TyId::from_modpath(
+                    PkgId::new(self.pkg_name.clone()),
+                    &self.modpath,
+                    deftyp.qualid.id.clone(),
+                )
             } else if let Some((import_decl, sym)) = self.imports.get(&deftyp.qualid.id) {
                 match sym {
                     ImportedSym::Ty(tid) => tid.clone(),
@@ -148,7 +155,7 @@ impl ModuleLevelResolveCtx {
             {
                 // 現在のモジュールからの相対パス
                 TyId::new(
-                    PkgId::Internal,
+                    PkgId::new(self.pkg_name.clone()),
                     [self.modpath.clone().into(), deftyp.qualid.quals.clone()].concat(),
                     deftyp.qualid.id.clone(),
                 )
@@ -156,7 +163,7 @@ impl ModuleLevelResolveCtx {
                 // 外部 package であると仮定
                 if deftyp.qualid.quals.len() == 1 {
                     TyId::new(
-                        PkgId::External(
+                        PkgId::new(
                             PackageName::from_str(&deftyp.qualid.quals[0])
                                 .map_err(ResolveError::PackageNameError)?,
                         ),
@@ -165,7 +172,7 @@ impl ModuleLevelResolveCtx {
                     )
                 } else {
                     TyId::new(
-                        PkgId::External(
+                        PkgId::new(
                             PackageName::from_str(&deftyp.qualid.quals[0])
                                 .map_err(ResolveError::PackageNameError)?,
                         ),
@@ -183,7 +190,11 @@ impl ModuleLevelResolveCtx {
                     module.pop(); // hoge::fuga -> hoge
                     let quals: Vec<String> = [module, deftyp.qualid.quals.clone()].concat();
 
-                    TyId::new(PkgId::Internal, quals, deftyp.qualid.id.clone())
+                    TyId::new(
+                        PkgId::new(self.pkg_name.clone()),
+                        quals,
+                        deftyp.qualid.id.clone(),
+                    )
                 }
                 ImportedSym::Ty(_) => {
                     // error
@@ -200,7 +211,7 @@ impl ModuleLevelResolveCtx {
         {
             // 現在のモジュールからの相対パス
             TyId::new(
-                PkgId::Internal,
+                PkgId::new(self.pkg_name.clone()),
                 [self.modpath.clone().into(), deftyp.qualid.quals.clone()].concat(),
                 deftyp.qualid.id.clone(),
             )
@@ -208,7 +219,7 @@ impl ModuleLevelResolveCtx {
             // 外部 package であると仮定
             if deftyp.qualid.quals.len() == 1 {
                 TyId::new(
-                    PkgId::External(
+                    PkgId::new(
                         PackageName::from_str(&deftyp.qualid.quals[0])
                             .map_err(ResolveError::PackageNameError)?,
                     ),
@@ -217,7 +228,7 @@ impl ModuleLevelResolveCtx {
                 )
             } else {
                 TyId::new(
-                    PkgId::External(
+                    PkgId::new(
                         PackageName::from_str(&deftyp.qualid.quals[0])
                             .map_err(ResolveError::PackageNameError)?,
                     ),
@@ -261,7 +272,7 @@ impl ModuleLevelResolveCtx {
         let vid = if qualid.is_from_root {
             // `package::hoge::fuga` の場合、直ちにOk
             RsvResult::Ok(ValId::new(
-                PkgId::Internal,
+                PkgId::new(self.pkg_name.clone()),
                 qualid.quals.clone(),
                 qualid.id.clone(),
             ))
@@ -269,7 +280,7 @@ impl ModuleLevelResolveCtx {
             // `hoge` の場合
             if self.vals.contains(&qualid.id) {
                 Ok(ValId::from_modpath(
-                    PkgId::Internal,
+                    PkgId::new(self.pkg_name.clone()),
                     &self.modpath,
                     qualid.id.clone(),
                 ))
@@ -297,7 +308,7 @@ impl ModuleLevelResolveCtx {
             {
                 // 現在のモジュールからの相対パス
                 Ok(ValId::new(
-                    PkgId::Internal,
+                    PkgId::new(self.pkg_name.clone()),
                     [self.modpath.clone().into(), qualid.quals.clone()].concat(),
                     qualid.id.clone(),
                 ))
@@ -305,7 +316,7 @@ impl ModuleLevelResolveCtx {
                 // 外部 package であると仮定
                 if qualid.quals.len() == 1 {
                     Ok(ValId::new(
-                        PkgId::External(
+                        PkgId::new(
                             PackageName::from_str(&qualid.quals[0])
                                 .map_err(ResolveError::PackageNameError)?,
                         ),
@@ -314,7 +325,7 @@ impl ModuleLevelResolveCtx {
                     ))
                 } else {
                     Ok(ValId::new(
-                        PkgId::External(
+                        PkgId::new(
                             PackageName::from_str(&qualid.quals[0])
                                 .map_err(ResolveError::PackageNameError)?,
                         ),
@@ -331,7 +342,11 @@ impl ModuleLevelResolveCtx {
                     module.pop(); // hoge::fuga -> hoge
                     let quals: Vec<String> = [module, qualid.quals.clone()].concat();
 
-                    Ok(ValId::new(PkgId::Internal, quals, qualid.id.clone()))
+                    Ok(ValId::new(
+                        PkgId::new(self.pkg_name.clone()),
+                        quals,
+                        qualid.id.clone(),
+                    ))
                 }
                 ImportedSym::Ty(tid) => {
                     // `import hoge::fuga; fuga::piyo`
@@ -386,7 +401,7 @@ impl ModuleLevelResolveCtx {
         {
             // 現在のモジュールからの相対パス
             Ok(ValId::new(
-                PkgId::Internal,
+                PkgId::new(self.pkg_name.clone()),
                 [self.modpath.clone().into(), qualid.quals.clone()].concat(),
                 qualid.id.clone(),
             ))
@@ -394,7 +409,7 @@ impl ModuleLevelResolveCtx {
             // 外部 package であると仮定
             if qualid.quals.len() == 1 {
                 Ok(ValId::new(
-                    PkgId::External(
+                    PkgId::new(
                         PackageName::from_str(&qualid.quals[0])
                             .map_err(ResolveError::PackageNameError)?,
                     ),
@@ -403,7 +418,7 @@ impl ModuleLevelResolveCtx {
                 ))
             } else {
                 Ok(ValId::new(
-                    PkgId::External(
+                    PkgId::new(
                         PackageName::from_str(&qualid.quals[0])
                             .map_err(ResolveError::PackageNameError)?,
                     ),
@@ -427,7 +442,7 @@ impl ModuleLevelResolveCtx {
         if !qualid.quals.is_empty() {
             // TODO: 正しくTyIdを構成
             let tid = TyId::new(
-                PkgId::Internal,
+                PkgId::new(self.pkg_name.clone()),
                 qualid.quals[..qualid.quals.len() - 1].to_vec(),
                 qualid.quals.last().unwrap().clone(),
             );

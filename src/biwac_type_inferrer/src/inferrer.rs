@@ -698,7 +698,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 Literal::String(_) => Ok(Ty::new(
                     TyKind::Defined(DefinedTy {
                         tid: TyId::new(
-                            PkgId::External(PackageName::from_str("std").unwrap()),
+                            PkgId::new(PackageName::from_str("std").unwrap()),
                             vec!["types".into(), "string".into()],
                             "String".into(),
                         ),

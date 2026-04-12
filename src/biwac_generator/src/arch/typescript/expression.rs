@@ -1,19 +1,18 @@
 use std::cell::Cell;
 
 use biwac_ast::{BinOperator, UnOperator};
-use biwac_base::PackageName;
 use biwac_hir::{
-    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, PkgId, Primary, TyId,
-    TyKind, VarIdKind,
+    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, TyId, TyKind,
+    VarIdKind,
 };
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
 
-impl Mangled for (&PackageName, &VarIdKind) {
+impl Mangled for VarIdKind {
     fn mangled(&self) -> String {
-        match self.1 {
-            VarIdKind::Global(vid) => (self.0, vid).mangled(),
+        match self {
+            VarIdKind::Global(vid) => vid.mangled(),
             VarIdKind::Local(var_id) => var_id.mangled(),
         }
     }
@@ -25,31 +24,25 @@ impl Mangled for LocVarId {
     }
 }
 
-impl Mangled for (&PackageName, &TyId, &str, &ImplValId) {
+impl Mangled for (&TyId, &str, &ImplValId) {
     fn mangled(&self) -> String {
         let mut result = String::from("_ZN");
 
-        match self.1.pkg() {
-            PkgId::Internal => {
-                result.push_str(&format!("{}{}", self.0.value().len(), self.0.value()));
-            }
-            PkgId::External(pkg) => {
-                result.push_str(&format!("{}{}", pkg.value().len(), pkg.value()));
-            }
-        }
+        let pkg_name_str = self.0.pkg().name().value();
+        result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
 
-        for q in self.1.quals() {
+        for q in self.0.quals() {
             result.push_str(&format!("{}{}", q.len(), q));
         }
 
-        result.push_str(&format!("{}{}", self.1.id().len(), self.1.id()));
+        result.push_str(&format!("{}{}", self.0.id().len(), self.0.id()));
 
-        result.push_str(&format!("{}{}", self.2.len(), self.2));
+        result.push_str(&format!("{}{}", self.1.len(), self.1));
 
         result.push_str(&format!(
             "{}G{}",
-            self.3.value().to_string().len() + 1,
-            self.3.value()
+            self.2.value().to_string().len() + 1,
+            self.2.value()
         ));
 
         result.push('E');
@@ -58,16 +51,16 @@ impl Mangled for (&PackageName, &TyId, &str, &ImplValId) {
     }
 }
 
-impl Mangled for (&PackageName, &TyKind, &str, &ImplValId) {
+impl Mangled for (&TyKind, &str, &ImplValId) {
     fn mangled(&self) -> String {
-        match self.1 {
+        match self.0 {
             TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
             TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
             TyKind::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
             TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
             TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-            TyKind::Int | TyKind::Float | TyKind::Bool => (self.1, self.2).mangled(),
-            TyKind::Defined(defined_ty) => (self.0, &defined_ty.tid, self.2, self.3).mangled(),
+            TyKind::Int | TyKind::Float | TyKind::Bool => (self.0, self.1).mangled(),
+            TyKind::Defined(defined_ty) => (&defined_ty.tid, self.1, self.2).mangled(),
         }
     }
 }
@@ -77,17 +70,14 @@ impl<'a> AsOxc<'a, oxc_span::Ident<'a>> for Callee {
         &'a self,
         _env: &mut super::FnAstBuildEnv<'a>,
         allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
+        _hir: &Hir,
     ) -> oxc_span::Ident<'a> {
         match self {
             Self::Var(_) => todo!(),
-            Self::Fn(vid) => {
-                oxc_span::Ident::new_const(allocator.alloc_str(&(&hir.pkg_name, vid).mangled()))
-            }
+            Self::Fn(vid) => oxc_span::Ident::new_const(allocator.alloc_str(&vid.mangled())),
             Self::Assoc(assoc_callee) => oxc_span::Ident::new_const(
                 allocator.alloc_str(
                     &(
-                        &hir.pkg_name,
                         &assoc_callee.ty.kind,
                         assoc_callee.assoc.as_str(),
                         &assoc_callee.impl_vid,
@@ -240,9 +230,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                     oxc_ast::ast::Expression::Identifier(oxc_allocator::Box::new_in(
                         oxc_ast::ast::IdentifierReference {
                             span: span(),
-                            name: oxc_span::Ident::new_const(
-                                allocator.alloc_str(&(&hir.pkg_name, &v.id).mangled()),
-                            ),
+                            name: oxc_span::Ident::new_const(allocator.alloc_str(&v.id.mangled())),
                             reference_id: Cell::new(None),
                         },
                         allocator,
@@ -334,13 +322,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 .unwrap()
                                 .unwrap();
 
-                            (
-                                &hir.pkg_name,
-                                &defined_ty.tid,
-                                m.method.id.as_str(),
-                                &impl_valid,
-                            )
-                                .mangled()
+                            (&defined_ty.tid, m.method.id.as_str(), &impl_valid).mangled()
                         }
                         TyKind::Infer(_) => {
                             panic!("compiler bug: failed to infer type of expression")

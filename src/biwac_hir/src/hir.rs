@@ -140,6 +140,11 @@ pub struct TyExistence {
     pub genarg_len: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PkgId {
+    name: PackageName,
+}
+
 impl Hir {
     pub fn new(
         pkg_name: PackageName,
@@ -1005,5 +1010,15 @@ impl Progressive<TyExistence, TyDefContentKind> {
                 }),
             },
         }
+    }
+}
+
+impl PkgId {
+    pub fn new(name: PackageName) -> Self {
+        Self { name }
+    }
+
+    pub fn name(&self) -> &PackageName {
+        &self.name
     }
 }

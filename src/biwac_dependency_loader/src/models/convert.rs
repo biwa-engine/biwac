@@ -72,7 +72,7 @@ impl DepsTy {
             Self::Void => TyKind::Void,
             Self::Defined { id, genargs } => TyKind::Defined(DefinedTy {
                 tid: TyId::new(
-                    PkgId::External(id.pkg.clone()),
+                    PkgId::new(id.pkg.clone()),
                     id.modu.clone().into(),
                     id.id.clone(),
                 ),

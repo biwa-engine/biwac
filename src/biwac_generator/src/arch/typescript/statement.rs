@@ -92,7 +92,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                     oxc_ast::ast::IdentifierReference{
                                                         span: span(),
                                                         name: oxc_span::Ident::new_const(
-                                                            allocator.alloc_str(&(&hir.pkg_name, &v.id).mangled())
+                                                            allocator.alloc_str(&v.id.mangled())
                                                         ),
                                                         reference_id: Cell::new(None)
                                                     }, allocator)

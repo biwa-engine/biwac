@@ -55,7 +55,7 @@ macro_rules! lang_item_ty {
         LangItem::new(
             LangItemKind::Ty {
                 tid: TyId {
-                    pkg: crate::PkgId::External(biwac_base::PackageName::from_str($pkg).unwrap()),
+                    pkg: crate::PkgId::new(biwac_base::PackageName::from_str($pkg).unwrap()),
                     quals: vec![
                         $(
                             $qual.to_string()
@@ -74,7 +74,7 @@ macro_rules! lang_item_fn {
     ( $pkg:literal ; $( $qual:literal ),* ; $id:literal ; [ $( $genarg:expr ),* ] ( $( $a:literal : $aty:expr ),* ) -> $rty:expr ) => {
         {
             let vid = ValId::new(
-                crate::PkgId::External(biwac_base::PackageName::from_str($pkg).unwrap()),
+                crate::PkgId::new(biwac_base::PackageName::from_str($pkg).unwrap()),
                 vec![
                     $(
                         $qual.to_string()
@@ -148,7 +148,7 @@ pub(crate) fn default_lang_items() -> Vec<LangItem> {
             [] (
                 "msg": TyKind::Defined(DefinedTy {
                     tid: TyId::new(
-                        crate::PkgId::External(PackageName::from_str("std").unwrap()),
+                        crate::PkgId::new(PackageName::from_str("std").unwrap()),
                         vec!["types".into(), "string".into(), ], "String".into()
                     ),
                     genargs: Vec::new() 
