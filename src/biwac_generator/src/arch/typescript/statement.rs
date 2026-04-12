@@ -73,7 +73,25 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                     allocator,
                 ))
             }
-            Stmt::If(_) => todo!(),
+            Stmt::If(if_stmt) => oxc_ast::ast::Statement::IfStatement(oxc_allocator::Box::new_in(
+                oxc_ast::ast::IfStatement{
+                    span: span(),
+                    test: if_stmt.cond.as_oxc(env, allocator, hir),
+                    consequent: oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::BlockStatement{
+                            span: span(),
+                            body: oxc_allocator::Vec::from_iter_in(
+                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc(env, allocator, hir)), allocator),
+                            scope_id: Cell::new(None),
+                        }, allocator)),
+                    alternate: if_stmt.els.as_ref().map(|els| oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::BlockStatement{
+                            span: span(),
+                            body: oxc_allocator::Vec::from_iter_in(
+                                els.stmts.iter().map(|stmt| stmt.as_oxc(env, allocator, hir)), allocator),
+                            scope_id: Cell::new(None),
+                        }, allocator))),
+                }, allocator)),
             Stmt::Block(_) => todo!(),
             Stmt::While(_) => todo!(),
             Stmt::Assign(assign) => {
@@ -112,7 +130,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                     },
                                                     allocator
                                                 )
-                                            )                        
+                                            )
                                         }
                                         _ => {
                                             panic!(
