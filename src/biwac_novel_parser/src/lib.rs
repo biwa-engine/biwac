@@ -30,6 +30,9 @@ pub enum NovelParseError {
     InvalidCloseLine {
         span: Span,
     },
+    CloseLineExpected {
+        span: Span,
+    },
 }
 
 #[derive(Debug)]

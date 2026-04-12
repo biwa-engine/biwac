@@ -29,47 +29,36 @@ impl<'src> NovelSourceStream<'src> {
 
         let mut stmts = Vec::new();
         loop {
-            match self.next_line() {
-                Some(NovelLineKind::BlockClose) => {
-                    // TODO: `}` 以降にトークンがないことを確認
+            let ss = self.consume_statements()?;
 
-                    let then_end = self.current_span(1);
+            if ss.is_empty() {
+                match self.line_kind() {
+                    Some(NovelLineKind::BlockClose) => {
+                        // TODO: `}` 以降にトークンがないことを確認
 
-                    return Ok(NovelIfStmt {
-                        span: Span::merge(&begin, &then_end),
-                        cond,
-                        then: NovelBlockStmt {
-                            stmts,
-                            span: Span::merge(&then_begin, &then_end),
-                        },
-                        els: None,
-                    });
-                }
-                Some(_) => {
-                    let ss = self.consume_statements()?;
+                        let then_end = self.current_span(1);
 
-                    if ss.is_empty() {
-                        if self.line_kind() == Some(NovelLineKind::BlockClose) {
-                            let then_end = self.current_span(1);
-
-                            return Ok(NovelIfStmt {
-                                span: Span::merge(&begin, &then_end),
-                                cond,
-                                then: NovelBlockStmt {
-                                    stmts,
-                                    span: Span::merge(&then_begin, &then_end),
-                                },
-                                els: None,
-                            });
-                        }
-                    } else {
-                        stmts.extend(ss);
+                        return Ok(NovelIfStmt {
+                            span: Span::merge(&begin, &then_end),
+                            cond,
+                            then: NovelBlockStmt {
+                                stmts,
+                                span: Span::merge(&then_begin, &then_end),
+                            },
+                            els: None,
+                        });
+                    }
+                    Some(_) => {
+                        panic!("compiler bug");
+                    }
+                    None => {
+                        return Err(NovelParseError::CloseLineExpected {
+                            span: self.current_span(1),
+                        });
                     }
                 }
-                None => {
-                    // error
-                    todo!()
-                }
+            } else {
+                stmts.extend(ss);
             }
         }
     }
