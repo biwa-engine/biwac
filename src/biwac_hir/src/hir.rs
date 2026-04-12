@@ -141,7 +141,11 @@ pub struct TyExistence {
 }
 
 impl Hir {
-    pub fn new(pkg_name: PackageName) -> Self {
+    pub fn new(
+        pkg_name: PackageName,
+        external_tys: HashMap<TyId, TyDefContentKind>,
+        external_vals: HashMap<ValId, FnDefContentSignature>,
+    ) -> Self {
         let mut lang_item_vals = HashMap::new();
         let mut lang_item_tys = HashMap::new();
 
@@ -174,8 +178,22 @@ impl Hir {
 
         Self {
             pkg_name,
-            vals: HashMap::new(),
-            tys: HashMap::new(),
+            vals: external_vals
+                .into_iter()
+                .map(|(vid, fsign)| (vid, ValDefContentKind::ExternalFn(Box::new(fsign))))
+                .collect(),
+            tys: external_tys
+                .into_iter()
+                .map(|(tid, ty)| {
+                    (
+                        tid,
+                        DefinedTyImpl {
+                            ty_content: Progressive::Completed(ty),
+                            vals: HashMap::new(),
+                        },
+                    )
+                })
+                .collect(),
             special_ty_impls: HashMap::new(),
             modules: HashSet::new(),
             module_global_natives: HashMap::new(),
@@ -192,14 +210,12 @@ impl Hir {
     }
 
     // 型の存在を登録する
+    // NOTE: 型はすべて、その存在自体は値名前空間の登録よりも前に行われなければならない
     pub fn register_type_existence(
         &mut self,
         tid: TyId,
         ty_existence: TyExistence,
     ) -> HirResult<()> {
-        // NOTE: 型はすべて、その存在自体は値名前空間の登録よりも前に行われなければならない
-        assert!(self.vals.is_empty());
-
         match self.tys.entry(tid.clone()) {
             Entry::Vacant(e) => {
                 e.insert(DefinedTyImpl {
@@ -276,26 +292,16 @@ impl Hir {
             Entry::Occupied(e) => Err(HirError::DuplicatedValueName {
                 vid: Box::new(vid),
                 defined_position1: Box::new(match &e.get() {
-                    ValDefContentKind::Fn(f) => SSpan::Span {
-                        span: f.fn_name_span.clone(),
-                    },
-                    ValDefContentKind::Native(f) => SSpan::Span {
-                        span: f.fn_name_span.clone(),
-                    },
-                    ValDefContentKind::NovelScene(n) => SSpan::Span {
-                        span: n.scene_name_span.clone(),
-                    },
+                    ValDefContentKind::Fn(f) => f.fn_name_span.clone().into(),
+                    ValDefContentKind::Native(f) => f.fn_name_span.clone().into(),
+                    ValDefContentKind::NovelScene(n) => n.scene_name_span.clone().into(),
+                    ValDefContentKind::ExternalFn(f) => f.span.clone(),
                 }),
                 defined_position2: Box::new(match val_content {
-                    ValDefContentKind::Fn(f) => SSpan::Span {
-                        span: f.fn_name_span.clone(),
-                    },
-                    ValDefContentKind::Native(f) => SSpan::Span {
-                        span: f.fn_name_span.clone(),
-                    },
-                    ValDefContentKind::NovelScene(n) => SSpan::Span {
-                        span: n.scene_name_span.clone(),
-                    },
+                    ValDefContentKind::Fn(f) => f.fn_name_span.clone().into(),
+                    ValDefContentKind::Native(f) => f.fn_name_span.clone().into(),
+                    ValDefContentKind::NovelScene(n) => n.scene_name_span.clone().into(),
+                    ValDefContentKind::ExternalFn(f) => f.span.clone(),
                 }),
             }),
         }
@@ -336,6 +342,9 @@ impl Hir {
             },
             ValDefContentKind::Native(_) => {
                 panic!("compiler bug: native function cannot be registered its body")
+            }
+            ValDefContentKind::ExternalFn(_) => {
+                panic!("compiler bug: external function cannot be registered its body")
             }
         }
     }
@@ -921,6 +930,7 @@ impl Hir {
                 ValDefContentKind::Fn(f) => Some(&f.signature),
                 ValDefContentKind::Native(f) => Some(&f.signature),
                 ValDefContentKind::NovelScene(n) => Some(&n.signature),
+                ValDefContentKind::ExternalFn(f) => Some(f),
             },
 
             // コンパイル対象の vals の中になければ

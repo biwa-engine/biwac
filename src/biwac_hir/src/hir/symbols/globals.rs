@@ -66,6 +66,7 @@ pub enum ValDefContentKind {
     Fn(Box<FnDefContent>),
     Native(Box<NativeFnDefContent>),
     NovelScene(Box<NovelSceneDefContent>),
+    ExternalFn(Box<FnDefContentSignature>),
 }
 
 // impl block 内での

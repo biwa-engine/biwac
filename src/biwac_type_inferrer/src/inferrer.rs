@@ -600,7 +600,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     if let Some(definition_ty) = struct_.members.get(*id).cloned() {
                         let user_ty = self.infer_expr(expr)?;
                         self.defined_ty_unify(
-                            Ty::new(definition_ty.kind, ident.span.clone().into()),
+                            Ty::new(definition_ty.kind, ident.span.clone()),
                             user_ty,
                             &mut dtctx,
                         )?;
@@ -1212,7 +1212,7 @@ impl TyCtx {
                         self.infer_fn_body(n.body.expect_completed(), &n.signature)?,
                     ));
                 }
-                ValDefContentKind::Native(_) => {
+                ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
                     // nothing to do
                 }
             }
@@ -1234,7 +1234,7 @@ impl TyCtx {
                     n.expr_tys = ty_info.expr_tys;
                     n.var_tys = ty_info.var_tys;
                 }
-                ValDefContentKind::Native(_) => {
+                ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
                     // nothing to do
                 }
             }

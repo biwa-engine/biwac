@@ -104,14 +104,17 @@ pub fn generate(hir: &Hir) -> String {
                     }
                 })
             }))
-            .chain(hir.vals.iter().map(|(vid, val)| match val {
-                ValDefContentKind::Fn(f) => f.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir),
+            .chain(hir.vals.iter().flat_map(|(vid, val)| match val {
+                ValDefContentKind::Fn(f) => {
+                    Some(f.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir))
+                }
                 ValDefContentKind::Native(f) => {
-                    f.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir)
+                    Some(f.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir))
                 }
                 ValDefContentKind::NovelScene(n) => {
-                    n.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir)
+                    Some(n.as_oxc_global(&(&hir.pkg_name, vid), &allocator, hir))
                 }
+                ValDefContentKind::ExternalFn(_) => None,
             })),
         &allocator,
     ));

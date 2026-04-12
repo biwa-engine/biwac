@@ -7,7 +7,7 @@ use biwac_ast::{DefTyp, ImportDecl, QualifiedId};
 use biwac_base::{ModPath, PackageName, Span};
 use biwac_hir::{
     AssocCallee, DefinedTy, Hir, InferTy, PkgId, Ty, TyDefContentKind, TyExistence, TyId, TyKind,
-    ValDefContentKind, ValId,
+    ValId,
 };
 
 use crate::{
@@ -414,12 +414,8 @@ impl ModuleLevelResolveCtx {
         }?;
 
         // パッケージ内の存在確認
-        let err = if let Some(val) = hir.vals.get(&vid) {
-            return match val {
-                ValDefContentKind::Fn(_) => Ok(ResolvedValue::Global(vid)),
-                ValDefContentKind::NovelScene(_) => Ok(ResolvedValue::Global(vid)),
-                ValDefContentKind::Native(_) => Ok(ResolvedValue::Global(vid)),
-            };
+        let err = if hir.vals.contains_key(&vid) {
+            return Ok(ResolvedValue::Global(vid));
         } else {
             Err(ResolveError::ValueNotFound {
                 qualid: Box::new(qualid.clone()),

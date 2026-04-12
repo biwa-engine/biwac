@@ -5,10 +5,11 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use biwac_ast::{DefTyp, ImportDecl, QualifiedId, TypeDef};
-use biwac_base::{ModPath, PackageName, PackageNameError, Span};
+use biwac_base::{ModPath, PackageName, PackageNameError, SSpan, Span};
+use biwac_dependency_loader::DepsSymbolKind;
 use biwac_hir::{
     Hir, HirError, Ident, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId,
     StructDefContent, Ty, TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
@@ -119,6 +120,9 @@ pub enum ResolveError {
     DependsOnSamePackageName {
         pkg: PackageName,
     },
+    DuplicatedDepsPackageName {
+        pkg: PackageName,
+    },
     PackageNameError(PackageNameError), // CanNotBeImplementedForType {
                                         //     typ: Typ,
                                         // },
@@ -194,6 +198,17 @@ impl ResolveCtx {
         metadata: &biwac_base::PackageMetadata,
         deps: &biwac_dependency_loader::Deps,
     ) -> Result<Self, ResolveError> {
+        // dependencies に重複したパッケージ名がないか検査
+        let mut dep_pkg_names = HashSet::new();
+        for pkg in &metadata.dependencies {
+            if !dep_pkg_names.insert(pkg.name.value()) {
+                // not newly inserted
+                return Err(ResolveError::DuplicatedDepsPackageName {
+                    pkg: pkg.name.clone(),
+                });
+            }
+        }
+
         // dependency list file にすべての依存パッケージが記述されていることを検査
         let deps_pkgs: HashMap<_, _> = deps
             .deps_pkgs
@@ -215,8 +230,43 @@ impl ResolveCtx {
             });
         }
 
+        // パッケージ名に重複がないことを検査済みのため、
+        // パッケージ内で重複がない限り、シンボルの重複は起こり得ない
+        let mut external_vals = HashMap::new();
+        let mut external_tys = HashMap::new();
+        for pkg in &deps.deps_pkgs {
+            for sym in &pkg.symbols {
+                let span = SSpan::External {
+                    pkg: pkg.name.clone(),
+                    modu: sym.id.modu.clone(),
+                };
+                match &sym.body {
+                    DepsSymbolKind::Struct(struct_) => {
+                        external_tys.insert(
+                            TyId::new(
+                                PkgId::External(pkg.name.clone()),
+                                sym.id.modu.clone().into(),
+                                sym.id.id.clone(),
+                            ),
+                            TyDefContentKind::Struct(Box::new(struct_.as_struct_def(span))),
+                        );
+                    }
+                    DepsSymbolKind::Function(fn_sign) => {
+                        external_vals.insert(
+                            ValId::new(
+                                PkgId::External(pkg.name.clone()),
+                                sym.id.modu.clone().into(),
+                                sym.id.id.clone(),
+                            ),
+                            fn_sign.as_fn_signature(span),
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(Self {
-            hir: Hir::new(metadata.name.clone()),
+            hir: Hir::new(metadata.name.clone(), external_tys, external_vals),
             pkg_name: metadata.name.clone(),
         })
     }
@@ -606,7 +656,7 @@ impl ResolveCtx {
                         }
                     }
                 }
-                ValDefContentKind::Native(_) => {
+                ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
                     // nothing to do
                 }
             }
