@@ -7,11 +7,11 @@ mod tests;
 
 use std::collections::HashMap;
 
-use biwac_ast::{DefTyp, Ident, ImportDecl, QualifiedId, TypeDef};
+use biwac_ast::{DefTyp, ImportDecl, QualifiedId, TypeDef};
 use biwac_base::{ModPath, PackageName, PackageNameError, Span};
 use biwac_hir::{
-    Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId, StructDefContent, Ty,
-    TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
+    Hir, HirError, Ident, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId,
+    StructDefContent, Ty, TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
 };
 use biwac_package_loader::Pkg;
 
@@ -88,8 +88,8 @@ pub enum ResolveError {
         fid2: Box<Ident>,
     },
     DuplicatedTypeName {
-        tid1: Box<Ident>,
-        tid2: Box<Ident>,
+        tid1: Box<biwac_ast::Ident>,
+        tid2: Box<biwac_ast::Ident>,
     },
     DuplicatedVarName {
         vid1: Box<Ident>,
@@ -331,7 +331,12 @@ impl ResolveCtx {
                                 TyDefContentKind::NativeTypeAlias(Box::new(
                                     NativeTypeAliasDefContent {
                                         alias_name_span: native.ident.span.clone(),
-                                        genargs: native.genargs.clone(),
+                                        genargs: native
+                                            .genargs
+                                            .clone()
+                                            .into_iter()
+                                            .map(|g| g.into())
+                                            .collect(),
                                         native: native.native.clone(),
                                         native_span: native.native_span.clone(),
                                     },

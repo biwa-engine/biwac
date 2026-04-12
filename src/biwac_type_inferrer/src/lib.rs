@@ -3,8 +3,10 @@ mod inferrer;
 #[cfg(test)]
 mod tests;
 
-use biwac_ast::{BinOperator, Ident, UnOperator};
-use biwac_hir::{AssignStmt, Expr, FnTy, HirError, MemberAccess, StructLiteral, Ty, TyId, TyVar};
+use biwac_ast::{BinOperator, UnOperator};
+use biwac_hir::{
+    AssignStmt, Expr, FnTy, HirError, Ident, MemberAccess, StructLiteral, Ty, TyId, TyVar,
+};
 
 pub use crate::inferrer::context::TyCtx;
 

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_ast::{DefTyp, Ident, TypRepr, TypReprVal};
+use biwac_ast::{DefTyp, TypRepr, TypReprVal};
 use biwac_base::Span;
-use biwac_hir::{DefinedTy, Hir, InferTy, LocGenTyId, Ty, TyKind};
+use biwac_hir::{DefinedTy, Hir, Ident, InferTy, LocGenTyId, Ty, TyKind};
 
 use crate::{
     ResolveError, RsvResult,
@@ -31,10 +31,10 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
 
     pub(crate) fn new(
         mctx: &'mctx ModuleLevelTyResolveCtx,
-        impl_block_genargs: &Vec<Ident>,
+        impl_block_genargs: &Vec<biwac_ast::Ident>,
     ) -> RsvResult<Self> {
         let mut next_gen_id = 0;
-        let mut impl_block_genarg_map = HashMap::<String, (LocGenTyId, Ident)>::new();
+        let mut impl_block_genarg_map = HashMap::<String, (LocGenTyId, biwac_ast::Ident)>::new();
         let mut impl_block_genarg_vec = vec![];
 
         for ident in impl_block_genargs {
@@ -42,13 +42,13 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
                 Entry::Vacant(e) => {
                     let id = LocGenTyId::new(next_gen_id);
                     next_gen_id += 1;
-                    e.insert((id, ident.clone()));
-                    impl_block_genarg_vec.push((ident.clone(), id));
+                    e.insert((id, ident.clone().into()));
+                    impl_block_genarg_vec.push((ident.clone().into(), id));
                 }
                 Entry::Occupied(e) => {
                     return Err(ResolveError::DuplicatedGenericTypeDeclaration {
-                        tid1: Box::new(e.get().1.clone()),
-                        tid2: Box::new(ident.clone()),
+                        tid1: Box::new(e.get().1.clone().into()),
+                        tid2: Box::new(ident.clone().into()),
                     });
                 }
             }

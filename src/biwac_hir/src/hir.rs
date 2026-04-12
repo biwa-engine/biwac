@@ -3,12 +3,11 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 pub(crate) mod symbols;
 pub(crate) mod types;
 
-use biwac_ast::Ident;
 use biwac_base::{ModPath, PackageName, SSpan, Span};
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, GenTyId, HirError,
-    HirResult, ImplValDefContentKind, InferTy, LocGenTyId, NativeCode, StructDefContent, Ty,
+    HirResult, Ident, ImplValDefContentKind, InferTy, LocGenTyId, NativeCode, StructDefContent, Ty,
     TyDefContentKind, TyId, TyKind, ValDefContentKind, ValId,
 };
 
@@ -348,7 +347,7 @@ impl Hir {
         &mut self,
         ty: TyKind,
         impl_block_genargs: HashMap<String, (LocGenTyId, Span)>,
-        ident: &Ident,
+        ident: &biwac_ast::Ident,
         val_content: ImplValDefContentKind,
     ) -> HirResult<()> {
         match ty {
@@ -680,14 +679,14 @@ impl Hir {
                             ImplValDefContentKind::Fn(_) => {
                                 Err(HirError::ImplementedValueIsNotMethod {
                                     ty: Box::new(ty.clone()),
-                                    method: Box::new(method.clone()),
+                                    method: Box::new(method.clone().into()),
                                     val_content: Box::new(impl_.val_content.clone()),
                                 })
                             }
                             ImplValDefContentKind::NativeFn(_) => {
                                 Err(HirError::ImplementedValueIsNotMethod {
                                     ty: Box::new(ty.clone()),
-                                    method: Box::new(method.clone()),
+                                    method: Box::new(method.clone().into()),
                                     val_content: Box::new(impl_.val_content.clone()),
                                 })
                             }
@@ -777,14 +776,14 @@ impl Hir {
                         ImplValDefContentKind::Fn(_) => {
                             Err(HirError::ImplementedValueIsNotMethod {
                                 ty: Box::new(ty.clone()),
-                                method: Box::new(method.clone()),
+                                method: Box::new(method.clone().into()),
                                 val_content: Box::new(val.clone()),
                             })
                         }
                         ImplValDefContentKind::NativeFn(_) => {
                             Err(HirError::ImplementedValueIsNotMethod {
                                 ty: Box::new(ty.clone()),
-                                method: Box::new(method.clone()),
+                                method: Box::new(method.clone().into()),
                                 val_content: Box::new(val.clone()),
                             })
                         }

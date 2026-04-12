@@ -1,4 +1,3 @@
-use biwac_ast::Ident;
 use biwac_hir::{
     BinaryExpr, BlockExpr, Callee, Expr, ExprVal, FnCall, IfExpr, Literal, MemberAccess,
     MethodCall, Primary, Stmt, StructLiteral, TyKind, UnaryExpr, Variable,
@@ -98,7 +97,7 @@ impl TryResolve<&biwac_ast::MemberAccess> for MemberAccess {
         Ok(Self {
             span: value.span(),
             left: Box::new(Expr::try_resolve(&value.left, fctx, hir)?),
-            member: value.member.clone(),
+            member: value.member.clone().into(),
         })
     }
 }
@@ -112,7 +111,7 @@ impl TryResolve<&biwac_ast::MethodCall> for MethodCall {
         Ok(Self {
             span: value.span.clone(),
             left: Box::new(Expr::try_resolve(&value.left, fctx, hir)?),
-            method: value.method.clone(),
+            method: value.method.clone().into(),
             args: value
                 .args
                 .iter()
@@ -151,10 +150,10 @@ impl TryResolve<&biwac_ast::Literal> for Literal {
                     .members
                     .iter()
                     .map(|(ident, expr)| match Expr::try_resolve(expr, fctx, hir) {
-                        Ok(expr) => Ok((ident.clone(), expr)),
+                        Ok(expr) => Ok((ident.clone().into(), expr)),
                         Err(e) => Err(e),
                     })
-                    .collect::<RsvResult<Vec<(Ident, Expr)>>>()?,
+                    .collect::<RsvResult<Vec<(biwac_hir::Ident, Expr)>>>()?,
                 span: s.span.clone(),
             })),
         }

@@ -35,8 +35,8 @@ impl<'mctx> TyDefLevelTyResolveCtx<'mctx> {
                 }
                 Entry::Occupied(e) => {
                     return Err(ResolveError::DuplicatedGenericTypeDeclaration {
-                        tid1: Box::new(e.get().1.clone()),
-                        tid2: Box::new(ident.clone()),
+                        tid1: Box::new(e.get().1.clone().into()),
+                        tid2: Box::new(ident.clone().into()),
                     });
                 }
             }

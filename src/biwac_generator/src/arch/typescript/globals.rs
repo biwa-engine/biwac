@@ -58,7 +58,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructD
                     oxc_ast::ast::TSTypeLiteral {
                         span: span(),
                         members: oxc_allocator::Vec::from_iter_in(
-                            self.members.iter().map(|(id, (ty, _))| {
+                            self.members.iter().map(|(id, ty)| {
                                 oxc_ast::ast::TSSignature::TSPropertySignature(
                                     oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSPropertySignature {

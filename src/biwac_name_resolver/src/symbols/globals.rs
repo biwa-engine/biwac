@@ -53,7 +53,7 @@ impl TryResolve<(&biwac_ast::MethodDef, &biwac_hir::FnDefContentSignature)> for 
         // selfは含まない残りの引数も変数の宣言として記録
         let self_ty = fctx.try_resolve_ty(&method_def.self_typ, hir)?;
         let arg_var_ids = [
-            vec![fctx.declare_variable(&method_def.self_ident, self_ty)?],
+            vec![fctx.declare_variable(&method_def.self_ident.clone().into(), self_ty)?],
             fn_signature
                 .args
                 .iter()
@@ -99,11 +99,7 @@ impl ModuleLevelTryResolveTy<&biwac_ast::StructDef> for biwac_hir::StructDefCont
             members: struct_
                 .members
                 .iter()
-                .map(|(id, typ)| {
-                    tgctx
-                        .try_resolve_ty(typ, hir)
-                        .map(|ty| (id.id.clone(), (ty, id.span.clone().into())))
-                })
+                .map(|(id, typ)| tgctx.try_resolve_ty(typ, hir).map(|ty| (id.id.clone(), ty)))
                 .collect::<Result<HashMap<_, _>, ResolveError>>()?,
             genargs: tgctx.ty_def_genarg_vec,
             struct_name_span: struct_.id.span.clone().into(),
@@ -141,7 +137,7 @@ impl TryResolveTy<(&biwac_ast::ArgDeclList, &biwac_ast::RetTypRepr)>
             .0
             .args
             .iter()
-            .map(|arg| Ok((arg.id.clone(), fctx.try_resolve_ty(&arg.typ, hir)?)))
+            .map(|arg| Ok((arg.id.clone().into(), fctx.try_resolve_ty(&arg.typ, hir)?)))
             .collect::<RsvResult<Vec<_>>>()?;
 
         let (rty, rty_span) = match &value.1 {

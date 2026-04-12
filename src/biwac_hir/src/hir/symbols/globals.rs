@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
-use biwac_ast::{
-    FnDef, Ident, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef,
-};
+use biwac_ast::{FnDef, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef};
 use biwac_base::{ModPath, PackageName, SSpan, Span};
 
-use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
+use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, Progressive, Stmt, Ty};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PkgId {
@@ -206,7 +204,7 @@ pub enum TyDefContentKind {
 
 #[derive(Debug, Clone)]
 pub struct StructDefContent {
-    pub members: HashMap<String, (Ty, SSpan)>,
+    pub members: HashMap<String, Ty>,
     pub genargs: Vec<GenTyId>,
     // TODO: その他各種情報
     pub struct_name_span: SSpan,

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_ast::{Ident, TypRepr, TypReprVal};
+use biwac_ast::{TypRepr, TypReprVal};
 use biwac_hir::{Hir, LocGenTyId, Ty, TyKind};
 
 use crate::{
@@ -12,16 +12,16 @@ use crate::{
 pub(crate) struct FnLevelTyResolveCtx<'ictx> {
     ictx: &'ictx ImplLevelTyResolveCtx<'ictx>,
     fn_def_genargs: HashMap<String, LocGenTyId>,
-    pub(crate) fn_def_genarg_vec: Vec<(Ident, LocGenTyId)>,
+    // pub(crate) fn_def_genarg_vec: Vec<(Ident, LocGenTyId)>,
 }
 
 impl<'ictx> FnLevelTyResolveCtx<'ictx> {
     pub(crate) fn new(
         ictx: &'ictx ImplLevelTyResolveCtx<'ictx>,
-        fn_def_genargs: &Vec<Ident>,
+        fn_def_genargs: &Vec<biwac_ast::Ident>,
     ) -> RsvResult<Self> {
         let mut next_gen_id = 0;
-        let mut fn_def_genarg_map = HashMap::<String, (LocGenTyId, Ident)>::new();
+        let mut fn_def_genarg_map = HashMap::<String, (LocGenTyId, biwac_ast::Ident)>::new();
         let mut fn_def_genarg_vec = Vec::new();
 
         for ident in fn_def_genargs {
@@ -34,8 +34,8 @@ impl<'ictx> FnLevelTyResolveCtx<'ictx> {
                 }
                 Entry::Occupied(e) => {
                     return Err(ResolveError::DuplicatedGenericTypeDeclaration {
-                        tid1: Box::new(e.get().1.clone()),
-                        tid2: Box::new(ident.clone()),
+                        tid1: Box::new(e.get().1.clone().into()),
+                        tid2: Box::new(ident.clone().into()),
                     });
                 }
             }
@@ -47,7 +47,7 @@ impl<'ictx> FnLevelTyResolveCtx<'ictx> {
                 .into_iter()
                 .map(|(name, (id, _))| (name, id))
                 .collect::<HashMap<_, _>>(),
-            fn_def_genarg_vec,
+            // fn_def_genarg_vec,
         })
     }
 

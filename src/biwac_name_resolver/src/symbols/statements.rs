@@ -104,7 +104,7 @@ impl TryResolve<&biwac_ast::VarDecl> for VarDecl {
                 value.id.span.clone().into(),
             ), // 型が不明で推論を要する
         };
-        let id = fctx.declare_variable(&value.id, ty)?;
+        let id = fctx.declare_variable(&value.id.clone().into(), ty)?;
 
         Ok(Self {
             id,

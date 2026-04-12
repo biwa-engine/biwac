@@ -1,14 +1,14 @@
-use biwac_ast::{BinOperator, BoolLiteral, Ident, IntegerLiteral, StringLiteral, UnOperator};
+use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
 use biwac_base::Span;
 
-use crate::{ImplValId, LocVarId, Stmt, Ty, TyId, ValId};
+use crate::{Ident, ImplValId, LocVarId, Stmt, Ty, TyId, ValId};
 
 // ExprId
 // function local expression id
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ExprId(usize);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub expr: ExprVal,
     pub id: ExprId,
@@ -20,7 +20,7 @@ impl ExprId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ExprVal {
     Primary(Primary),
     Unary(UnaryExpr),
@@ -37,7 +37,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Primary {
     Literal(Literal),
     Variable(Variable), // TODO: support using external module variables
@@ -48,14 +48,14 @@ pub enum Primary {
     MethodCall(MethodCall),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BlockExpr {
     pub stmts: Vec<Stmt>,
     pub expr: Box<Expr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct IfExpr {
     pub cond: Box<Expr>,
     pub then: BlockExpr,
@@ -90,7 +90,7 @@ impl Primary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     Integer(IntegerLiteral),
     // Float(f64),
@@ -110,14 +110,14 @@ impl Literal {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct StructLiteral {
     pub tid: TyId,
     pub members: Vec<(Ident, Expr)>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct FnCall {
     pub callee: Callee,
     pub args: Vec<Expr>,
@@ -158,14 +158,14 @@ pub struct AssocCallee {
     pub impl_vid: ImplValId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct MemberAccess {
     pub left: Box<Expr>,
     pub member: Ident,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct MethodCall {
     pub left: Box<Expr>,
     pub method: Ident,
@@ -173,7 +173,7 @@ pub struct MethodCall {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BinaryExpr {
     pub op: BinOperator,
     pub left: Box<Expr>,
@@ -186,7 +186,7 @@ impl BinaryExpr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct UnaryExpr {
     pub op: UnOperator,
     pub right: Box<Expr>,

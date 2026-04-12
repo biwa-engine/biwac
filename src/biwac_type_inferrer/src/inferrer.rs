@@ -5,13 +5,13 @@ use std::{
 
 pub(crate) mod context;
 
-use biwac_ast::{BinOperator, Ident, UnOperator};
+use biwac_ast::{BinOperator, UnOperator};
 use biwac_base::PackageName;
 use biwac_hir::{
     BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnDefContentBody,
-    FnDefContentSignature, FnTy, GenTyId, Hir, ImplValDefContentKind, InferTy, Literal, LocGenTyId,
-    MemberAccess, PkgId, Primary, Stmt, StructLiteral, Ty, TyDefContentKind, TyId, TyKind, TyVar,
-    ValDefContentKind, VarIdKind,
+    FnDefContentSignature, FnTy, GenTyId, Hir, Ident, ImplValDefContentKind, InferTy, Literal,
+    LocGenTyId, MemberAccess, PkgId, Primary, Stmt, StructLiteral, Ty, TyDefContentKind, TyId,
+    TyKind, TyVar, ValDefContentKind, VarIdKind,
 };
 
 use crate::{
@@ -597,7 +597,7 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                 let mut dtctx = DefinedTyCtx::default();
                 for (id, (ident, expr)) in &members {
-                    if let Some((definition_ty, _)) = struct_.members.get(*id).cloned() {
+                    if let Some(definition_ty) = struct_.members.get(*id).cloned() {
                         let user_ty = self.infer_expr(expr)?;
                         self.defined_ty_unify(
                             Ty::new(definition_ty.kind, ident.span.clone().into()),
@@ -974,7 +974,6 @@ impl<'tctx> FnTyCtx<'tctx> {
                                 tid: defined_ty.tid.clone(),
                                 access: Box::new(member_access.clone()),
                             })
-                            .map(|(ty, _)| ty)
                             .cloned()?;
 
                         // NOTE: ジェネリック型 TyKind::Gen(GenTyId) の場合、

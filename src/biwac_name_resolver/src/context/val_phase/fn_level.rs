@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_ast::{DefTyp, Ident, QualifiedId, TypRepr, TypReprVal};
+use biwac_ast::{DefTyp, QualifiedId, TypRepr, TypReprVal};
 use biwac_hir::{DecledVar, ExprId, Hir, LocGenTyId, LocVarId, Ty, TyKind, VarIdKind};
 
 use crate::{
@@ -30,7 +30,7 @@ pub(crate) struct FnLevelResolveCtx<'ictx> {
 impl<'ictx> FnLevelResolveCtx<'ictx> {
     pub(crate) fn new(
         ictx: &'ictx ImplLevelResolveCtx<'ictx>,
-        fn_def_genarg_vec: &[(Ident, LocGenTyId)],
+        fn_def_genarg_vec: &[(biwac_hir::Ident, LocGenTyId)],
     ) -> RsvResult<Self> {
         Ok(Self {
             ictx,
@@ -101,7 +101,11 @@ impl<'ictx> FnLevelResolveCtx<'ictx> {
         self.scopes.pop().expect("compiler bug: scope underflowed");
     }
 
-    pub(crate) fn declare_variable(&mut self, var: &Ident, ty: Ty) -> RsvResult<LocVarId> {
+    pub(crate) fn declare_variable(
+        &mut self,
+        var: &biwac_hir::Ident,
+        ty: Ty,
+    ) -> RsvResult<LocVarId> {
         match self.scopes.last_mut().unwrap().entry(var.id.clone()) {
             Entry::Vacant(e) => {
                 let var_id = LocVarId::new(self.next_var_id);
@@ -124,7 +128,11 @@ impl<'ictx> FnLevelResolveCtx<'ictx> {
     }
 
     // 変数名を解決する
-    pub(crate) fn try_resolve_variable(&self, ident: &Ident, hir: &Hir) -> RsvResult<VarIdKind> {
+    pub(crate) fn try_resolve_variable(
+        &self,
+        ident: &biwac_ast::Ident,
+        hir: &Hir,
+    ) -> RsvResult<VarIdKind> {
         // 先に関数ローカルで、内側のスコープから、解決を試みる
         for scope in self.scopes.iter().rev() {
             if let Some((_, var_id)) = scope.get(&ident.id) {

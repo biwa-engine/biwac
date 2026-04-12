@@ -1,12 +1,12 @@
 pub mod hir;
 mod lang_item;
 
-use biwac_ast::Ident;
 use biwac_base::SSpan;
 
 pub use crate::hir::{
     Hir, ImplValId, Progressive, TyExistence,
     symbols::{
+        Ident,
         expressions::{
             AssocCallee, BinaryExpr, BlockExpr, Callee, Expr, ExprId, ExprVal, FnCall, IfExpr,
             Literal, MemberAccess, MethodCall, Primary, StructLiteral, UnaryExpr, VarIdKind,

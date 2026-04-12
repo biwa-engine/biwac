@@ -101,16 +101,16 @@ macro_rules! lang_item_fn {
                                     ($a, $aty)
                                 ),*
                             ].into_iter()
-                            .map(|(id, kind): (&str, _)| (biwac_ast::Ident {
+                            .map(|(id, kind): (&str, _)| (crate::Ident {
                                     id: id.to_string(),
-                                    span: Span::new(ModPath::Mod(vec![
-                                        $(
-                                            $qual.to_string()
-                                        ),*
-                                    ]),
-                                    Pos::new(0, 0),
-                                    Pos::new(0, 0),
-                                    ),
+                                    span: biwac_base::SSpan::External{
+                                        pkg: biwac_base::PackageName::from_str($pkg).unwrap(),
+                                        modu: ModPath::Mod(vec![
+                                            $(
+                                                $qual.to_string()
+                                            ),*
+                                        ]),
+                                    },
                                 },
                                 Ty {
                                     kind,
