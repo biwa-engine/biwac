@@ -32,8 +32,8 @@ struct MyGameState {}
 struct MyGameCharacters {}
 
 scene scene1(
-    g: package::game::Game[MyGameCharacters, MyGameState]
-  ) -> package::game::Game[MyGameCharacters, MyGameState] {{
+    g: std::game::Game[MyGameCharacters, MyGameState]
+  ) -> std::game::Game[MyGameCharacters, MyGameState] {{
   Hello, World!
   #let x = native_add(1, 2)
   #if x > 2 {
