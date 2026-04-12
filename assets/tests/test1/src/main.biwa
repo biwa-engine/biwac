@@ -26,3 +26,21 @@ fn native_add(x: Int, y: Int) -> Int {{
   console.log("Hello, TypeScript World!");
   return x + y;
 }}
+
+struct MyGameState {}
+
+struct MyGameCharacters {}
+
+scene scene1(
+    g: package::game::Game[MyGameCharacters, MyGameState]
+  ) -> package::game::Game[MyGameCharacters, MyGameState] {{
+  Hello, World!
+  #let x = native_add(1, 2)
+  #if x > 2 {
+    Nice!
+  }
+
+  hogehoge~~~
+  
+  #endscene g
+}}

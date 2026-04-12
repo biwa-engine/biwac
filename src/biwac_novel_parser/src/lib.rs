@@ -27,6 +27,9 @@ pub enum NovelParseError {
     GeneralCommandLineOnlyPrefix {
         span: Span,
     },
+    InvalidCloseLine {
+        span: Span,
+    },
 }
 
 #[derive(Debug)]

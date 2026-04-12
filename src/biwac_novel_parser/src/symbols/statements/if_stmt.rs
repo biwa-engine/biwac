@@ -45,15 +45,27 @@ impl<'src> NovelSourceStream<'src> {
                         els: None,
                     });
                 }
-                Some(_) => match self.consume_statement()? {
-                    Some(stmt) => {
-                        stmts.push(stmt);
+                Some(_) => {
+                    let ss = self.consume_statements()?;
+
+                    if ss.is_empty() {
+                        if self.line_kind() == Some(NovelLineKind::BlockClose) {
+                            let then_end = self.current_span(1);
+
+                            return Ok(NovelIfStmt {
+                                span: Span::merge(&begin, &then_end),
+                                cond,
+                                then: NovelBlockStmt {
+                                    stmts,
+                                    span: Span::merge(&then_begin, &then_end),
+                                },
+                                els: None,
+                            });
+                        }
+                    } else {
+                        stmts.extend(ss);
                     }
-                    None => {
-                        // error
-                        todo!()
-                    }
-                },
+                }
                 None => {
                     // error
                     todo!()

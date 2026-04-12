@@ -8,7 +8,7 @@ use biwac_base::Span;
 use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 
 impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn consume_statement(&mut self) -> Result<Option<NovelStmt>, NovelParseError> {
+    pub(crate) fn consume_statements(&mut self) -> Result<Vec<NovelStmt>, NovelParseError> {
         self.next_line()
             .map(|line_kind| {
                 match line_kind {
@@ -19,22 +19,22 @@ impl<'src> NovelSourceStream<'src> {
 
                         let line = self.lines.get(self.cursor.lidx).unwrap();
 
-                        Ok(Some(NovelStmt::NovelWrite(NovelMessage {
+                        Ok(vec![NovelStmt::NovelWrite(NovelMessage {
                             msg: line.to_string(),
                             span: self.current_span(line.len()), // FIXME
-                        })))
+                        })])
                     }
                     NovelLineKind::GeneralCommand => match self.peek_token()? {
                         Some(t) => match t.kind {
                             NCodeTkKind::KwIf => {
-                                Ok(Some(NovelStmt::If(self.consume_if_statement()?)))
+                                Ok(vec![NovelStmt::If(self.consume_if_statement()?)])
                             }
-                            NCodeTkKind::KwLet => Ok(Some(NovelStmt::VarDecl(
+                            NCodeTkKind::KwLet => Ok(vec![NovelStmt::VarDecl(
                                 self.consume_variable_declaration_statment()?,
-                            ))),
-                            NCodeTkKind::KwEndScene => Ok(Some(NovelStmt::NovelEndScene(
+                            )]),
+                            NCodeTkKind::KwEndScene => Ok(vec![NovelStmt::NovelEndScene(
                                 self.consume_end_scene_statment()?,
-                            ))),
+                            )]),
                             // WARN: 意味のある式の実行(副作用のある関数の呼び出しなど)に限定するため、
                             // パーサの段階で
                             // - <identifier> 以外禁止とする
@@ -56,11 +56,11 @@ impl<'src> NovelSourceStream<'src> {
                                         // <END_OF_LINE>
                                         self.must_be_line_end()?;
 
-                                        Ok(Some(NovelStmt::Assign(AssignStmt {
+                                        Ok(vec![NovelStmt::Assign(AssignStmt {
                                             span: Span::merge(&dst.span(), &src.span()),
                                             dst,
                                             src,
-                                        })))
+                                        })])
                                     } else {
                                         Err(NovelParseError::LineEndExpected {
                                             found: Box::new(t.to_owned()),
@@ -70,10 +70,10 @@ impl<'src> NovelSourceStream<'src> {
                                     // <END_OF_LINE>
                                     self.must_be_line_end()?;
 
-                                    Ok(Some(NovelStmt::Expr(ExprStmt {
+                                    Ok(vec![NovelStmt::Expr(ExprStmt {
                                         span: expr.span(),
                                         expr,
-                                    })))
+                                    })])
                                 }
                             }
                         },
@@ -86,14 +86,14 @@ impl<'src> NovelSourceStream<'src> {
                     NovelLineKind::CharaCommand => {
                         todo!()
                     }
-                    NovelLineKind::BlockClose => {
-                        // TODO: error
-                        todo!()
-                    }
+
+                    // } 行が予期せぬときに来た場合、
+                    // 内側スコープの終了を考えて空で返す
+                    NovelLineKind::BlockClose => Ok(Vec::new()),
                 }
             })
             .transpose()
-            .map(|opt| opt.flatten())
+            .map(|opt_stmts| opt_stmts.into_iter().flatten().collect())
     }
 
     pub(crate) fn must_be_line_end(&mut self) -> Result<(), NovelParseError> {

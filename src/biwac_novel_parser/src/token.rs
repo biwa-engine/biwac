@@ -113,8 +113,13 @@ impl<'src> NovelSourceStream<'src> {
             None => {
                 self.peek_token()?;
 
+                let t = self.peeked.take().unwrap();
+                if let Some(t) = &t {
+                    self.cursor.idx = t.span.end().idx();
+                }
+
                 // SAFETY: .next_peek() で .peeked は必ず Some になっている
-                Ok(self.peeked.take().unwrap())
+                Ok(t)
             }
         }
     }
