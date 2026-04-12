@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet, hash_map::Entry},
+};
 
 pub(crate) mod symbols;
 pub(crate) mod types;
@@ -86,6 +89,10 @@ pub struct Hir {
 
     // lang item (package std などに定義された型)
     lang_item_tys: HashMap<TyId, DefinedTyImpl>,
+
+    // 外部パッケージのシンボルで、
+    // 使用されていることを確認したシンボル
+    pub deps_recorder: RefCell<DepsRecorder>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +189,7 @@ impl Hir {
         }
 
         Self {
+            deps_recorder: RefCell::new(DepsRecorder::new(pkg_name.clone())),
             pkg_name,
             vals: external_vals
                 .into_iter()
@@ -259,6 +267,21 @@ impl Hir {
 
         match defined_ty_impl.ty_content {
             Progressive::NotYet(_) => {
+                // 依存関係を記録
+                match &ty_content {
+                    TyDefContentKind::Struct(struct_) => {
+                        for m in struct_.members.values() {
+                            self.deps_recorder.borrow_mut().depends_on_ty(m);
+                        }
+                    }
+                    TyDefContentKind::TypeAlias(alias) => {
+                        self.deps_recorder.borrow_mut().depends_on_ty(&alias.right);
+                    }
+                    TyDefContentKind::NativeTypeAlias(_) => {
+                        // nothing to do
+                    }
+                }
+
                 defined_ty_impl.ty_content = Progressive::Completed(ty_content);
 
                 Ok(())
@@ -288,6 +311,16 @@ impl Hir {
         vid: ValId,
         val_content: ValDefContentKind,
     ) -> HirResult<()> {
+        // シグニチャに使われている型を依存として記録
+        if let Some(fsign) = match &val_content {
+            ValDefContentKind::Fn(f) => Some(&f.signature),
+            ValDefContentKind::Native(f) => Some(&f.signature),
+            ValDefContentKind::NovelScene(n) => Some(&n.signature),
+            ValDefContentKind::ExternalFn(_) => None,
+        } {
+            self.deps_recorder.borrow_mut().register_from_fn_sign(fsign);
+        }
+
         match self.vals.entry(vid.clone()) {
             Entry::Vacant(e) => {
                 e.insert(val_content);
@@ -364,6 +397,15 @@ impl Hir {
         ident: &biwac_ast::Ident,
         val_content: ImplValDefContentKind,
     ) -> HirResult<()> {
+        // シグニチャに使われている型を依存として記録
+        let fsign = match &val_content {
+            ImplValDefContentKind::Fn(f) => &f.signature,
+            ImplValDefContentKind::NativeFn(f) => &f.signature,
+            ImplValDefContentKind::Method(f) => &f.signature,
+            ImplValDefContentKind::NativeMethod(f) => &f.signature,
+        };
+        self.deps_recorder.borrow_mut().register_from_fn_sign(fsign);
+
         match ty {
             TyKind::Defined(defined_ty) => {
                 // 型の存在を取得し、ジェネリック引数の長さの一致を検査
@@ -693,14 +735,14 @@ impl Hir {
                             ImplValDefContentKind::Fn(_) => {
                                 Err(HirError::ImplementedValueIsNotMethod {
                                     ty: Box::new(ty.clone()),
-                                    method: Box::new(method.clone().into()),
+                                    method: Box::new(method.clone()),
                                     val_content: Box::new(impl_.val_content.clone()),
                                 })
                             }
                             ImplValDefContentKind::NativeFn(_) => {
                                 Err(HirError::ImplementedValueIsNotMethod {
                                     ty: Box::new(ty.clone()),
-                                    method: Box::new(method.clone().into()),
+                                    method: Box::new(method.clone()),
                                     val_content: Box::new(impl_.val_content.clone()),
                                 })
                             }
@@ -790,14 +832,14 @@ impl Hir {
                         ImplValDefContentKind::Fn(_) => {
                             Err(HirError::ImplementedValueIsNotMethod {
                                 ty: Box::new(ty.clone()),
-                                method: Box::new(method.clone().into()),
+                                method: Box::new(method.clone()),
                                 val_content: Box::new(val.clone()),
                             })
                         }
                         ImplValDefContentKind::NativeFn(_) => {
                             Err(HirError::ImplementedValueIsNotMethod {
                                 ty: Box::new(ty.clone()),
-                                method: Box::new(method.clone().into()),
+                                method: Box::new(method.clone()),
                                 val_content: Box::new(val.clone()),
                             })
                         }
@@ -930,6 +972,9 @@ impl Hir {
     }
 
     pub fn get_fn_sign(&self, vid: &ValId) -> Option<&FnDefContentSignature> {
+        // 依存関係を記録
+        self.deps_recorder.borrow_mut().depends_on_val(vid);
+
         match self.vals.get(vid) {
             Some(val) => match &val {
                 ValDefContentKind::Fn(f) => Some(&f.signature),
@@ -1010,6 +1055,75 @@ impl Progressive<TyExistence, TyDefContentKind> {
                 }),
             },
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DepsRecorder {
+    pkg_name: PackageName,
+    depended_tys: HashSet<TyId>,
+    depended_vals: HashSet<ValId>,
+}
+
+impl DepsRecorder {
+    fn new(pkg_name: PackageName) -> Self {
+        Self {
+            pkg_name,
+            depended_tys: HashSet::new(),
+            depended_vals: HashSet::new(),
+        }
+    }
+
+    fn depends_on_defined_ty(&mut self, defined_ty: &DefinedTy) {
+        if defined_ty.tid.pkg().name() != &self.pkg_name {
+            self.depended_tys.insert(defined_ty.tid.clone());
+        }
+
+        for g in &defined_ty.genargs {
+            self.depends_on_ty(g);
+        }
+    }
+
+    pub fn depends_on_ty(&mut self, ty: &Ty) {
+        match &ty.kind {
+            TyKind::Defined(defined_ty) => {
+                self.depends_on_defined_ty(defined_ty);
+            }
+            TyKind::Fn(fty) => {
+                for a in &fty.args {
+                    self.depends_on_ty(a);
+                }
+                self.depends_on_ty(&fty.rty);
+            }
+            TyKind::Int
+            | TyKind::Float
+            | TyKind::Bool
+            | TyKind::Void
+            | TyKind::Gen(_)
+            | TyKind::LocGen(_)
+            | TyKind::Infer(_) => {}
+        }
+    }
+
+    fn register_from_fn_sign(&mut self, fsign: &FnDefContentSignature) {
+        for (_, aty) in &fsign.args {
+            self.depends_on_ty(aty);
+        }
+        self.depends_on_ty(&fsign.rty);
+    }
+
+    pub fn depends_on_val(&mut self, vid: &ValId) {
+        if vid.pkg().name() != &self.pkg_name {
+            self.depended_vals.insert(vid.clone());
+        }
+    }
+
+    pub fn depended_tys(&self) -> &HashSet<TyId> {
+        &self.depended_tys
+    }
+
+    pub fn depended_vals(&self) -> &HashSet<ValId> {
+        &self.depended_vals
     }
 }
 

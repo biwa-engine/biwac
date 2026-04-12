@@ -1036,6 +1036,9 @@ impl<'tctx> FnTyCtx<'tctx> {
                 let ty = self.infer_expr(&v.init)?;
                 let ty = self.apply_ty(ty);
 
+                // 変数に付いた型は、ターゲットによっては依存に含まれる
+                self.tctx.hir.deps_recorder.borrow_mut().depends_on_ty(&ty);
+
                 self.vars.insert(v.id, ty);
 
                 Ok(None)

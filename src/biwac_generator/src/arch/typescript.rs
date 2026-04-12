@@ -9,6 +9,7 @@ use biwac_hir::{
     ExprId, Hir, ImplValDefContentKind, LocVarId, Ty, TyDefContentKind, TyId, TyKind,
     ValDefContentKind, ValId,
 };
+use oxc_allocator::FromIn;
 
 pub fn generate(hir: &Hir) -> String {
     let allocator = oxc_allocator::Allocator::default();
@@ -39,6 +40,113 @@ pub fn generate(hir: &Hir) -> String {
     {
         body.extend(native.into_oxc(&allocator, hir));
     }
+
+    // 依存する外部パッケージのシンボルをimportとして展開
+    body.extend(oxc_allocator::Vec::from_iter_in(
+        hir.deps_recorder.borrow().depended_tys().iter().map(|tid| {
+            oxc_ast::ast::Statement::ImportDeclaration(oxc_allocator::Box::new_in(
+                oxc_ast::ast::ImportDeclaration {
+                    span: span(),
+                    specifiers: Some(oxc_allocator::Vec::from_iter_in(
+                        [oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(
+                            oxc_allocator::Box::new_in(
+                                oxc_ast::ast::ImportSpecifier {
+                                    span: span(),
+                                    imported: oxc_ast::ast::ModuleExportName::IdentifierName(
+                                        oxc_ast::ast::IdentifierName {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&tid.mangled()),
+                                            ),
+                                        },
+                                    ),
+                                    local: oxc_ast::ast::BindingIdentifier {
+                                        span: span(),
+                                        name: oxc_span::Ident::new_const(
+                                            allocator.alloc_str(&tid.mangled()),
+                                        ),
+                                        symbol_id: Cell::new(None),
+                                    },
+                                    import_kind: oxc_ast::ast::ImportOrExportKind::Value,
+                                },
+                                &allocator,
+                            ),
+                        )],
+                        &allocator,
+                    )),
+                    source: oxc_ast::ast::StringLiteral {
+                        span: span(),
+                        value: oxc_ast::ast::Atom::from_in(
+                            &format!("./{}.ts", tid.pkg().name().value()),
+                            &allocator,
+                        ),
+                        raw: None,
+                        lone_surrogates: false,
+                    },
+                    phase: None,
+                    with_clause: None,
+                    import_kind: oxc_ast::ast::ImportOrExportKind::Type,
+                },
+                &allocator,
+            ))
+        }),
+        &allocator,
+    ));
+
+    body.extend(oxc_allocator::Vec::from_iter_in(
+        hir.deps_recorder
+            .borrow()
+            .depended_vals()
+            .iter()
+            .map(|vid| {
+                oxc_ast::ast::Statement::ImportDeclaration(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::ImportDeclaration {
+                        span: span(),
+                        specifiers: Some(oxc_allocator::Vec::from_iter_in(
+                            [oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(
+                                oxc_allocator::Box::new_in(
+                                    oxc_ast::ast::ImportSpecifier {
+                                        span: span(),
+                                        imported: oxc_ast::ast::ModuleExportName::IdentifierName(
+                                            oxc_ast::ast::IdentifierName {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator.alloc_str(&vid.mangled()),
+                                                ),
+                                            },
+                                        ),
+                                        local: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&vid.mangled()),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        import_kind: oxc_ast::ast::ImportOrExportKind::Value,
+                                    },
+                                    &allocator,
+                                ),
+                            )],
+                            &allocator,
+                        )),
+                        source: oxc_ast::ast::StringLiteral {
+                            span: span(),
+                            value: oxc_ast::ast::Atom::from_in(
+                                &format!("./{}.ts", vid.pkg().name().value()),
+                                &allocator,
+                            ),
+                            raw: None,
+                            lone_surrogates: false,
+                        },
+                        phase: None,
+                        with_clause: None,
+                        import_kind: oxc_ast::ast::ImportOrExportKind::Value,
+                    },
+                    &allocator,
+                ))
+            }),
+        &allocator,
+    ));
 
     body.extend(oxc_allocator::Vec::from_iter_in(
         hir.tys
