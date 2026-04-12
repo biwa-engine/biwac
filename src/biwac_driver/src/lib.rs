@@ -3,8 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use biwac_base::PackageName;
+
 // build_dir_path はdirであることが保証されている必要がある
-pub fn write_bin(build_dir_path: PathBuf, bin: &str) -> Result<(), std::io::Error> {
+pub fn write_bin(
+    build_dir_path: PathBuf,
+    pkg_name: &PackageName,
+    bin: &str,
+) -> Result<(), std::io::Error> {
     if cfg!(feature = "typescript") {
         let dstpath = build_dir_path
             .join(Path::new("typescript"))
@@ -25,7 +31,7 @@ pub fn write_bin(build_dir_path: PathBuf, bin: &str) -> Result<(), std::io::Erro
             );
         }
 
-        let binpath = dstpath.join(Path::new("dst.ts"));
+        let binpath = dstpath.join(Path::new(&format!("{}.ts", pkg_name.value())));
 
         let mut f = std::fs::File::create(binpath).unwrap();
 

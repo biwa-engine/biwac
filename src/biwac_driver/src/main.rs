@@ -57,7 +57,7 @@ fn main() {
 
         let bin = biwac_generator::arch::typescript::generate(&hir);
 
-        biwac_driver::write_bin(build_dir_path.to_path_buf(), &bin).unwrap();
+        biwac_driver::write_bin(build_dir_path.to_path_buf(), &metadata.name, &bin).unwrap();
     } else {
         panic!("1 Argument Required: <package-path>")
     }
