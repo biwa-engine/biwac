@@ -102,11 +102,11 @@ impl ModuleLevelTryResolveTy<&biwac_ast::StructDef> for biwac_hir::StructDefCont
                 .map(|(id, typ)| {
                     tgctx
                         .try_resolve_ty(typ, hir)
-                        .map(|ty| (id.id.clone(), (ty, id.span.clone())))
+                        .map(|ty| (id.id.clone(), (ty, id.span.clone().into())))
                 })
                 .collect::<Result<HashMap<_, _>, ResolveError>>()?,
             genargs: tgctx.ty_def_genarg_vec,
-            struct_name_span: struct_.id.span.clone(),
+            struct_name_span: struct_.id.span.clone().into(),
         })
     }
 }
@@ -144,13 +144,13 @@ impl TryResolveTy<(&biwac_ast::ArgDeclList, &biwac_ast::RetTypRepr)>
             .map(|arg| Ok((arg.id.clone(), fctx.try_resolve_ty(&arg.typ, hir)?)))
             .collect::<RsvResult<Vec<_>>>()?;
 
-        let rty = match &value.1 {
-            RetTypRepr::Typ(typ) => fctx.try_resolve_ty(typ, hir)?,
-            RetTypRepr::Void(span) => Ty::new(TyKind::Void, span.clone()),
+        let (rty, rty_span) = match &value.1 {
+            RetTypRepr::Typ(typ) => (fctx.try_resolve_ty(typ, hir)?, typ.span.clone()),
+            RetTypRepr::Void(span) => (Ty::new(TyKind::Void, span.clone().into()), span.clone()),
         };
 
         Ok(biwac_hir::FnDefContentSignature {
-            span: Span::merge(&value.0.span, &rty.span),
+            span: Span::merge(&value.0.span, &rty_span).into(),
             args,
             rty,
             genargs: vec![],

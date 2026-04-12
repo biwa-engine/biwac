@@ -1,9 +1,12 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_ast::{Ident, PrimTyp, TypRepr, TypReprVal};
+use biwac_ast::{Ident, TypRepr, TypReprVal};
 use biwac_hir::{Hir, LocGenTyId, Ty, TyKind};
 
-use crate::{ResolveError, RsvResult, context::ty_phase::impl_level::ImplLevelTyResolveCtx};
+use crate::{
+    ResolveError, RsvResult,
+    context::{ty_from_primitive, ty_phase::impl_level::ImplLevelTyResolveCtx},
+};
 
 #[derive(Debug)]
 pub(crate) struct FnLevelTyResolveCtx<'ictx> {
@@ -50,13 +53,7 @@ impl<'ictx> FnLevelTyResolveCtx<'ictx> {
 
     pub(crate) fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
         match &typ.val {
-            TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                // TODO: Uint
-                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
-                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
-            },
+            TypReprVal::Primitive(p) => Ok(ty_from_primitive(p, typ.span.clone())),
             TypReprVal::Defined(deftyp) => {
                 // deftypがidのみ(ex: `T`)の場合、
                 // 内側から名前解決する
@@ -81,7 +78,7 @@ impl<'ictx> FnLevelTyResolveCtx<'ictx> {
                 if let Some(id) = deftyp.qualid.only_id()
                     && let Some(gid) = self.fn_def_genargs.get(id)
                 {
-                    Ok(Ty::new(TyKind::LocGen(*gid), typ.span.clone()))
+                    Ok(Ty::new(TyKind::LocGen(*gid), typ.span.clone().into()))
                 } else {
                     self.ictx.try_resolve_defined_ty(deftyp, hir)
                 }

@@ -1,3 +1,5 @@
+use crate::PackageName;
+
 const BIWA_SRC_EXT: &str = "biwa";
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -23,6 +25,18 @@ pub struct Span {
 pub struct Pos {
     line: usize,
     idx: usize,
+}
+
+/// SSpan
+/// Semi span
+/// Span has position (line index and character index range).
+/// But external package symbols do not have position information,
+/// only have a package name and a module path.
+/// So, Semi span provides both probabilities with enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SSpan {
+    Span { span: Span },
+    External { pkg: PackageName, modu: ModPath },
 }
 
 impl Span {
@@ -127,5 +141,11 @@ impl From<ModPath> for Vec<String> {
             ModPath::Lib => vec![],
             ModPath::Mod(m) => m,
         }
+    }
+}
+
+impl From<Span> for SSpan {
+    fn from(value: Span) -> Self {
+        Self::Span { span: value }
     }
 }

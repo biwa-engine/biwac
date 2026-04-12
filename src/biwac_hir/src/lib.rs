@@ -2,7 +2,7 @@ pub mod hir;
 mod lang_item;
 
 use biwac_ast::Ident;
-use biwac_base::Span;
+use biwac_base::SSpan;
 
 pub use crate::hir::{
     Hir, ImplValId, Progressive, TyExistence,
@@ -33,13 +33,13 @@ pub type HirResult<T> = Result<T, HirError>;
 pub enum HirError {
     DuplicatedValueName {
         vid: Box<ValId>,
-        defined_position1: Box<Span>,
-        defined_position2: Box<Span>,
+        defined_position1: Box<SSpan>,
+        defined_position2: Box<SSpan>,
     },
     DuplicatedTypeName {
         tid: Box<TyId>,
-        defined_position1: Box<Span>,
-        defined_position2: Box<Span>,
+        defined_position1: Box<SSpan>,
+        defined_position2: Box<SSpan>,
     },
     GenericArgLengthMismatched {
         defined_ty: Box<DefinedTy>,

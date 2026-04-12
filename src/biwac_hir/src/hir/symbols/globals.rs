@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use biwac_ast::{
     FnDef, Ident, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef,
 };
-use biwac_base::{ModPath, PackageName, Span};
+use biwac_base::{ModPath, PackageName, SSpan, Span};
 
 use crate::{DecledVar, Expr, ExprId, LocVarId, Progressive, Stmt, Ty};
 
@@ -112,7 +112,7 @@ pub struct FnDefContentSignature {
     pub rty: Ty,
 
     pub genargs: Vec<(Ident, LocGenTyId)>,
-    pub span: Span,
+    pub span: SSpan,
 }
 
 #[derive(Debug, Clone)]
@@ -206,10 +206,10 @@ pub enum TyDefContentKind {
 
 #[derive(Debug, Clone)]
 pub struct StructDefContent {
-    pub members: HashMap<String, (Ty, Span)>,
+    pub members: HashMap<String, (Ty, SSpan)>,
     pub genargs: Vec<GenTyId>,
     // TODO: その他各種情報
-    pub struct_name_span: Span,
+    pub struct_name_span: SSpan,
 }
 
 #[derive(Debug, Clone)]

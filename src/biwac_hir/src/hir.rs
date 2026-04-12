@@ -4,7 +4,7 @@ pub(crate) mod symbols;
 pub(crate) mod types;
 
 use biwac_ast::Ident;
-use biwac_base::{ModPath, PackageName, Pos, Span};
+use biwac_base::{ModPath, PackageName, SSpan, Span};
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, GenTyId, HirError,
@@ -137,7 +137,7 @@ pub struct TyValImplGenargsContentPair {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TyExistence {
-    pub ty_name_span: Span,
+    pub ty_name_span: SSpan,
     pub genarg_len: usize,
 }
 
@@ -158,7 +158,7 @@ impl Hir {
                                 StructDefContent {
                                     members: HashMap::new(),
                                     genargs: (0..genarg_len).map(GenTyId::new).collect(),
-                                    struct_name_span: item.span,
+                                    struct_name_span: SSpan::Span { span: item.span },
                                 },
                             ))),
                             vals: HashMap::new(),
@@ -216,8 +216,12 @@ impl Hir {
                     Progressive::NotYet(ty_existence) => ty_existence.ty_name_span.clone(),
                     Progressive::Completed(ty_content) => match ty_content {
                         TyDefContentKind::Struct(struct_) => struct_.struct_name_span.clone(),
-                        TyDefContentKind::TypeAlias(alias) => alias.alias_name_span.clone(),
-                        TyDefContentKind::NativeTypeAlias(native) => native.alias_name_span.clone(),
+                        TyDefContentKind::TypeAlias(alias) => SSpan::Span {
+                            span: alias.alias_name_span.clone(),
+                        },
+                        TyDefContentKind::NativeTypeAlias(native) => SSpan::Span {
+                            span: native.alias_name_span.clone(),
+                        },
                     },
                 }),
                 defined_position2: Box::new(ty_existence.ty_name_span),
@@ -273,14 +277,26 @@ impl Hir {
             Entry::Occupied(e) => Err(HirError::DuplicatedValueName {
                 vid: Box::new(vid),
                 defined_position1: Box::new(match &e.get() {
-                    ValDefContentKind::Fn(f) => f.fn_name_span.clone(),
-                    ValDefContentKind::Native(f) => f.fn_name_span.clone(),
-                    ValDefContentKind::NovelScene(n) => n.scene_name_span.clone(),
+                    ValDefContentKind::Fn(f) => SSpan::Span {
+                        span: f.fn_name_span.clone(),
+                    },
+                    ValDefContentKind::Native(f) => SSpan::Span {
+                        span: f.fn_name_span.clone(),
+                    },
+                    ValDefContentKind::NovelScene(n) => SSpan::Span {
+                        span: n.scene_name_span.clone(),
+                    },
                 }),
                 defined_position2: Box::new(match val_content {
-                    ValDefContentKind::Fn(f) => f.fn_name_span.clone(),
-                    ValDefContentKind::Native(f) => f.fn_name_span.clone(),
-                    ValDefContentKind::NovelScene(n) => n.scene_name_span.clone(),
+                    ValDefContentKind::Fn(f) => SSpan::Span {
+                        span: f.fn_name_span.clone(),
+                    },
+                    ValDefContentKind::Native(f) => SSpan::Span {
+                        span: f.fn_name_span.clone(),
+                    },
+                    ValDefContentKind::NovelScene(n) => SSpan::Span {
+                        span: n.scene_name_span.clone(),
+                    },
                 }),
             }),
         }
@@ -483,7 +499,7 @@ impl Hir {
                     // genargs のため、適当な値を入れる
                     Ty {
                         kind: TyKind::Infer(InferTy::Unknown),
-                        span: Span::new(ModPath::Lib, Pos::new(0, 0), Pos::new(0, 0)),
+                        span: SSpan::External { pkg: self.pkg_name.clone(), modu: ModPath::Lib },
                     };
                     defined_ty_impl
                         .ty_content
@@ -945,7 +961,9 @@ fn resolve_ty_alias(
             Err(HirError::GenericArgLengthMismatched {
                 defined_ty: Box::new(defined_ty.clone()),
                 ty_existence: Box::new(TyExistence {
-                    ty_name_span: alias.alias_name_span.clone(),
+                    ty_name_span: SSpan::Span {
+                        span: alias.alias_name_span.clone(),
+                    },
                     genarg_len: alias.genargs.len(),
                 }),
             })
@@ -965,11 +983,15 @@ impl Progressive<TyExistence, TyDefContentKind> {
                     genarg_len: struct_.genargs.len(),
                 }),
                 TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
-                    ty_name_span: alias.alias_name_span.clone(),
+                    ty_name_span: SSpan::Span {
+                        span: alias.alias_name_span.clone(),
+                    },
                     genarg_len: alias.genargs.len(),
                 }),
                 TyDefContentKind::NativeTypeAlias(native) => Some(TyExistence {
-                    ty_name_span: native.alias_name_span.clone(),
+                    ty_name_span: SSpan::Span {
+                        span: native.alias_name_span.clone(),
+                    },
                     genarg_len: native.genargs.len(),
                 }),
             },

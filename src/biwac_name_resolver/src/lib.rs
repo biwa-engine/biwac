@@ -237,7 +237,7 @@ impl ResolveCtx {
                             self.hir.register_type_existence(
                                 tid,
                                 TyExistence {
-                                    ty_name_span: struct_.id.span.clone(),
+                                    ty_name_span: struct_.id.span.clone().into(),
                                     genarg_len: struct_.genargs.len(),
                                 },
                             )?;
@@ -251,7 +251,7 @@ impl ResolveCtx {
                             self.hir.register_type_existence(
                                 tid.clone(),
                                 TyExistence {
-                                    ty_name_span: alias.ident.span.clone(),
+                                    ty_name_span: alias.ident.span.clone().into(),
                                     genarg_len: alias.genargs.len(),
                                 },
                             )?;
@@ -267,7 +267,7 @@ impl ResolveCtx {
                             self.hir.register_type_existence(
                                 tid.clone(),
                                 TyExistence {
-                                    ty_name_span: native.ident.span.clone(),
+                                    ty_name_span: native.ident.span.clone().into(),
                                     genarg_len: native.genargs.len(),
                                 },
                             )?;

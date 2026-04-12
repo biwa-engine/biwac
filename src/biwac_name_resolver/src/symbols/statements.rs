@@ -99,7 +99,10 @@ impl TryResolve<&biwac_ast::VarDecl> for VarDecl {
         // 変数の宣言をcontextに登録
         let ty = match &value.typ {
             TypDecl::Typ(typ) => fctx.try_resolve_ty(typ, hir)?,
-            TypDecl::Any => Ty::new(TyKind::Infer(InferTy::Unknown), value.id.span.clone()), // 型が不明で推論を要する
+            TypDecl::Any => Ty::new(
+                TyKind::Infer(InferTy::Unknown),
+                value.id.span.clone().into(),
+            ), // 型が不明で推論を要する
         };
         let id = fctx.declare_variable(&value.id, ty)?;
 

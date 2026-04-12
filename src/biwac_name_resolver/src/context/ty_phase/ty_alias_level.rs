@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use biwac_ast::{PrimTyp, TypReprVal, TypeAlias};
+use biwac_ast::{TypReprVal, TypeAlias};
 use biwac_base::{ModPath, Span};
 use biwac_hir::{DefinedTy, FnTy, GenTyId, Hir, Ty, TyId, TyKind, TypeAliasDefContent};
 
 use crate::{
     ResolveError, RsvResult,
-    context::ty_phase::{
-        module_level::ModuleLevelTyResolveCtx, ty_def_level::TyDefLevelTyResolveCtx,
+    context::{
+        ty_from_primitive,
+        ty_phase::{module_level::ModuleLevelTyResolveCtx, ty_def_level::TyDefLevelTyResolveCtx},
     },
 };
 
@@ -68,12 +69,9 @@ impl<'ast> TyAliasResolveCtx<'ast> {
     fn try_resolve_rhs_typ_name(&mut self, hir: &Hir) -> RsvResult<()> {
         for (tid, alias) in &self.alias_defs {
             let (ty, genargs) = match &alias.right.val {
-                TypReprVal::Primitive(p) => match p {
-                    PrimTyp::Int => (Ty::new(TyKind::Int, alias.right.span.clone()), vec![]),
-                    PrimTyp::Uint => (Ty::new(TyKind::Int, alias.right.span.clone()), vec![]), // TODO
-                    PrimTyp::Float => (Ty::new(TyKind::Float, alias.right.span.clone()), vec![]),
-                    PrimTyp::Bool => (Ty::new(TyKind::Bool, alias.right.span.clone()), vec![]),
-                },
+                TypReprVal::Primitive(p) => {
+                    (ty_from_primitive(p, alias.right.span.clone()), Vec::new())
+                }
                 TypReprVal::Defined(_) => {
                     let mctx = self
                         .mctxes

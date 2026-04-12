@@ -82,11 +82,14 @@ macro_rules! lang_item_fn {
                 ],
                 $id.to_string(),
             );
-            let span = Span::new(
-                ModPath::Mod(vid.quals.clone()),
-                Pos::new(0, 0),
-                Pos::new(0, 0),
-            );
+            let span = crate::SSpan::External{
+                pkg: biwac_base::PackageName::from_str($pkg).unwrap(),
+                modu: ModPath::Mod(vec![
+                    $(
+                        $qual.to_string()
+                    ),*
+                ]),
+            };
 
             LangItem::new(
                 LangItemKind::Val {
@@ -100,7 +103,14 @@ macro_rules! lang_item_fn {
                             ].into_iter()
                             .map(|(id, kind): (&str, _)| (biwac_ast::Ident {
                                     id: id.to_string(),
-                                    span: span.clone(),
+                                    span: Span::new(ModPath::Mod(vec![
+                                        $(
+                                            $qual.to_string()
+                                        ),*
+                                    ]),
+                                    Pos::new(0, 0),
+                                    Pos::new(0, 0),
+                                    ),
                                 },
                                 Ty {
                                     kind,

@@ -349,11 +349,14 @@ impl ModuleLevelResolveCtx {
                             TyKind::Defined(DefinedTy {
                                 tid: tid.clone(),
                                 genargs: vec![
-                                    Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                                    Ty::new(
+                                        TyKind::Infer(InferTy::Unknown),
+                                        garg_span.into()
+                                    );
                                     ty_existence.genarg_len
                                 ],
                             }),
-                            qualid.span.clone(),
+                            qualid.span.clone().into(),
                         );
 
                         let impl_vid = hir.get_impl_value_id_of_type(&ty.kind, &qualid.id)?.ok_or(
@@ -446,42 +449,45 @@ impl ModuleLevelResolveCtx {
 
                 let ty = match ty_content {
                     TyDefContentKind::Struct(struct_) => {
-                        let genargs = vec![
-                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
-                            struct_.genargs.len()
-                        ];
+                        let genargs =
+                            vec![
+                                Ty::new(TyKind::Infer(InferTy::Unknown), garg_span.into());
+                                struct_.genargs.len()
+                            ];
 
                         Ty::new(
                             TyKind::Defined(DefinedTy { tid, genargs }),
-                            qualid.span.clone(),
+                            qualid.span.clone().into(),
                         )
                     }
                     TyDefContentKind::NativeTypeAlias(native) => {
-                        let genargs = vec![
-                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
-                            native.genargs.len()
-                        ];
+                        let genargs =
+                            vec![
+                                Ty::new(TyKind::Infer(InferTy::Unknown), garg_span.into());
+                                native.genargs.len()
+                            ];
 
                         Ty::new(
                             TyKind::Defined(DefinedTy { tid, genargs }),
-                            qualid.span.clone(),
+                            qualid.span.clone().into(),
                         )
                     }
 
                     // alias は解決した型を返す
                     TyDefContentKind::TypeAlias(alias) => match &alias.right.kind {
                         TyKind::Defined(defined_ty) => {
-                            let genargs = vec![
-                                Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
-                                alias.genargs.len()
-                            ];
+                            let genargs =
+                                vec![
+                                    Ty::new(TyKind::Infer(InferTy::Unknown), garg_span.into());
+                                    alias.genargs.len()
+                                ];
 
                             Ty::new(
                                 TyKind::Defined(DefinedTy {
                                     tid: defined_ty.tid.clone(),
                                     genargs,
                                 }),
-                                qualid.span.clone(),
+                                qualid.span.clone().into(),
                             )
                         }
                         _ => alias.right.clone(),

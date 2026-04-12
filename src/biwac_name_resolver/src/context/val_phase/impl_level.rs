@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
-use biwac_ast::{DefTyp, PrimTyp, QualifiedId, TypRepr, TypReprVal};
+use biwac_ast::{DefTyp, QualifiedId, TypRepr, TypReprVal};
 use biwac_base::Span;
 use biwac_hir::{DefinedTy, Hir, InferTy, LocGenTyId, Ty, TyKind};
 
 use crate::{
     RsvResult,
-    context::val_phase::{ResolvedValue, module_level::ModuleLevelResolveCtx},
+    context::{
+        ty_from_primitive,
+        val_phase::{ResolvedValue, module_level::ModuleLevelResolveCtx},
+    },
 };
 
 //  impl[T] Foo[T] {
@@ -50,7 +53,10 @@ impl<'mctx> ImplLevelResolveCtx<'mctx> {
         if let Some(id) = deftyp.qualid.only_id()
             && let Some((gid, _)) = self.impl_block_genargs.get(id)
         {
-            Ok(Ty::new(TyKind::LocGen(*gid), deftyp.qualid.span.clone()))
+            Ok(Ty::new(
+                TyKind::LocGen(*gid),
+                deftyp.qualid.span.clone().into(),
+            ))
         } else {
             // ジェネリック引数の数が合うか検査済み
             let (tid, ty_existence) = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
@@ -71,25 +77,19 @@ impl<'mctx> ImplLevelResolveCtx<'mctx> {
                             .collect::<RsvResult<_>>()?
                     } else {
                         vec![
-                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span);
+                            Ty::new(TyKind::Infer(InferTy::Unknown), garg_span.into());
                             ty_existence.genarg_len
                         ]
                     },
                 }),
-                deftyp.qualid.span.clone(),
+                deftyp.qualid.span.clone().into(),
             ))
         }
     }
 
     pub(crate) fn try_resolve_ty(&self, typ: &TypRepr, hir: &Hir) -> RsvResult<Ty> {
         match &typ.val {
-            TypReprVal::Primitive(p) => match p {
-                PrimTyp::Int => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                // TODO: Uint
-                PrimTyp::Uint => Ok(Ty::new(TyKind::Int, typ.span.clone())),
-                PrimTyp::Float => Ok(Ty::new(TyKind::Float, typ.span.clone())),
-                PrimTyp::Bool => Ok(Ty::new(TyKind::Bool, typ.span.clone())),
-            },
+            TypReprVal::Primitive(p) => Ok(ty_from_primitive(p, typ.span.clone())),
             TypReprVal::Defined(deftyp) => self.try_resolve_defined_ty(deftyp, hir),
         }
     }

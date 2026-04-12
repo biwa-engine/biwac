@@ -8,7 +8,7 @@ pub use package::{
     DependedPackage, PackageMetadata, PackageName, PackageNameError, PackageVersion,
     PackageVersionError,
 };
-pub use span::{ModPath, Pos, Span};
+pub use span::{ModPath, Pos, SSpan, Span};
 
 pub const BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME: &str = "main";
 pub const BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME: &str = "lib";

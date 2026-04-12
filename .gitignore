@@ -1,3 +1,4 @@
 **/target
 **/dst
 **/.biwa_build
+.env
