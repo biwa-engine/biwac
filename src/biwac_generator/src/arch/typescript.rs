@@ -46,7 +46,12 @@ pub fn generate(hir: &Hir) -> String {
             .flat_map(
                 |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
                     TyDefContentKind::Struct(struct_) => {
-                        Some(struct_.as_oxc_global(tid, &allocator, hir))
+                        if tid.pkg().name() == &hir.pkg_name {
+                            Some(struct_.as_oxc_global(tid, &allocator, hir))
+                        } else {
+                            // 外部パッケージの型定義は生成しないガード
+                            None
+                        }
                     }
                     TyDefContentKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
                     TyDefContentKind::NativeTypeAlias(_) => Some(
