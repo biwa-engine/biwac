@@ -12,7 +12,8 @@ members = [
   "src/biwac_name_resolver",
   "src/biwac_type_inferrer",
   "src/biwac_generator",
-  "src/biwac_driver"
+  "src/biwac_driver",
+  "src/biwac_cli"
 ]
 resolver = "2"
 
@@ -29,6 +30,7 @@ oxc_parser = "0.113.0"
 serde = "1.0.228"
 serde_json = "1.0.149"
 regex = "1.12.3"
+clap = { version = "4.5.61", features = ["derive"] }
 
 [workspace.features]
 default = [ "typescript" ]

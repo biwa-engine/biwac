@@ -1,0 +1,23 @@
+[package]
+name = "biwac"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "biwac"
+path = "src/main.rs"
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_metadata_loader = { path = "../biwac_metadata_loader"}
+biwac_dependency_loader = { path = "../biwac_dependency_loader"}
+biwac_package_loader = { path = "../biwac_package_loader"}
+biwac_name_resolver = { path = "../biwac_name_resolver"}
+biwac_type_inferrer = { path = "../biwac_type_inferrer"}
+biwac_generator = { path = "../biwac_generator"}
+biwac_driver = { path = "../biwac_driver"}
+clap.workspace = true
+
+[features]
+default = [ "typescript" ]
+typescript = [ "biwac_generator/typescript" ]
