@@ -1,0 +1,87 @@
+{
+  "fetched_at": "",
+  "dependencies": [
+    {
+      "name": "std",
+      "version": "0.1.0",
+      "symbols": [
+        {
+          "id": "::game::base_engine::write",
+          "body": {
+            "kind": "function",
+            "genargs": [],
+            "args": [
+              {
+                "id": "msg",
+                "type": {
+                  "kind": "defined",
+                  "id": "std::types::string::String"
+                }
+              }
+            ],
+            "ret": {
+              "kind": "void"
+            }
+          }
+        },
+        {
+          "id": "::game::base_engine::wait",
+          "body": {
+            "kind": "function",
+            "genargs": [],
+            "args": [],
+            "ret": {
+              "kind": "void"
+            }
+          }
+        },
+        {
+          "id": "::types::string::String",
+          "body": {
+            "kind": "struct",
+            "genargs": [],
+            "members": [],
+            "impls": []
+          }
+        },
+        {
+          "id": "::game::Game",
+          "body": {
+            "kind": "struct",
+            "genargs": ["T1", "T2"],
+            "members": [],
+            "impls": []
+          }
+        },
+        {
+          "id": "::game::Character",
+          "body": {
+            "kind": "struct",
+            "genargs": ["T1"],
+            "members": [],
+            "impls": [
+              {
+                "id": "new",
+                "kind": "function",
+                "is_method": false,
+                "genargs": ["T1"],
+                "args": [],
+                "ret": {
+                  "kind": "defined",
+                  "id": "std::game::Character",
+                  "genargs": [
+                    {
+                      "kind": "defined",
+                      "id": "T1"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+
