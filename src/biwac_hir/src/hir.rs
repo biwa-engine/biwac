@@ -173,7 +173,7 @@ impl Hir {
                                 StructDefContent {
                                     members: HashMap::new(),
                                     genargs: (0..genarg_len).map(GenTyId::new).collect(),
-                                    struct_name_span: SSpan::Span { span: item.span },
+                                    struct_name_span: item.span.clone(),
                                 },
                             ))),
                             vals: HashMap::new(),

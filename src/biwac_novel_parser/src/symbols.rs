@@ -24,7 +24,7 @@ impl<'src> NovelSourceStream<'src> {
                 //      }         // span.begin().line() + self.cursor.lidx
                 //  }}            // span.end().line()
                 //  ```
-                if self.span.end().line() == self.span.begin().line() + self.cursor.lidx {
+                if self.span.end() == self.idx {
                     return Ok(stmts);
                 } else {
                     assert_eq!(self.line_kind(), Some(NovelLineKind::BlockClose));

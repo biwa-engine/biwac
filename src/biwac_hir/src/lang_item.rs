@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use biwac_base::{ModPath, PackageName, Pos, Span};
+use biwac_base::{ModPath, PackageName, SSpan};
 
 use crate::{DefinedTy, FnDefContentSignature, Ty, TyId, TyKind, ValId};
 
@@ -8,7 +8,7 @@ use crate::{DefinedTy, FnDefContentSignature, Ty, TyId, TyKind, ValId};
 pub struct LangItem {
     pub kind: LangItemKind,
     pub id: String,
-    pub span: Span,
+    pub span: SSpan,
 }
 
 #[derive(Debug, Clone)]
@@ -34,19 +34,17 @@ impl LangItem {
     }
 }
 
-fn dummy_span(kind: &LangItemKind) -> Span {
+fn dummy_span(kind: &LangItemKind) -> SSpan {
     // TODO: Span に package を追加
     match kind {
-        LangItemKind::Ty { tid, .. } => Span::new(
-            ModPath::Mod(tid.quals.clone()),
-            Pos::new(0, 0),
-            Pos::new(0, 0),
-        ),
-        LangItemKind::Val { vid, .. } => Span::new(
-            ModPath::Mod(vid.quals.clone()),
-            Pos::new(0, 0),
-            Pos::new(0, 0),
-        ),
+        LangItemKind::Ty { tid, .. } => SSpan::External {
+            pkg: tid.pkg.name().clone(),
+            modu: ModPath::Mod(tid.quals.clone()),
+        },
+        LangItemKind::Val { vid, .. } => SSpan::External {
+            pkg: vid.pkg.name().clone(),
+            modu: ModPath::Mod(vid.quals.clone()),
+        },
     }
 }
 

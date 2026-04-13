@@ -1,4 +1,4 @@
-use crate::PackageName;
+use crate::{PackageName, src::FileId};
 
 const BIWA_SRC_EXT: &str = "biwa";
 
@@ -13,9 +13,9 @@ pub enum ModPath {
 /// such as lexer token, AST node, and other IR node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
-    modu: ModPath,
-    begin: Pos,
-    end: Pos,
+    file: FileId,
+    begin: usize,
+    end: usize,
 }
 
 /// `struct Pos` represents position in raw source codes.
@@ -40,49 +40,28 @@ pub enum SSpan {
 }
 
 impl Span {
-    pub fn new(modu: ModPath, begin: Pos, end: Pos) -> Self {
-        Self { modu, begin, end }
+    pub fn new(file: FileId, begin: usize, end: usize) -> Self {
+        Self { file, begin, end }
     }
 
     pub fn merge(begin: &Self, end: &Self) -> Self {
         Self {
-            modu: begin.modu.clone(),
-            begin: begin.begin.clone(),
-            end: end.end.clone(),
+            file: begin.file,
+            begin: begin.begin,
+            end: end.end,
         }
     }
 
-    pub fn module(&self) -> &ModPath {
-        &self.modu
+    pub fn module(&self) -> FileId {
+        self.file
     }
 
-    pub fn begin(&self) -> &Pos {
-        &self.begin
+    pub fn begin(&self) -> usize {
+        self.begin
     }
 
-    pub fn end(&self) -> &Pos {
-        &self.end
-    }
-
-    pub fn file_position(&self) -> String {
-        if self.begin.line == self.end.line {
-            format!(
-                "{} L{}:{}-{}",
-                self.modu.file_name(),
-                self.begin.line + 1,
-                self.begin.idx + 1,
-                self.end.idx
-            )
-        } else {
-            format!(
-                "{} L{}:{}-L{}:{}",
-                self.modu.file_name(),
-                self.begin.line + 1,
-                self.begin.idx + 1,
-                self.end.line + 1,
-                self.end.idx
-            )
-        }
+    pub fn end(&self) -> usize {
+        self.end
     }
 }
 

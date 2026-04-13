@@ -1,10 +1,21 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
 
-pub struct ModSrc {
-    path: PathBuf,
+use crate::ModPath;
+
+pub struct SourceHolder {
+    mods: HashMap<FileId, ModSource>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileId(usize);
+
+pub struct ModSource {
+    modu: ModPath,
     src: String,
 }
 
-pub struct PkgSrc {
-    mods: Vec<ModSrc>,
+impl FileId {
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
 }

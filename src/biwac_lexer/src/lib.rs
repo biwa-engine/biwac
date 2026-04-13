@@ -5,28 +5,26 @@ pub mod token;
 mod tests;
 
 use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
-use biwac_base::ModPath;
+use biwac_base::{FileId, Span};
 
 pub use token::{TkKind, TkVal, Token};
 
 #[derive(Debug, Clone)]
 pub enum TokenizeError {
     SingleQuoteCloseNotFound,
-    DoubleQuoteCloseNotFound,
+    DoubleQuoteCloseNotFound { span: Span },
 }
 
-pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
-    let regions = divide_regions(modu.clone(), src)?;
+pub fn lex(file_id: FileId, src: &str) -> Result<Vec<Token>, TokenizeError> {
+    let regions = divide_regions(file_id, src)?;
 
-    let pretokens = pre_lex(modu, src, regions);
+    let pretokens = pre_lex(file_id, src, regions);
 
-    let lines: Vec<&str> = src.lines().collect();
     let tokens = pretokens
         .into_iter()
         .map(|p| match p.kind {
             PreTkKind::Word => {
-                let w = &lines.get(p.span.begin().line()).unwrap()
-                    [p.span.begin().idx()..p.span.end().idx()];
+                let w = &src[p.span.begin()..p.span.end()];
 
                 let (kind, val) = match w {
                     "TRUE" => (TkKind::BoolLiteralTrue, None),
@@ -75,24 +73,13 @@ pub fn lex(modu: ModPath, src: &str) -> Result<Vec<Token>, TokenizeError> {
                 kind: TkKind::StringLiteral,
                 span: p.span.clone(),
                 val: Some(TkVal::String(
-                    lines.get(p.span.begin().line()).unwrap()
-                        [p.span.begin().idx() + 1..p.span.end().idx() - 1]
-                        .to_string(),
+                    src[p.span.begin() + 1..p.span.end() - 1].to_string(),
                 )),
             },
             PreTkKind::Dsl => Token {
                 kind: TkKind::DslLiteral,
                 span: p.span.clone(),
-                val: Some(TkVal::String(
-                    // 開始行と終了行は少なくとも別の行
-                    [
-                        lines.get(p.span.begin().line()).unwrap()[p.span.begin().idx()..]
-                            .to_string(),
-                        lines[p.span.begin().line() + 1..p.span.end().line()].join("\n"),
-                        lines.get(p.span.end().line()).unwrap()[..p.span.end().idx()].to_string(),
-                    ]
-                    .join("\n"),
-                )),
+                val: Some(TkVal::String(src[p.span.begin()..p.span.end()].to_string())),
             },
         })
         .collect();

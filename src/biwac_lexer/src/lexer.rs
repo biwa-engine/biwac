@@ -1,4 +1,4 @@
-use biwac_base::{ModPath, Pos, Span};
+use biwac_base::{FileId, Span};
 
 use crate::{TokenizeError, token::TkKind};
 
@@ -15,19 +15,21 @@ enum RegionKind {
     Dsl,
 }
 
-pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
+pub(crate) fn divide_regions(modu: FileId, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
     let mut regions: Vec<SrcRegion> = vec![];
 
-    let mut quoted = false;
+    let mut inner_quoted = false;
     let mut inner_dsl = false;
-    let mut last_pos = Pos::new(0, 0);
-    let mut lmaxidx = 0;
-    for (lidx, l) in src.lines().enumerate() {
-        lmaxidx = lidx;
-        let mut idx = 0;
-        let mut comment_end = false;
-        while idx < l.len() {
-            if inner_dsl {
+    let mut inner_line_comment = false;
+
+    let mut last_pos = 0;
+
+    let mut chars = src.chars();
+    let mut i = 0;
+    while let Some(c) = chars.nth(i) {
+        match c {
+            // 改行ならリセット
+            '\n' => {
                 // DSLの領域は
                 // ```biwa
                 //   }}
@@ -35,95 +37,95 @@ pub(crate) fn divide_regions(modu: ModPath, src: &str) -> Result<Vec<SrcRegion>,
                 // のように空白文字を除けば`}}`で始まる行が来たら終了
                 // それまではここでは何もしない
                 // パースは独自のパーサに委譲する
-                let trimmed = l.trim_start();
-                let trimmed_idx = l.len() - trimmed.len();
-                if trimmed.starts_with("}}") {
-                    // end of DSL
-                    inner_dsl = false;
-                    regions.push(SrcRegion {
-                        kind: RegionKind::Dsl,
-                        span: Span::new(modu.clone(), last_pos, Pos::new(lidx, 0)),
-                    });
-                    last_pos = Pos::new(lidx, trimmed_idx + 2);
-                } else {
-                    break;
-                }
-            } else {
-                if quoted {
-                    // TODO: if backslach appear, start escape
-                    // if &l[idx..idx + 1] == "\\" {}
-                    if let '\"' = l.chars().nth(idx).unwrap() {
-                        // end of string literal
-                        quoted = false;
+                if inner_dsl {
+                    let remained_len = src[i..].chars().count();
+                    let trimmed = src[i..].trim_start_matches('\n').trim_start();
+                    let trimmed_len = remained_len - trimmed.len();
+                    if trimmed.starts_with("}}") {
+                        // end of DSL
                         regions.push(SrcRegion {
-                            kind: RegionKind::StringLiteral,
-                            span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx + 1)),
+                            kind: RegionKind::Dsl,
+                            span: Span::new(modu.clone(), last_pos, i + 1 + trimmed_len),
                         });
-                        last_pos = Pos::new(lidx, idx + 1);
+                        i = i + 1 + trimmed_len;
+                        last_pos = i;
+                        inner_dsl = false;
+                        break;
                     }
-
-                    idx += 1;
-                } else if let '\"' = l.chars().nth(idx).unwrap() {
-                    // start of string literal
-                    quoted = true;
-                    if idx > 0 {
+                } else if inner_quoted {
+                    return Err(TokenizeError::DoubleQuoteCloseNotFound {
+                        span: Span::new(modu, i, i + 1),
+                    });
+                } else if inner_line_comment {
+                    inner_line_comment = false;
+                    last_pos = i + 1;
+                }
+            }
+            c => {
+                if !inner_dsl && !inner_line_comment {
+                    if inner_quoted {
+                        // TODO: if backslach appear, start escape
+                        // if &l[idx..idx + 1] == "\\" {}
+                        if c == '\"' {
+                            // end of string literal
+                            inner_quoted = false;
+                            regions.push(SrcRegion {
+                                kind: RegionKind::StringLiteral,
+                                span: Span::new(modu.clone(), last_pos, i + 1),
+                            });
+                            last_pos = i + 1;
+                        }
+                    } else if c == '\"' {
+                        // start of string literal
+                        inner_quoted = true;
+                        if i > 0 {
+                            regions.push(SrcRegion {
+                                kind: RegionKind::Raw,
+                                span: Span::new(modu.clone(), last_pos, i),
+                            });
+                            last_pos = i + 1;
+                        }
+                    } else if c == '/'
+                        && let Some('/') = chars.next()
+                    {
+                        // start of comment (to line end)
                         regions.push(SrcRegion {
                             kind: RegionKind::Raw,
-                            span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
+                            span: Span::new(modu.clone(), last_pos, i),
                         });
-                        last_pos = Pos::new(lidx, idx);
+
+                        inner_line_comment = true;
+                        i += 2;
+
+                        break;
+                    } else if let '{' = c
+                        && let Some('{') = chars.next()
+                    {
+                        // start of DSL such as novel mode, or inline native code.
+                        regions.push(SrcRegion {
+                            kind: RegionKind::Raw,
+                            span: Span::new(modu.clone(), last_pos, i),
+                        });
+                        last_pos = i + 2;
+
+                        inner_dsl = true;
+                        break;
                     }
-                } else if let '/' = l.chars().nth(idx).unwrap()
-                    && let Some('/') = l.chars().nth(idx + 1)
-                {
-                    // start of comment (to line end)
-                    regions.push(SrcRegion {
-                        kind: RegionKind::Raw,
-                        span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
-                    });
-                    last_pos = Pos::new(lidx + 1, 0);
-
-                    comment_end = true;
-                    break;
-                } else if let '{' = l.chars().nth(idx).unwrap()
-                    && let Some('{') = l.chars().nth(idx + 1)
-                {
-                    // start of DSL such as novel mode, or inline native code.
-                    regions.push(SrcRegion {
-                        kind: RegionKind::Raw,
-                        span: Span::new(modu.clone(), last_pos, Pos::new(lidx, idx)),
-                    });
-                    last_pos = Pos::new(lidx, idx + 2);
-
-                    inner_dsl = true;
-                    break;
                 }
-
-                idx += 1;
             }
         }
 
-        if quoted {
-            return Err(TokenizeError::DoubleQuoteCloseNotFound);
-        } else if !comment_end && idx < l.len() && !inner_dsl {
-            regions.push(SrcRegion {
-                kind: RegionKind::Raw,
-                span: Span::new(modu.clone(), last_pos, Pos::new(lidx, l.len())),
-            });
-            last_pos = Pos::new(lidx + 1, 0);
-        }
+        i += 1;
     }
 
-    if quoted {
-        Err(TokenizeError::DoubleQuoteCloseNotFound)
+    if inner_quoted {
+        Err(TokenizeError::DoubleQuoteCloseNotFound {
+            span: Span::new(modu, i, i + 1),
+        })
     } else {
         regions.push(SrcRegion {
             kind: RegionKind::Raw,
-            span: Span::new(
-                modu.clone(),
-                last_pos,
-                Pos::new(lmaxidx, src.lines().last().map_or(0, |l| l.len())),
-            ),
+            span: Span::new(modu, last_pos, i),
         });
 
         Ok(regions)
@@ -144,7 +146,7 @@ pub(crate) enum PreTkKind {
     Dsl,
 }
 
-pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
+pub(crate) fn pre_lex(modu: FileId, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
     let lines: Vec<&str> = src.lines().collect();
     let mut pretokens = vec![];
     if lines.is_empty() {
@@ -154,26 +156,12 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
     for r in &regions {
         match r.kind {
             RegionKind::Raw => {
-                let mut lidx = r.span.begin().line();
-                while lidx <= r.span.end().line() {
-                    // NOTE: region の開始行は開始インデックスに注意
-                    let mut idx = if lidx == r.span.begin().line() {
-                        r.span.begin().idx()
-                    } else {
-                        0
-                    };
+                for line in &lines {
+                    let mut idx = 0;
                     let mut last_idx = idx;
-
-                    // NOTE: region の終了行は終了インデックスに注意
-                    // なお、lineは対象行の0文字目からregion終了インデックスまで
-                    let line = if lidx == r.span.end().line() {
-                        &lines.get(lidx).unwrap()[..r.span.end().idx()]
-                    } else {
-                        lines.get(lidx).unwrap()
-                    };
                     while idx < line.len() {
                         // two characters reserved mark
-                        if idx + 1 < line.len()
+                        if idx + 1 < r.span.end()
                             && let Some(kind) = match &line[idx..idx + 2] {
                                 "<=" => Some(TkKind::LesEq),
                                 ">=" => Some(TkKind::GrtEq),
@@ -187,21 +175,13 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                             if last_idx < idx {
                                 pretokens.push(PreToken {
                                     kind: PreTkKind::Word,
-                                    span: Span::new(
-                                        modu.clone(),
-                                        Pos::new(lidx, last_idx),
-                                        Pos::new(lidx, idx),
-                                    ),
+                                    span: Span::new(modu, last_idx, idx),
                                 });
                             }
 
                             pretokens.push(PreToken {
                                 kind: PreTkKind::Mark(kind),
-                                span: Span::new(
-                                    modu.clone(),
-                                    Pos::new(lidx, idx),
-                                    Pos::new(lidx, idx + 2),
-                                ),
+                                span: Span::new(modu, idx, idx + 2),
                             });
 
                             idx += 2;
@@ -235,21 +215,13 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                             if last_idx < idx {
                                 pretokens.push(PreToken {
                                     kind: PreTkKind::Word,
-                                    span: Span::new(
-                                        modu.clone(),
-                                        Pos::new(lidx, last_idx),
-                                        Pos::new(lidx, idx),
-                                    ),
+                                    span: Span::new(modu, last_idx, idx),
                                 });
                             }
 
                             pretokens.push(PreToken {
                                 kind: PreTkKind::Mark(kind),
-                                span: Span::new(
-                                    modu.clone(),
-                                    Pos::new(lidx, idx),
-                                    Pos::new(lidx, idx + 1),
-                                ),
+                                span: Span::new(modu, idx, idx + 1),
                             });
 
                             idx += 1;
@@ -262,11 +234,7 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                                 if last_idx < idx {
                                     pretokens.push(PreToken {
                                         kind: PreTkKind::Word,
-                                        span: Span::new(
-                                            modu.clone(),
-                                            Pos::new(lidx, last_idx),
-                                            Pos::new(lidx, idx),
-                                        ),
+                                        span: Span::new(modu, last_idx, idx),
                                     });
                                 }
 
@@ -282,15 +250,9 @@ pub(crate) fn pre_lex(modu: ModPath, src: &str, regions: Vec<SrcRegion>) -> Vec<
                     if last_idx < line.len() {
                         pretokens.push(PreToken {
                             kind: PreTkKind::Word,
-                            span: Span::new(
-                                modu.clone(),
-                                Pos::new(lidx, last_idx),
-                                Pos::new(lidx, line.len()),
-                            ),
+                            span: Span::new(modu.clone(), last_idx, idx),
                         });
                     }
-
-                    lidx += 1;
                 }
             }
             RegionKind::StringLiteral => {

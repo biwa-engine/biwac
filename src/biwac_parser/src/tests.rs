@@ -1,4 +1,4 @@
-use biwac_base::{ModPath, Pos, Span};
+use biwac_base::{FileId, Span};
 
 use biwac_ast::{
     Exprs, Globals, Ident, IntegerLiteral, Literal, Primary, Stmt, StringLiteral, TypDecl, VarDecl,
@@ -6,7 +6,7 @@ use biwac_ast::{
 
 #[test]
 fn test1() {
-    let modu = ModPath::Main;
+    let file_id = FileId::new(0);
 
     // NOTE: Rustの生文字列の扱いでは以下の場合
     // 空文字列の0行目が含まれ、fnは1行目となるため注意
@@ -18,7 +18,7 @@ fn foo() {
 }
 "#;
 
-    let tokens = biwac_lexer::lex(modu.clone(), src).unwrap();
+    let tokens = biwac_lexer::lex(file_id, src).unwrap();
 
     let module = crate::Parser::new(tokens).try_parse().unwrap();
 
@@ -36,13 +36,13 @@ fn foo() {
             typ: TypDecl::Any,
             id: Ident {
                 id: "x".to_string(),
-                span: Span::new(modu.clone(), Pos::new(2, 8), Pos::new(2, 9))
+                span: Span::new(file_id, 20, 21)
             },
             init: Exprs::Primary(Primary::Literal(Literal::Integer(IntegerLiteral {
                 val: 0,
-                span: Span::new(modu.clone(), Pos::new(2, 12), Pos::new(2, 13))
+                span: Span::new(file_id, 25, 26)
             }))),
-            span: Span::new(modu.clone(), Pos::new(2, 4), Pos::new(2, 14))
+            span: Span::new(file_id, 16, 28)
         }),
         fn_foo.stmts.first().unwrap()
     );
@@ -51,13 +51,13 @@ fn foo() {
             typ: TypDecl::Any,
             id: Ident {
                 id: "str".to_string(),
-                span: Span::new(modu.clone(), Pos::new(4, 8), Pos::new(4, 11))
+                span: Span::new(file_id, 54, 57)
             },
             init: Exprs::Primary(Primary::Literal(Literal::String(StringLiteral {
                 val: "string".to_string(),
-                span: Span::new(modu.clone(), Pos::new(4, 14), Pos::new(4, 22))
+                span: Span::new(file_id, 60, 68)
             }))),
-            span: Span::new(modu.clone(), Pos::new(4, 4), Pos::new(4, 23))
+            span: Span::new(file_id, 50, 69)
         }),
         fn_foo.stmts.get(1).unwrap()
     );

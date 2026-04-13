@@ -17,7 +17,7 @@ impl<'src> NovelSourceStream<'src> {
                         // - 埋め込み式 $(expr) をパース
                         // - wait コマンド >> をパース
 
-                        let line = self.lines.get(self.cursor.lidx).unwrap();
+                        let line = &self.src[self.line_begin_idx..self.next_line_begin_idx];
 
                         Ok(vec![NovelStmt::NovelWrite(NovelMessage {
                             msg: line.to_string(),
