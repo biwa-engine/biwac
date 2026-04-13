@@ -1,4 +1,9 @@
+# nix
+/.direnv
+
+# rust
 **/target
 **/dst
 **/.biwa_build
 .env
+
