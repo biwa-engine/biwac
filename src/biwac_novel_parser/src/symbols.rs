@@ -15,16 +15,16 @@ impl<'src> NovelSourceStream<'src> {
                 // 正常に最終行までパースできる場合
                 //  ```biwa
                 //      Hello!
-                //  }}            // span.end().line() == span.begin().line() + self.cursor.lidx
+                //  }}            // span.end() == span.begin() + self.idx
                 //  ```
                 //
                 // } が残っていて、パースしようとしても空が返る場合
                 //  ```biwa
                 //      Hello!
-                //      }         // span.begin().line() + self.cursor.lidx
-                //  }}            // span.end().line()
+                //      }         // span.begin() + idx
+                //  }}            // span.end()
                 //  ```
-                if self.span.end() == self.idx {
+                if self.span.end() == self.span.begin() + self.idx {
                     return Ok(stmts);
                 } else {
                     assert_eq!(self.line_kind(), Some(NovelLineKind::BlockClose));

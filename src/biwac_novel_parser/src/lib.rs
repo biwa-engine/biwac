@@ -47,9 +47,9 @@ pub struct NovelSourceStream<'src> {
 
     src: &'src str,
 
-    idx: usize,
-    line_begin_idx: usize,
-    next_line_begin_idx: usize,
+    idx: usize,                 // DSL部分の文字列スライス src のインデックス
+    line_begin_idx: usize,      // 同じく
+    next_line_begin_idx: usize, // 同じく
 }
 
 #[derive(Debug)]
@@ -96,7 +96,7 @@ impl<'src> NovelSourceStream<'src> {
     //
     //  次の行が存在すれば true を返す
     fn next_line(&mut self) -> Option<NovelLineKind> {
-        assert_eq!(self.idx, self.next_line_begin_idx);
+        // assert_eq!(self.idx, self.next_line_begin_idx);
 
         if self.next_line_begin_idx >= self.src.len() {
             None
@@ -105,9 +105,11 @@ impl<'src> NovelSourceStream<'src> {
             self.next_line_begin_idx = self.src.len();
             for (i, c) in self.src[self.line_begin_idx..].char_indices() {
                 if c == '\n' {
-                    self.next_line_begin_idx = self.line_begin_idx + i;
+                    self.next_line_begin_idx = self.line_begin_idx + i + 1;
+                    break;
                 }
             }
+            self.idx = self.line_begin_idx;
 
             let next_line = &self.src[self.line_begin_idx..self.next_line_begin_idx];
 
@@ -115,7 +117,7 @@ impl<'src> NovelSourceStream<'src> {
             // 先頭をtrimする
             for (i, c) in next_line.char_indices() {
                 if i <= self.indent_depth && c.is_whitespace() {
-                    self.idx = self.line_begin_idx + i;
+                    self.idx += i;
                 } else {
                     break;
                 }
@@ -125,20 +127,14 @@ impl<'src> NovelSourceStream<'src> {
         }
     }
 
-    fn current_line(&self) -> &str {
-        &self.src[self.line_begin_idx..self.next_line_begin_idx]
-    }
-
     // 行の種類を返す
     // 空白行は、改行のみのノベルテキストとみなす
     fn line_kind(&mut self) -> Option<NovelLineKind> {
-        let line = self.current_line();
-
         // 空白文字でない位置まで一時的に下げる
-        let mut tmp_idx = self.idx;
-        for (i, c) in line.char_indices() {
+        let mut tmp_idx_in_line = 0;
+        for (i, c) in self.src[self.line_begin_idx..self.next_line_begin_idx].char_indices() {
             if !c.is_whitespace() || c == '\n' {
-                tmp_idx = i;
+                tmp_idx_in_line = i;
                 break;
             }
         }
@@ -146,17 +142,17 @@ impl<'src> NovelSourceStream<'src> {
         // NOTE:
         // コマンド行であれば
         // カーソル位置をその次にずらす
-        match line.chars().nth(tmp_idx) {
+        match self.src.chars().nth(self.line_begin_idx + tmp_idx_in_line) {
             Some('#') => {
-                self.idx = tmp_idx + 1;
+                self.idx = self.line_begin_idx + tmp_idx_in_line + 1;
                 Some(NovelLineKind::GeneralCommand)
             }
             Some('@') => {
-                self.idx = tmp_idx + 1;
+                self.idx = self.line_begin_idx + tmp_idx_in_line + 1;
                 Some(NovelLineKind::CharaCommand)
             }
             Some('}') => {
-                self.idx = tmp_idx + 1;
+                self.idx = self.line_begin_idx + tmp_idx_in_line + 1;
                 Some(NovelLineKind::BlockClose)
             }
             Some(_) => Some(NovelLineKind::RawNovel),
@@ -165,6 +161,10 @@ impl<'src> NovelSourceStream<'src> {
     }
 
     fn current_span(&self, token_len: usize) -> Span {
-        Span::new(self.span.module(), self.idx, self.idx + token_len)
+        Span::new(
+            self.span.module(),
+            self.span.begin() + self.idx,
+            self.span.begin() + self.idx + token_len,
+        )
     }
 }

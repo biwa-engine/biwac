@@ -41,9 +41,9 @@ fn foo() {
             },
             init: Exprs::Primary(Primary::Literal(Literal::Integer(IntegerLiteral {
                 val: 0,
-                span: Span::new(mod_id, 25, 26)
+                span: Span::new(mod_id, 24, 25)
             }))),
-            span: Span::new(mod_id, 16, 28)
+            span: Span::new(mod_id, 16, 26)
         }),
         fn_foo.stmts.first().unwrap()
     );
@@ -52,13 +52,13 @@ fn foo() {
             typ: TypDecl::Any,
             id: Ident {
                 id: "str".to_string(),
-                span: Span::new(mod_id, 54, 57)
+                span: Span::new(mod_id, 52, 55)
             },
             init: Exprs::Primary(Primary::Literal(Literal::String(StringLiteral {
                 val: "string".to_string(),
-                span: Span::new(mod_id, 60, 68)
+                span: Span::new(mod_id, 58, 66)
             }))),
-            span: Span::new(mod_id, 50, 69)
+            span: Span::new(mod_id, 48, 67)
         }),
         fn_foo.stmts.get(1).unwrap()
     );

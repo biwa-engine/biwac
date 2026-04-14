@@ -105,7 +105,7 @@ impl<'src> NovelSourceStream<'src> {
             Some(t) => {
                 // カーソル位置を更新する
                 if let Some(t) = &t {
-                    self.idx = t.span.end();
+                    self.idx = t.span.end() - self.span.begin();
                 }
 
                 Ok(t)
@@ -115,7 +115,7 @@ impl<'src> NovelSourceStream<'src> {
 
                 let t = self.peeked.take().unwrap();
                 if let Some(t) = &t {
-                    self.idx = t.span.end();
+                    self.idx = t.span.end() - self.span.begin();
                 }
 
                 // SAFETY: .next_peek() で .peeked は必ず Some になっている
@@ -136,7 +136,8 @@ impl<'src> NovelSourceStream<'src> {
     // ノベルモード中のコードについては、おそらく実際には変換すればLL(1)として表せるだろうが、
     // パーサの実装のしやすさからpeekは用いたい。
     pub(crate) fn peek_token(&mut self) -> Result<Option<&NCodeToken>, NovelParseError> {
-        if self.idx >= self.src.len() {
+        if self.idx >= self.next_line_begin_idx {
+            self.peeked = Some(None);
             return Ok(None);
         };
 
@@ -148,8 +149,7 @@ impl<'src> NovelSourceStream<'src> {
                 .chars()
                 .peekable();
 
-            // SAFETY: 現在のインデックスより行の長さが大きいため、
-            // 次の文字は必ず存在する
+            // SAFETY: 現在の位置が行内であることを検査済み
             let (kind, token_len) = match remain_chars.next().unwrap() {
                 '(' => (Some(NCodeTkKind::MarkLPare), 1),
                 ')' => (Some(NCodeTkKind::MarkRPare), 1),
@@ -323,7 +323,7 @@ impl<'src> NovelSourceStream<'src> {
                 self.idx += token_len;
                 self.peek_token()?;
             }
-        };
+        }
 
         Ok(self.peeked.as_ref().unwrap().as_ref())
     }
