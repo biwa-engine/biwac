@@ -48,13 +48,13 @@ fn foo() {
 
     assert_eq!(TkKind::Ident, tokens[11].kind);
     assert_eq!(Some(TkVal::String("str".to_string())), tokens[11].val);
-    assert_eq!(Span::new(modu, 54, 57), tokens[11].span);
+    assert_eq!(Span::new(modu, 52, 55), tokens[11].span);
 
     assert_eq!(TkKind::Assign, tokens[12].kind);
 
     assert_eq!(TkKind::StringLiteral, tokens[13].kind);
     assert_eq!(Some(TkVal::String("string".to_string())), tokens[13].val);
-    assert_eq!(Span::new(modu, 60, 68), tokens[13].span);
+    assert_eq!(Span::new(modu, 58, 66), tokens[13].span);
 
     assert_eq!(TkKind::SemiColon, tokens[14].kind);
 

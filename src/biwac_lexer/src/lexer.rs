@@ -15,19 +15,19 @@ enum RegionKind {
     Dsl,
 }
 
-pub(crate) fn divide_regions(modu: ModId, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
+pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
     let mut regions: Vec<SrcRegion> = vec![];
 
     let mut inner_quoted = false;
     let mut inner_dsl = false;
     let mut inner_line_comment = false;
 
-    let mut last_pos = 0;
+    let mut region_begin_idx = 0;
 
-    let mut chars = src.chars();
+    let chars: Vec<char> = src.chars().collect();
     let mut i = 0;
-    while let Some(c) = chars.nth(i) {
-        match c {
+    while let Some(c) = chars.get(i) {
+        match *c {
             // 改行ならリセット
             '\n' => {
                 // DSLの領域は
@@ -45,20 +45,20 @@ pub(crate) fn divide_regions(modu: ModId, src: &str) -> Result<Vec<SrcRegion>, T
                         // end of DSL
                         regions.push(SrcRegion {
                             kind: RegionKind::Dsl,
-                            span: Span::new(modu.clone(), last_pos, i + 1 + trimmed_len),
+                            span: Span::new(mod_id, region_begin_idx, i + trimmed_len),
                         });
-                        i = i + 1 + trimmed_len;
-                        last_pos = i;
+                        i += 2 + trimmed_len;
+                        region_begin_idx = i;
                         inner_dsl = false;
-                        break;
+                        continue;
                     }
                 } else if inner_quoted {
                     return Err(TokenizeError::DoubleQuoteCloseNotFound {
-                        span: Span::new(modu, i, i + 1),
+                        span: Span::new(mod_id, i, i + 1),
                     });
                 } else if inner_line_comment {
                     inner_line_comment = false;
-                    last_pos = i + 1;
+                    region_begin_idx = i + 1;
                 }
             }
             c => {
@@ -71,61 +71,63 @@ pub(crate) fn divide_regions(modu: ModId, src: &str) -> Result<Vec<SrcRegion>, T
                             inner_quoted = false;
                             regions.push(SrcRegion {
                                 kind: RegionKind::StringLiteral,
-                                span: Span::new(modu.clone(), last_pos, i + 1),
+                                span: Span::new(mod_id, region_begin_idx, i + 1),
                             });
-                            last_pos = i + 1;
+                            region_begin_idx = i + 1;
                         }
                     } else if c == '\"' {
                         // start of string literal
                         inner_quoted = true;
-                        if i > 0 {
+                        if i > region_begin_idx {
                             regions.push(SrcRegion {
                                 kind: RegionKind::Raw,
-                                span: Span::new(modu.clone(), last_pos, i),
+                                span: Span::new(mod_id, region_begin_idx, i),
                             });
-                            last_pos = i + 1;
+                            region_begin_idx = i;
                         }
                     } else if c == '/'
-                        && let Some('/') = chars.next()
+                        && let Some('/') = chars.get(i + 1)
                     {
                         // start of comment (to line end)
                         regions.push(SrcRegion {
                             kind: RegionKind::Raw,
-                            span: Span::new(modu.clone(), last_pos, i),
+                            span: Span::new(mod_id, region_begin_idx, i),
                         });
-
+                        region_begin_idx = i;
                         inner_line_comment = true;
                         i += 2;
 
-                        break;
+                        continue;
                     } else if let '{' = c
-                        && let Some('{') = chars.next()
+                        && let Some('{') = chars.get(i + 1)
                     {
                         // start of DSL such as novel mode, or inline native code.
                         regions.push(SrcRegion {
                             kind: RegionKind::Raw,
-                            span: Span::new(modu.clone(), last_pos, i),
+                            span: Span::new(mod_id, region_begin_idx, i),
                         });
-                        last_pos = i + 2;
+                        region_begin_idx = i + 2;
 
                         inner_dsl = true;
-                        break;
+                        i += 2;
+                        continue;
                     }
                 }
             }
         }
 
         i += 1;
+        // i += c.len_utf8();
     }
 
     if inner_quoted {
         Err(TokenizeError::DoubleQuoteCloseNotFound {
-            span: Span::new(modu, i, i + 1),
+            span: Span::new(mod_id, i, i + 1),
         })
     } else {
         regions.push(SrcRegion {
             kind: RegionKind::Raw,
-            span: Span::new(modu, last_pos, i),
+            span: Span::new(mod_id, region_begin_idx, i),
         });
 
         Ok(regions)
@@ -146,113 +148,126 @@ pub(crate) enum PreTkKind {
     Dsl,
 }
 
-pub(crate) fn pre_lex(modu: ModId, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
-    let lines: Vec<&str> = src.lines().collect();
+pub(crate) fn pre_lex(mod_id: ModId, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
     let mut pretokens = vec![];
-    if lines.is_empty() {
-        return pretokens;
-    }
 
     for r in &regions {
         match r.kind {
             RegionKind::Raw => {
-                for line in &lines {
-                    let mut idx = 0;
-                    let mut last_idx = idx;
-                    while idx < line.len() {
-                        // two characters reserved mark
-                        if idx + 1 < r.span.end()
-                            && let Some(kind) = match &line[idx..idx + 2] {
-                                "<=" => Some(TkKind::LesEq),
-                                ">=" => Some(TkKind::GrtEq),
-                                "==" => Some(TkKind::Equal),
-                                "!=" => Some(TkKind::NotEq),
-                                "->" => Some(TkKind::Arrow),
-                                "::" => Some(TkKind::DoubleColon),
-                                _ => None,
-                            }
-                        {
-                            if last_idx < idx {
-                                pretokens.push(PreToken {
-                                    kind: PreTkKind::Word,
-                                    span: Span::new(modu, last_idx, idx),
-                                });
-                            }
-
+                let region_src: Vec<char> = src[r.span.begin()..r.span.end()].chars().collect();
+                let mut idx = 0; // region 内のインデックス
+                let mut token_begin_idx = 0;
+                while let Some(c) = region_src.get(idx) {
+                    if *c == '\n' {
+                        if token_begin_idx < idx {
                             pretokens.push(PreToken {
-                                kind: PreTkKind::Mark(kind),
-                                span: Span::new(modu, idx, idx + 2),
+                                kind: PreTkKind::Word,
+                                span: Span::new(
+                                    mod_id,
+                                    r.span.begin() + token_begin_idx,
+                                    r.span.begin() + idx,
+                                ),
                             });
-
-                            idx += 2;
-                            last_idx = idx;
-                            continue;
                         }
-
-                        // single character reserved mark
-                        if let Some(kind) = match &line[idx..idx + 1] {
-                            "." => Some(TkKind::Dot),
-                            "(" => Some(TkKind::LPare),
-                            ")" => Some(TkKind::RPare),
-                            "{" => Some(TkKind::LBrace),
-                            "}" => Some(TkKind::RBrace),
-                            "[" => Some(TkKind::LBracket),
-                            "]" => Some(TkKind::RBracket),
-                            "+" => Some(TkKind::Plus),
-                            "-" => Some(TkKind::Minus),
-                            "*" => Some(TkKind::Asterisk),
-                            "/" => Some(TkKind::Slash),
-                            "%" => Some(TkKind::Percent),
-                            "&" => Some(TkKind::Ampersand),
-                            "<" => Some(TkKind::Lesser),
-                            ">" => Some(TkKind::Greater),
-                            "=" => Some(TkKind::Assign),
-                            "," => Some(TkKind::Comma),
-                            ":" => Some(TkKind::Colon),
-                            ";" => Some(TkKind::SemiColon),
+                        idx += 1;
+                        token_begin_idx = idx;
+                    } else if let Some(c2) = region_src.get(idx + 1)
+                        && let Some(kind) = match (*c, *c2) {
+                            ('<', '=') => Some(TkKind::LesEq),
+                            ('>', '=') => Some(TkKind::GrtEq),
+                            ('=', '=') => Some(TkKind::Equal),
+                            ('!', '=') => Some(TkKind::NotEq),
+                            ('-', '>') => Some(TkKind::Arrow),
+                            (':', ':') => Some(TkKind::DoubleColon),
                             _ => None,
-                        } {
-                            if last_idx < idx {
-                                pretokens.push(PreToken {
-                                    kind: PreTkKind::Word,
-                                    span: Span::new(modu, last_idx, idx),
-                                });
-                            }
-
+                        }
+                    {
+                        if token_begin_idx < idx {
                             pretokens.push(PreToken {
-                                kind: PreTkKind::Mark(kind),
-                                span: Span::new(modu, idx, idx + 1),
+                                kind: PreTkKind::Word,
+                                span: Span::new(
+                                    mod_id,
+                                    r.span.begin() + token_begin_idx,
+                                    r.span.begin() + idx,
+                                ),
                             });
-
-                            idx += 1;
-                            last_idx = idx;
-                            continue;
                         }
 
-                        match &line[idx..idx + 1] {
-                            " " | "\t" => {
-                                if last_idx < idx {
-                                    pretokens.push(PreToken {
-                                        kind: PreTkKind::Word,
-                                        span: Span::new(modu, last_idx, idx),
-                                    });
-                                }
-
-                                idx += 1;
-                                last_idx = idx;
-                            }
-                            _ => {
-                                idx += 1;
-                            }
-                        }
-                    }
-
-                    if last_idx < line.len() {
                         pretokens.push(PreToken {
-                            kind: PreTkKind::Word,
-                            span: Span::new(modu.clone(), last_idx, idx),
+                            kind: PreTkKind::Mark(kind),
+                            span: Span::new(
+                                mod_id,
+                                r.span.begin() + token_begin_idx,
+                                r.span.begin() + idx + 2,
+                            ),
                         });
+
+                        idx += 2;
+                        token_begin_idx = idx;
+                    } else if let Some(kind) = match *c {
+                        '.' => Some(TkKind::Dot),
+                        '(' => Some(TkKind::LPare),
+                        ')' => Some(TkKind::RPare),
+                        '{' => Some(TkKind::LBrace),
+                        '}' => Some(TkKind::RBrace),
+                        '[' => Some(TkKind::LBracket),
+                        ']' => Some(TkKind::RBracket),
+                        '+' => Some(TkKind::Plus),
+                        '-' => Some(TkKind::Minus),
+                        '*' => Some(TkKind::Asterisk),
+                        '/' => Some(TkKind::Slash),
+                        '%' => Some(TkKind::Percent),
+                        '&' => Some(TkKind::Ampersand),
+                        '<' => Some(TkKind::Lesser),
+                        '>' => Some(TkKind::Greater),
+                        '=' => Some(TkKind::Assign),
+                        ',' => Some(TkKind::Comma),
+                        ':' => Some(TkKind::Colon),
+                        ';' => Some(TkKind::SemiColon),
+                        _ => None,
+                    } {
+                        if token_begin_idx < idx {
+                            pretokens.push(PreToken {
+                                kind: PreTkKind::Word,
+                                span: Span::new(
+                                    mod_id,
+                                    r.span.begin() + token_begin_idx,
+                                    r.span.begin() + idx,
+                                ),
+                            });
+                        }
+
+                        pretokens.push(PreToken {
+                            kind: PreTkKind::Mark(kind),
+                            span: Span::new(mod_id, r.span.begin() + idx, r.span.begin() + idx + 1),
+                        });
+
+                        idx += 1;
+                        token_begin_idx = idx;
+                    } else if *c == ' ' || *c == '\t' {
+                        if token_begin_idx < idx {
+                            pretokens.push(PreToken {
+                                kind: PreTkKind::Word,
+                                span: Span::new(
+                                    mod_id,
+                                    r.span.begin() + token_begin_idx,
+                                    r.span.begin() + idx,
+                                ),
+                            });
+                        }
+
+                        idx += 1;
+                        token_begin_idx = idx;
+                    } else {
+                        idx += 1;
                     }
+                }
+
+                if token_begin_idx < idx {
+                    pretokens.push(PreToken {
+                        kind: PreTkKind::Word,
+                        span: Span::new(mod_id, r.span.begin() + token_begin_idx, r.span.end()),
+                    });
                 }
             }
             RegionKind::StringLiteral => {
