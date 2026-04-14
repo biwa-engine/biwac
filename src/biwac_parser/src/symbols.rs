@@ -21,6 +21,9 @@ impl Parser {
             }
         }
 
-        Ok(ModAst { globals })
+        Ok(ModAst {
+            modpath: self.modpath,
+            globals,
+        })
     }
 }

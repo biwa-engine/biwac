@@ -7,7 +7,7 @@ pub mod types;
 mod tests;
 
 use biwac_ast::{Ident, QualifiedId};
-use biwac_base::Span;
+use biwac_base::{ModPath, Span};
 use biwac_lexer::{TkKind, Token};
 
 pub(crate) use symbols::statements::ExprOrStmt;
@@ -16,12 +16,13 @@ pub use error::ParseError;
 
 #[derive(Debug, Clone)]
 pub struct Parser {
+    modpath: ModPath,
     tokens: Vec<Token>,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens }
+    pub fn new(modpath: ModPath, tokens: Vec<Token>) -> Self {
+        Self { modpath, tokens }
     }
 }
 

@@ -42,7 +42,7 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
                 Entry::Vacant(e) => {
                     let id = LocGenTyId::new(next_gen_id);
                     next_gen_id += 1;
-                    e.insert((id, ident.clone().into()));
+                    e.insert((id, ident.clone()));
                     impl_block_genarg_vec.push((ident.clone().into(), id));
                 }
                 Entry::Occupied(e) => {
@@ -94,11 +94,7 @@ impl<'mctx> ImplLevelTyResolveCtx<'mctx> {
             //      y = y,
             //  }
             //  ```
-            let garg_span = Span::new(
-                deftyp.qualid.span.module().clone(),
-                deftyp.qualid.span.end().clone(),
-                deftyp.qualid.span.end().clone(),
-            );
+            let garg_span = deftyp.qualid.span.clone();
 
             Ok(Ty::new(
                 TyKind::Defined(DefinedTy {

@@ -11,17 +11,20 @@ fn test1() {
 
     let pkg = Pkg::try_load(Path::new("../../assets/tests/test1").to_path_buf()).unwrap();
 
-    assert!(pkg.modules.contains_key(&ModPath::Main));
+    assert!(pkg.modules.iter().any(|(_, m)| m.modpath == ModPath::Main));
     assert!(
         pkg.modules
-            .contains_key(&ModPath::Mod(vec!["math".to_string()]))
+            .iter()
+            .any(|(_, m)| m.modpath == ModPath::Mod(vec!["math".to_string()]))
     );
     assert!(
         pkg.modules
-            .contains_key(&ModPath::Mod(vec!["math".to_string(), "pos".to_string()]))
+            .iter()
+            .any(|(_, m)| m.modpath == ModPath::Mod(vec!["math".to_string(), "pos".to_string()]))
     );
     assert!(
         pkg.modules
-            .contains_key(&ModPath::Mod(vec!["math".to_string(), "line".to_string()]))
+            .iter()
+            .any(|(_, m)| m.modpath == ModPath::Mod(vec!["math".to_string(), "line".to_string()]))
     );
 }

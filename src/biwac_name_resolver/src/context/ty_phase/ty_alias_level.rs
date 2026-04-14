@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use biwac_ast::{TypReprVal, TypeAlias};
-use biwac_base::{ModPath, Span};
+use biwac_base::{ModId, Span};
 use biwac_hir::{DefinedTy, FnTy, GenTyId, Hir, Ty, TyId, TyKind, TypeAliasDefContent};
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 
 #[derive(Debug)]
 pub(crate) struct TyAliasResolveCtx<'ast> {
-    mctxes: &'ast HashMap<ModPath, ModuleLevelTyResolveCtx>,
+    mctxes: &'ast HashMap<ModId, ModuleLevelTyResolveCtx>,
     alias_defs: HashMap<TyId, &'ast TypeAlias>,
 
     // 名前解決が済んだのみで循環参照などがあり得る type alias
@@ -26,7 +26,7 @@ pub(crate) struct TyAliasResolveCtx<'ast> {
 
 impl<'ast> TyAliasResolveCtx<'ast> {
     pub fn new(
-        mctxes: &'ast HashMap<ModPath, ModuleLevelTyResolveCtx>,
+        mctxes: &'ast HashMap<ModId, ModuleLevelTyResolveCtx>,
         alias_defs: HashMap<TyId, &'ast TypeAlias>,
     ) -> Self {
         Self {
@@ -75,7 +75,7 @@ impl<'ast> TyAliasResolveCtx<'ast> {
                 TypReprVal::Defined(_) => {
                     let mctx = self
                         .mctxes
-                        .get(alias.ident.span.module())
+                        .get(&alias.ident.span.module())
                         .expect("compiler bug: module not found");
 
                     //  type alias の左辺で宣言されたジェネリクス型を解決するために

@@ -28,7 +28,7 @@ pub enum PkgLoadError {
 
 #[derive(Debug)]
 pub struct Pkg {
-    pub modules: HashMap<ModPath, ModAst>,
+    pub modules: HashMap<ModId, ModAst>,
     pub srcs: SourceHolder,
 }
 
@@ -51,27 +51,27 @@ impl Pkg {
         // TODO:
         // 並列実行可能
         // エラーに互いに依存がないので、複数エラーを束ねるべき
-        for (file_id, (modpath, path)) in file_map.files {
+        for (mod_id, (modpath, path)) in file_map.files {
             let mut f = File::open(path.as_path()).unwrap();
             let mut contents = String::new();
             f.read_to_string(&mut contents).unwrap();
 
             let tokens =
-                biwac_lexer::lex(file_id, &contents).map_err(|e| PkgLoadError::LexError {
+                biwac_lexer::lex(mod_id, &contents).map_err(|e| PkgLoadError::LexError {
                     modpath: modpath.clone(),
                     err: Box::new(e),
                 })?;
 
-            let module = biwac_parser::Parser::new(tokens).try_parse().map_err(|e| {
-                PkgLoadError::ParseError {
+            let module = biwac_parser::Parser::new(modpath.clone(), tokens)
+                .try_parse()
+                .map_err(|e| PkgLoadError::ParseError {
                     modpath: modpath.clone(),
                     err: Box::new(e),
-                }
-            })?;
+                })?;
 
-            modules.insert(modpath.clone(), module);
+            modules.insert(mod_id, module);
             srcs.insert(
-                file_id,
+                mod_id,
                 ModSource {
                     modu: modpath,
                     src: contents,

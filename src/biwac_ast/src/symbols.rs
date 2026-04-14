@@ -3,12 +3,13 @@ pub mod globals;
 pub mod novel;
 pub mod statements;
 
-use biwac_base::Span;
+use biwac_base::{ModPath, Span};
 
 use crate::{Globals, PrimTyp, TypRepr, TypReprVal};
 
 #[derive(Debug)]
 pub struct ModAst {
+    pub modpath: ModPath,
     pub globals: Vec<Globals>,
 }
 

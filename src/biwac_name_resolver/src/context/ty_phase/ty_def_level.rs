@@ -1,7 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_ast::{Ident, TypRepr, TypReprVal};
-use biwac_base::Span;
 use biwac_hir::{DefinedTy, GenTyId, Hir, InferTy, Ty, TyKind};
 
 use crate::{
@@ -85,11 +84,7 @@ impl<'mctx> TyDefLevelTyResolveCtx<'mctx> {
                     // ジェネリック引数の数が合うか検査済み
                     let (tid, ty_existence) = self.mctx.try_resolve_defined_tid(deftyp, hir)?;
 
-                    let garg_span = Span::new(
-                        deftyp.qualid.span.module().clone(),
-                        deftyp.qualid.span.end().clone(),
-                        deftyp.qualid.span.end().clone(),
-                    );
+                    let garg_span = deftyp.qualid.span.clone();
 
                     Ok(Ty::new(
                         TyKind::Defined(DefinedTy {

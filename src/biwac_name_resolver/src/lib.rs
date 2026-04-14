@@ -8,7 +8,7 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 
 use biwac_ast::{DefTyp, ImportDecl, QualifiedId, TypeDef};
-use biwac_base::{ModPath, PackageName, PackageNameError, SSpan, Span};
+use biwac_base::{ModId, ModPath, PackageName, PackageNameError, SSpan, Span};
 use biwac_dependency_loader::DepsSymbolKind;
 use biwac_hir::{
     Hir, HirError, Ident, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId,
@@ -274,9 +274,9 @@ impl ResolveCtx {
     pub fn try_resolve(mut self, pkg: Pkg) -> RsvResult<Hir> {
         // 型の存在を記録する
         let mut alias_defs = HashMap::new();
-        for (modpath, modu) in &pkg.modules {
+        for modu in pkg.modules.values() {
             // モジュールの存在も記録
-            self.hir.register_module_existence(modpath.clone())?;
+            self.hir.register_module_existence(modu.modpath.clone())?;
 
             for g in &modu.globals {
                 if let biwac_ast::Globals::TypeDef(t) = g {
@@ -284,7 +284,7 @@ impl ResolveCtx {
                         TypeDef::Struct(struct_) => {
                             let tid = TyId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                modpath,
+                                &modu.modpath,
                                 struct_.id.id.clone(),
                             );
                             self.hir.register_type_existence(
@@ -298,7 +298,7 @@ impl ResolveCtx {
                         TypeDef::TypeAlias(alias) => {
                             let tid = TyId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                modpath,
+                                &modu.modpath,
                                 alias.ident.id.clone(),
                             );
                             self.hir.register_type_existence(
@@ -314,7 +314,7 @@ impl ResolveCtx {
                         TypeDef::NativeTypeAlias(native) => {
                             let tid = TyId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                modpath,
+                                &modu.modpath,
                                 native.ident.id.clone(),
                             );
                             self.hir.register_type_existence(
@@ -335,17 +335,17 @@ impl ResolveCtx {
         let mctxes = pkg
             .modules
             .iter()
-            .map(|(modpath, modu)| {
+            .map(|(mod_id, modu)| {
                 let mctx = ModuleLevelTyResolveCtx::new(
                     self.pkg_name.clone(),
-                    modpath.clone(),
+                    modu.modpath.clone(),
                     modu,
                     &self.hir,
                 )?;
 
-                Ok((modpath.clone(), mctx))
+                Ok((*mod_id, mctx))
             })
-            .collect::<RsvResult<HashMap<ModPath, ModuleLevelTyResolveCtx>>>()?;
+            .collect::<RsvResult<HashMap<ModId, ModuleLevelTyResolveCtx>>>()?;
 
         // 型エイリアス type alias を正規化し記録する
         let aliases = TyAliasResolveCtx::new(&mctxes, alias_defs).try_resolve(&self.hir)?;
@@ -355,8 +355,8 @@ impl ResolveCtx {
         }
 
         // 型の実体(シグニチャ)を記録する
-        for (modpath, modu) in &pkg.modules {
-            let mctx = mctxes.get(modpath).unwrap();
+        for (mod_id, modu) in &pkg.modules {
+            let mctx = mctxes.get(mod_id).unwrap();
 
             for g in &modu.globals {
                 if let biwac_ast::Globals::TypeDef(type_def) = g {
@@ -364,7 +364,7 @@ impl ResolveCtx {
                         TypeDef::Struct(struct_) => {
                             let tid = TyId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                modpath,
+                                &modu.modpath,
                                 struct_.id.id.clone(),
                             );
 
@@ -383,7 +383,7 @@ impl ResolveCtx {
                         TypeDef::NativeTypeAlias(native) => {
                             let tid = TyId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                modpath,
+                                &modu.modpath,
                                 native.ident.id.clone(),
                             );
 
@@ -411,8 +411,8 @@ impl ResolveCtx {
         // hir から型の実体を取得できるようになる
 
         // 値(fn, const)の存在(シグニチャ)を記録する
-        for (modpath, modu) in pkg.modules {
-            let mctx = mctxes.get(&modpath).unwrap();
+        for (mod_id, modu) in pkg.modules {
+            let mctx = mctxes.get(&mod_id).unwrap();
 
             for g in modu.globals {
                 match g {
@@ -444,7 +444,7 @@ impl ResolveCtx {
                             // 通常の関数のとき
                             let vid = ValId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                &modpath,
+                                &modu.modpath,
                                 fn_def.id.id.clone(),
                             );
                             let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
@@ -496,7 +496,7 @@ impl ResolveCtx {
                             // 通常の関数のとき
                             let vid = ValId::from_modpath(
                                 PkgId::new(self.pkg_name.clone()),
-                                &modpath,
+                                &modu.modpath,
                                 fn_def.id.id.clone(),
                             );
                             let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
@@ -586,12 +586,12 @@ impl ResolveCtx {
                     }
                     biwac_ast::Globals::NativeCode(native) => {
                         self.hir
-                            .register_module_native_code(modpath.clone(), &native);
+                            .register_module_native_code(modu.modpath.clone(), &native);
                     }
                     biwac_ast::Globals::NovelScene(scene_def) => {
                         let vid = ValId::from_modpath(
                             PkgId::new(self.pkg_name.clone()),
-                            &modpath,
+                            &modu.modpath,
                             scene_def.id.id.clone(),
                         );
                         let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
@@ -618,8 +618,8 @@ impl ResolveCtx {
         // 関数内の名前解決を行う
         let mctxes = mctxes
             .into_iter()
-            .map(|(modpath, mctx)| Ok((modpath, ModuleLevelResolveCtx::new(mctx, &self.hir)?)))
-            .collect::<RsvResult<HashMap<ModPath, ModuleLevelResolveCtx>>>()?;
+            .map(|(mod_id, mctx)| Ok((mod_id, ModuleLevelResolveCtx::new(mctx, &self.hir)?)))
+            .collect::<RsvResult<HashMap<ModId, ModuleLevelResolveCtx>>>()?;
 
         // 通常の関数に対し
         // 解決を行う
@@ -630,7 +630,7 @@ impl ResolveCtx {
                     match &f.body {
                         biwac_hir::Progressive::NotYet(fn_def) => {
                             let mctx = mctxes
-                                .get(fn_def.id.span.module())
+                                .get(&fn_def.id.span.module())
                                 .expect("compiler bug: module not found");
                             let ictx = ImplLevelResolveCtx::new_empty(mctx);
                             let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
@@ -652,7 +652,7 @@ impl ResolveCtx {
                     match &scene.body {
                         biwac_hir::Progressive::NotYet(scene_def) => {
                             let mctx = mctxes
-                                .get(scene_def.id.span.module())
+                                .get(&scene_def.id.span.module())
                                 .expect("compiler bug: module not found");
                             let ictx = ImplLevelResolveCtx::new_empty(mctx);
                             let mut fctx = FnLevelResolveCtx::new(&ictx, &scene.signature.genargs)?;
@@ -692,7 +692,7 @@ impl ResolveCtx {
                             match &f.body {
                                 biwac_hir::Progressive::NotYet(fn_body) => {
                                     let mctx = mctxes
-                                        .get(f.fn_name_span.module())
+                                        .get(&f.fn_name_span.module())
                                         .expect("compiler bug: module not found");
                                     let ictx = ImplLevelResolveCtx::new(
                                         mctx,
@@ -723,7 +723,7 @@ impl ResolveCtx {
                             match &m.body {
                                 biwac_hir::Progressive::NotYet(fn_body) => {
                                     let mctx = mctxes
-                                        .get(m.fn_name_span.module())
+                                        .get(&m.fn_name_span.module())
                                         .expect("compiler bug: module not found");
                                     let ictx = ImplLevelResolveCtx::new(
                                         mctx,
@@ -775,7 +775,7 @@ impl ResolveCtx {
                         match &f.body {
                             biwac_hir::Progressive::NotYet(fn_body) => {
                                 let mctx = mctxes
-                                    .get(f.fn_name_span.module())
+                                    .get(&f.fn_name_span.module())
                                     .expect("compiler bug: module not found");
                                 // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
                                 let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
@@ -802,7 +802,7 @@ impl ResolveCtx {
                         match &m.body {
                             biwac_hir::Progressive::NotYet(fn_body) => {
                                 let mctx = mctxes
-                                    .get(m.fn_name_span.module())
+                                    .get(&m.fn_name_span.module())
                                     .expect("compiler bug: module not found");
                                 // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
                                 let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;

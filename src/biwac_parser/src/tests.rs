@@ -1,4 +1,4 @@
-use biwac_base::{ModId, Span};
+use biwac_base::{ModId, ModPath, Span};
 
 use biwac_ast::{
     Exprs, Globals, Ident, IntegerLiteral, Literal, Primary, Stmt, StringLiteral, TypDecl, VarDecl,
@@ -6,7 +6,8 @@ use biwac_ast::{
 
 #[test]
 fn test1() {
-    let file_id = ModId::new(0);
+    let modpath = ModPath::Main;
+    let mod_id = ModId::new(0);
 
     // NOTE: Rustの生文字列の扱いでは以下の場合
     // 空文字列の0行目が含まれ、fnは1行目となるため注意
@@ -18,9 +19,9 @@ fn foo() {
 }
 "#;
 
-    let tokens = biwac_lexer::lex(file_id, src).unwrap();
+    let tokens = biwac_lexer::lex(mod_id, src).unwrap();
 
-    let module = crate::Parser::new(tokens).try_parse().unwrap();
+    let module = crate::Parser::new(modpath, tokens).try_parse().unwrap();
 
     let g0 = module.globals.first().unwrap();
 
@@ -36,13 +37,13 @@ fn foo() {
             typ: TypDecl::Any,
             id: Ident {
                 id: "x".to_string(),
-                span: Span::new(file_id, 20, 21)
+                span: Span::new(mod_id, 20, 21)
             },
             init: Exprs::Primary(Primary::Literal(Literal::Integer(IntegerLiteral {
                 val: 0,
-                span: Span::new(file_id, 25, 26)
+                span: Span::new(mod_id, 25, 26)
             }))),
-            span: Span::new(file_id, 16, 28)
+            span: Span::new(mod_id, 16, 28)
         }),
         fn_foo.stmts.first().unwrap()
     );
@@ -51,13 +52,13 @@ fn foo() {
             typ: TypDecl::Any,
             id: Ident {
                 id: "str".to_string(),
-                span: Span::new(file_id, 54, 57)
+                span: Span::new(mod_id, 54, 57)
             },
             init: Exprs::Primary(Primary::Literal(Literal::String(StringLiteral {
                 val: "string".to_string(),
-                span: Span::new(file_id, 60, 68)
+                span: Span::new(mod_id, 60, 68)
             }))),
-            span: Span::new(file_id, 50, 69)
+            span: Span::new(mod_id, 50, 69)
         }),
         fn_foo.stmts.get(1).unwrap()
     );
