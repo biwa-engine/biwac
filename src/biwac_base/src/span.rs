@@ -14,6 +14,9 @@ pub enum ModPath {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
     file: ModId,
+
+    /// UTF-8 byte index
+    /// can be used in &str slice as `&src[span.begin..span.end]`
     begin: usize,
     end: usize,
 }

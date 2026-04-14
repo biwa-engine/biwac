@@ -16,6 +16,7 @@ enum RegionKind {
 }
 
 pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
+    let src_len = src.len();
     let mut regions: Vec<SrcRegion> = vec![];
 
     let mut inner_quoted = false;
@@ -24,10 +25,10 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
 
     let mut region_begin_idx = 0;
 
-    let chars: Vec<char> = src.chars().collect();
-    let mut i = 0;
-    while let Some(c) = chars.get(i) {
-        match *c {
+    // UTF-8 バイトインデックス
+    let mut char_indices_iter = src.char_indices();
+    while let Some((i, c)) = char_indices_iter.next() {
+        match c {
             // 改行ならリセット
             '\n' => {
                 // DSLの領域は
@@ -38,7 +39,7 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                 // それまではここでは何もしない
                 // パースは独自のパーサに委譲する
                 if inner_dsl {
-                    let remained_len = src[i..].chars().count();
+                    let remained_len = src[i..].len(); // len returns UTF-8 byte len
                     let trimmed = src[i..].trim_start_matches('\n').trim_start();
                     let trimmed_len = remained_len - trimmed.len();
                     if trimmed.starts_with("}}") {
@@ -47,10 +48,11 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                             kind: RegionKind::Dsl,
                             span: Span::new(mod_id, region_begin_idx, i + trimmed_len),
                         });
-                        i += 2 + trimmed_len;
-                        region_begin_idx = i;
+
+                        // トリム分と}}分イテレータを進める
+                        char_indices_iter.nth(trimmed_len + 2);
+                        region_begin_idx = i + trimmed_len + 2;
                         inner_dsl = false;
-                        continue;
                     }
                 } else if inner_quoted {
                     return Err(TokenizeError::DoubleQuoteCloseNotFound {
@@ -85,9 +87,7 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                             });
                             region_begin_idx = i;
                         }
-                    } else if c == '/'
-                        && let Some('/') = chars.get(i + 1)
-                    {
+                    } else if c == '/' && i + 1 < src_len && src[i + 1..].starts_with("/") {
                         // start of comment (to line end)
                         regions.push(SrcRegion {
                             kind: RegionKind::Raw,
@@ -95,11 +95,10 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                         });
                         region_begin_idx = i;
                         inner_line_comment = true;
-                        i += 2;
-
-                        continue;
+                        char_indices_iter.next(); // 2個目の `/` を飛ばす
                     } else if let '{' = c
-                        && let Some('{') = chars.get(i + 1)
+                        && i + 1 < src_len
+                        && src[i + 1..].starts_with("{")
                     {
                         // start of DSL such as novel mode, or inline native code.
                         regions.push(SrcRegion {
@@ -107,27 +106,22 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                             span: Span::new(mod_id, region_begin_idx, i),
                         });
                         region_begin_idx = i + 2;
-
                         inner_dsl = true;
-                        i += 2;
-                        continue;
+                        char_indices_iter.next(); // 2個目の `{` を飛ばす
                     }
                 }
             }
         }
-
-        i += 1;
-        // i += c.len_utf8();
     }
 
     if inner_quoted {
         Err(TokenizeError::DoubleQuoteCloseNotFound {
-            span: Span::new(mod_id, i, i + 1),
+            span: Span::new(mod_id, src_len, src_len + 1),
         })
     } else {
         regions.push(SrcRegion {
             kind: RegionKind::Raw,
-            span: Span::new(mod_id, region_begin_idx, i),
+            span: Span::new(mod_id, region_begin_idx, src_len),
         });
 
         Ok(regions)
