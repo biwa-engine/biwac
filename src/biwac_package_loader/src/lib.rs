@@ -1,3 +1,5 @@
+mod error;
+
 #[cfg(test)]
 mod tests;
 
@@ -8,23 +10,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use biwac_ast::ModAst;
-use biwac_base::{BIWA_EXTENSION, ModId, ModPath, ModSource, SourceHolder};
-use biwac_lexer::TokenizeError;
-use biwac_parser::ParseError;
+pub use error::PkgLoadError;
 
-#[derive(Debug, Clone)]
-pub enum PkgLoadError {
-    RootModuleNotFound,
-    LexError {
-        modpath: ModPath,
-        err: Box<TokenizeError>,
-    },
-    ParseError {
-        modpath: ModPath,
-        err: Box<ParseError>,
-    },
-}
+use biwac_ast::ModAst;
+use biwac_base::{BIWA_EXTENSION, ErrorHolder, ModId, ModPath, ModSource, SourceHolder};
 
 #[derive(Debug)]
 pub struct Pkg {
@@ -34,42 +23,34 @@ pub struct Pkg {
 
 impl Pkg {
     // pkg_root_path はdirであることが保証されている必要がある
-    pub fn try_load(pkg_root_path: PathBuf) -> Result<Self, PkgLoadError> {
+    pub fn try_load(pkg_root_path: PathBuf) -> Result<Self, ErrorHolder<PkgLoadError>> {
         let srcpath = pkg_root_path.join(Path::new("src"));
 
         // トップレベルモジュールを起点にロードする
         // それにはMainを指定する
         let mut file_map = FileMap::new();
-        map_files_from_dir(&mut file_map, &srcpath, ModPath::Main)?;
+        map_files_from_dir(&mut file_map, &srcpath, ModPath::Main).map_err(|e| ErrorHolder {
+            errs: vec![e],
+            srcs: SourceHolder {
+                mods: HashMap::new(),
+            },
+        })?;
 
         if !file_map.contains_lib && !file_map.contains_main {
-            return Err(PkgLoadError::RootModuleNotFound);
+            return Err(ErrorHolder {
+                errs: vec![PkgLoadError::RootModuleNotFound],
+                srcs: SourceHolder {
+                    mods: HashMap::new(),
+                },
+            });
         }
 
-        let mut modules = HashMap::new();
+        // 先にすべてのファイルを読む
         let mut srcs = HashMap::new();
-        // TODO:
-        // 並列実行可能
-        // エラーに互いに依存がないので、複数エラーを束ねるべき
         for (mod_id, (modpath, path)) in file_map.files {
             let mut f = File::open(path.as_path()).unwrap();
             let mut contents = String::new();
             f.read_to_string(&mut contents).unwrap();
-
-            let tokens =
-                biwac_lexer::lex(mod_id, &contents).map_err(|e| PkgLoadError::LexError {
-                    modpath: modpath.clone(),
-                    err: Box::new(e),
-                })?;
-
-            let module = biwac_parser::Parser::new(modpath.clone(), tokens)
-                .try_parse()
-                .map_err(|e| PkgLoadError::ParseError {
-                    modpath: modpath.clone(),
-                    err: Box::new(e),
-                })?;
-
-            modules.insert(mod_id, module);
             srcs.insert(
                 mod_id,
                 ModSource {
@@ -79,10 +60,47 @@ impl Pkg {
             );
         }
 
-        Ok(Self {
-            modules,
-            srcs: SourceHolder { mods: srcs },
-        })
+        // TODO:
+        // 並列実行可能
+        // エラーに互いに依存がないので、複数エラーを束ねるべき
+        let mut modules = HashMap::new();
+        let mut errs = Vec::new();
+        for (mod_id, mod_src) in &srcs {
+            match biwac_lexer::lex(*mod_id, &mod_src.src) {
+                Ok(tokens) => {
+                    match biwac_parser::Parser::new(mod_src.modu.clone(), tokens).try_parse() {
+                        Ok(module) => {
+                            modules.insert(*mod_id, module);
+                        }
+                        Err(e) => {
+                            errs.push(PkgLoadError::ParseError {
+                                modpath: mod_src.modu.clone(),
+                                err: Box::new(e),
+                            });
+                        }
+                    }
+                }
+
+                Err(e) => {
+                    errs.push(PkgLoadError::LexError {
+                        modpath: mod_src.modu.clone(),
+                        err: Box::new(e),
+                    });
+                }
+            }
+        }
+
+        if !errs.is_empty() {
+            Err(ErrorHolder {
+                errs,
+                srcs: SourceHolder { mods: srcs },
+            })
+        } else {
+            Ok(Self {
+                modules,
+                srcs: SourceHolder { mods: srcs },
+            })
+        }
     }
 }
 

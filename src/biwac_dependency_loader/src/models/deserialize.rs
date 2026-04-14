@@ -1,8 +1,6 @@
 use std::str::FromStr;
 
-use biwac_base::{
-    BiwacError, ModPath, PackageName, PackageNameError, PackageVersion, PackageVersionError,
-};
+use biwac_base::{ModPath, PackageName, PackageNameError, PackageVersion, PackageVersionError};
 
 use serde::Deserialize;
 
@@ -27,13 +25,13 @@ impl FromStr for DepsSymId {
         let re = regex::Regex::new("[a-zA-Z][0-9a-zA-Z_]*|_[0-9a-zA-Z_]+").unwrap();
         if parts.len() == 2 && re.is_match(parts[0]) && re.is_match(parts[1]) {
             Ok(Self {
-                pkg: PackageName::from_str(parts[0]).map_err(|e| e.error_message())?,
+                pkg: PackageName::from_str(parts[0]).map_err(|e| e.to_string())?,
                 modu: ModPath::Lib,
                 id: parts[1].to_string(),
             })
         } else if parts.len() > 2 && parts.iter().all(|pat| re.is_match(pat)) {
             Ok(Self {
-                pkg: PackageName::from_str(parts[0]).map_err(|e| e.error_message())?,
+                pkg: PackageName::from_str(parts[0]).map_err(|e| e.to_string())?,
                 modu: ModPath::Mod(
                     parts[1..parts.len() - 1]
                         .iter()
@@ -98,7 +96,7 @@ where
 {
     let s = String::deserialize(deserializer)?;
     s.parse()
-        .map_err(|e: PackageVersionError| serde::de::Error::custom(e.error_message()))
+        .map_err(|e: PackageVersionError| serde::de::Error::custom(e.to_string()))
 }
 
 pub(super) fn deserialize_package_name<'de, D>(deserializer: D) -> Result<PackageName, D::Error>
@@ -107,5 +105,5 @@ where
 {
     let s = String::deserialize(deserializer)?;
     s.parse()
-        .map_err(|e: PackageNameError| serde::de::Error::custom(e.error_message()))
+        .map_err(|e: PackageNameError| serde::de::Error::custom(e.to_string()))
 }

@@ -1,3 +1,4 @@
+mod error;
 mod lexer;
 pub mod token;
 
@@ -5,15 +6,10 @@ pub mod token;
 mod tests;
 
 use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
-use biwac_base::{ModId, Span};
+use biwac_base::ModId;
 
+pub use error::TokenizeError;
 pub use token::{TkKind, TkVal, Token};
-
-#[derive(Debug, Clone)]
-pub enum TokenizeError {
-    SingleQuoteCloseNotFound,
-    DoubleQuoteCloseNotFound { span: Span },
-}
 
 pub fn lex(file_id: ModId, src: &str) -> Result<Vec<Token>, TokenizeError> {
     let regions = divide_regions(file_id, src)?;

@@ -21,15 +21,6 @@ pub struct Span {
     end: usize,
 }
 
-/// `struct Pos` represents position in raw source codes.
-/// NOTE: `line: usize` is 0 indexed,
-///     so when we show an error message, we have to add 1 to show real line number.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Pos {
-    line: usize,
-    idx: usize,
-}
-
 /// SSpan
 /// Semi span
 /// Span has position (line index and character index range).
@@ -68,26 +59,12 @@ impl Span {
     }
 }
 
-impl Pos {
-    pub fn new(line: usize, idx: usize) -> Self {
-        Self { line, idx }
-    }
-
-    pub fn line(&self) -> usize {
-        self.line
-    }
-
-    pub fn idx(&self) -> usize {
-        self.idx
-    }
-}
-
 impl ModPath {
     pub fn file_name(&self) -> String {
         match self {
             Self::Main => format!("main.{BIWA_SRC_EXT}"),
             Self::Lib => format!("lib.{BIWA_SRC_EXT}"),
-            Self::Mod(path) => format!("{}.biwa", path.join("/")),
+            Self::Mod(path) => format!("{}.{BIWA_SRC_EXT}", path.join("/")),
         }
     }
 

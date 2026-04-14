@@ -3,12 +3,12 @@ mod package;
 mod span;
 mod src;
 
-pub use error::BiwacError;
+pub use error::{BiwacError, ErrorHolder};
 pub use package::{
     DependedPackage, PackageMetadata, PackageName, PackageNameError, PackageVersion,
     PackageVersionError,
 };
-pub use span::{ModPath, Pos, SSpan, Span};
+pub use span::{ModPath, SSpan, Span};
 pub use src::{ModId, ModSource, SourceHolder};
 
 pub const BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME: &str = "main";

@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 
 use crate::BiwacError;
 
@@ -57,12 +57,25 @@ impl PackageName {
 }
 
 impl BiwacError for PackageNameError {
-    fn error_message(&self) -> String {
+    fn error_message(&self, _srcs: &crate::SourceHolder) -> String {
         match self {
             Self::InvalidPackageName(name) => {
                 format!(
                     r#"Invalid package name: `{name}`
 Package name must be `[a-z][0-9a-z_]*`"#,
+                )
+            }
+        }
+    }
+}
+
+impl Display for PackageNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPackageName(name) => {
+                write!(
+                    f,
+                    "Invalid package name: `{name}`. Package name must be `[a-z][0-9a-z_]*`",
                 )
             }
         }
@@ -112,12 +125,25 @@ impl PackageVersion {
 }
 
 impl BiwacError for PackageVersionError {
-    fn error_message(&self) -> String {
+    fn error_message(&self, _srcs: &crate::SourceHolder) -> String {
         match self {
             Self::InvalidPackageVersion(version) => {
                 format!(
                     r#"Invalid package version: `{version}`
 Package version must be `[0-9].[0-9].[0-9]`"#,
+                )
+            }
+        }
+    }
+}
+
+impl Display for PackageVersionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPackageVersion(version) => {
+                write!(
+                    f,
+                    "Invalid package version: `{version}`. Package version must be `[0-9].[0-9].[0-9]`",
                 )
             }
         }

@@ -8,7 +8,15 @@ use biwac_base::PackageName;
 pub fn compile(pkg_root_path: PathBuf) {
     let metadata = biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone()).unwrap();
 
-    println!("metadata: {metadata:#?}");
+    println!(
+        "Compiling {} v{}.{}.{}",
+        metadata.name.value(),
+        metadata.version.major(),
+        metadata.version.minor(),
+        metadata.version.patch()
+    );
+
+    println!();
 
     // build directory preparation
     let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
@@ -27,12 +35,16 @@ pub fn compile(pkg_root_path: PathBuf) {
         );
     }
 
-    let pkg = biwac_package_loader::Pkg::try_load(pkg_root_path.to_path_buf()).unwrap();
+    let pkg = match biwac_package_loader::Pkg::try_load(pkg_root_path.to_path_buf()) {
+        Ok(pkg) => pkg,
+        Err(e) => {
+            e.panic_with_error_messages();
+        }
+    };
     // println!("pkg: {pkg:#?}");
 
     let deps =
         biwac_dependency_loader::try_load_dependencies(build_dir_path.to_path_buf()).unwrap();
-    println!("deps: {deps:#?}");
 
     let hir = biwac_name_resolver::ResolveCtx::new(&metadata, &deps)
         .unwrap()

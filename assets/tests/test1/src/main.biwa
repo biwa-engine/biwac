@@ -17,7 +17,7 @@ fn main() {
   };
   let z = native_add(3, 2);
   let pair = Pair::new(l, z);
-  let aa = Pair::new(x, pair.y()).add();
+  let aa = Pair::new(x, pair.y()).add(); "
   let ab = PairIntT::new(0, aa).x();
 }
 
