@@ -1,4 +1,4 @@
-use crate::{PackageName, src::FileId};
+use crate::{ModId, PackageName};
 
 const BIWA_SRC_EXT: &str = "biwa";
 
@@ -13,7 +13,7 @@ pub enum ModPath {
 /// such as lexer token, AST node, and other IR node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
-    file: FileId,
+    file: ModId,
     begin: usize,
     end: usize,
 }
@@ -40,7 +40,7 @@ pub enum SSpan {
 }
 
 impl Span {
-    pub fn new(file: FileId, begin: usize, end: usize) -> Self {
+    pub fn new(file: ModId, begin: usize, end: usize) -> Self {
         Self { file, begin, end }
     }
 
@@ -52,7 +52,7 @@ impl Span {
         }
     }
 
-    pub fn module(&self) -> FileId {
+    pub fn module(&self) -> ModId {
         self.file
     }
 

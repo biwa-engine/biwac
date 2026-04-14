@@ -4,11 +4,11 @@ use crate::ModPath;
 
 #[derive(Debug)]
 pub struct SourceHolder {
-    pub mods: HashMap<FileId, ModSource>,
+    pub mods: HashMap<ModId, ModSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FileId(usize);
+pub struct ModId(usize);
 
 #[derive(Debug)]
 pub struct ModSource {
@@ -16,7 +16,7 @@ pub struct ModSource {
     pub src: String,
 }
 
-impl FileId {
+impl ModId {
     pub fn new(id: usize) -> Self {
         Self(id)
     }

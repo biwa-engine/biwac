@@ -5,7 +5,7 @@ pub mod token;
 mod tests;
 
 use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
-use biwac_base::{FileId, Span};
+use biwac_base::{ModId, Span};
 
 pub use token::{TkKind, TkVal, Token};
 
@@ -15,7 +15,7 @@ pub enum TokenizeError {
     DoubleQuoteCloseNotFound { span: Span },
 }
 
-pub fn lex(file_id: FileId, src: &str) -> Result<Vec<Token>, TokenizeError> {
+pub fn lex(file_id: ModId, src: &str) -> Result<Vec<Token>, TokenizeError> {
     let regions = divide_regions(file_id, src)?;
 
     let pretokens = pre_lex(file_id, src, regions);

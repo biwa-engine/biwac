@@ -1,4 +1,4 @@
-use biwac_base::{FileId, Span};
+use biwac_base::{ModId, Span};
 
 use biwac_ast::{
     Exprs, Globals, Ident, IntegerLiteral, Literal, Primary, Stmt, StringLiteral, TypDecl, VarDecl,
@@ -6,7 +6,7 @@ use biwac_ast::{
 
 #[test]
 fn test1() {
-    let file_id = FileId::new(0);
+    let file_id = ModId::new(0);
 
     // NOTE: Rustの生文字列の扱いでは以下の場合
     // 空文字列の0行目が含まれ、fnは1行目となるため注意

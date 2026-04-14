@@ -9,7 +9,7 @@ pub use package::{
     PackageVersionError,
 };
 pub use span::{ModPath, Pos, SSpan, Span};
-pub use src::{FileId, ModSource, SourceHolder};
+pub use src::{ModId, ModSource, SourceHolder};
 
 pub const BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME: &str = "main";
 pub const BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME: &str = "lib";

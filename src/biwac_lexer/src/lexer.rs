@@ -1,4 +1,4 @@
-use biwac_base::{FileId, Span};
+use biwac_base::{ModId, Span};
 
 use crate::{TokenizeError, token::TkKind};
 
@@ -15,7 +15,7 @@ enum RegionKind {
     Dsl,
 }
 
-pub(crate) fn divide_regions(modu: FileId, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
+pub(crate) fn divide_regions(modu: ModId, src: &str) -> Result<Vec<SrcRegion>, TokenizeError> {
     let mut regions: Vec<SrcRegion> = vec![];
 
     let mut inner_quoted = false;
@@ -146,7 +146,7 @@ pub(crate) enum PreTkKind {
     Dsl,
 }
 
-pub(crate) fn pre_lex(modu: FileId, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
+pub(crate) fn pre_lex(modu: ModId, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
     let lines: Vec<&str> = src.lines().collect();
     let mut pretokens = vec![];
     if lines.is_empty() {

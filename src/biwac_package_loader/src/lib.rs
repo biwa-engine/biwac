@@ -9,7 +9,7 @@ use std::{
 };
 
 use biwac_ast::ModAst;
-use biwac_base::{BIWA_EXTENSION, FileId, ModPath, ModSource, SourceHolder};
+use biwac_base::{BIWA_EXTENSION, ModId, ModPath, ModSource, SourceHolder};
 use biwac_lexer::TokenizeError;
 use biwac_parser::ParseError;
 
@@ -87,8 +87,8 @@ impl Pkg {
 }
 
 struct FileMap {
-    files: HashMap<FileId, (ModPath, Box<PathBuf>)>,
-    next_file_id: usize,
+    files: HashMap<ModId, (ModPath, Box<PathBuf>)>,
+    next_mod_id: usize,
     contains_lib: bool,
     contains_main: bool,
 }
@@ -97,15 +97,15 @@ impl FileMap {
     fn new() -> Self {
         Self {
             files: HashMap::new(),
-            next_file_id: 0,
+            next_mod_id: 0,
             contains_lib: false,
             contains_main: false,
         }
     }
 
     fn push(&mut self, modpath: ModPath, path: PathBuf) {
-        let id = FileId::new(self.next_file_id);
-        self.next_file_id += 1;
+        let id = ModId::new(self.next_mod_id);
+        self.next_mod_id += 1;
 
         if modpath == ModPath::Main {
             self.contains_main = true;
