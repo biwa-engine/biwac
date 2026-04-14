@@ -47,9 +47,9 @@ impl<'t> TokenStream<'t> {
                 )?)
             } else {
                 RetTypRepr::Void(Span::new(
-                    args.span.module().clone(),
-                    args.span.end().clone(),
-                    args.span.end().clone(),
+                    args.span.module(),
+                    args.span.end(),
+                    args.span.end(),
                 ))
             };
 
@@ -350,9 +350,9 @@ impl<'t> TokenStream<'t> {
                         RetTypRepr::Typ(self.consume_type_representaion(&None)?)
                     } else {
                         RetTypRepr::Void(Span::new(
-                            args.span.module().clone(),
-                            args.span.end().clone(),
-                            args.span.end().clone(),
+                            args.span.module(),
+                            args.span.end(),
+                            args.span.end(),
                         ))
                     };
 
