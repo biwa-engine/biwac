@@ -2,16 +2,18 @@ use std::collections::HashMap;
 
 use crate::ModPath;
 
+#[derive(Debug)]
 pub struct SourceHolder {
-    mods: HashMap<FileId, ModSource>,
+    pub mods: HashMap<FileId, ModSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(usize);
 
+#[derive(Debug)]
 pub struct ModSource {
-    modu: ModPath,
-    src: String,
+    pub modu: ModPath,
+    pub src: String,
 }
 
 impl FileId {
