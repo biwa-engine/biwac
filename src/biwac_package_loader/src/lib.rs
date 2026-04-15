@@ -28,7 +28,7 @@ impl Pkg {
         metadata: &'a MetadataHolder,
         srcs: &'a mut SourceHolder, // 空の SourceHolder を受け取る
         pkg_root_path: PathBuf,
-    ) -> Result<Self, ErrorHolder<'a, PkgLoadError>> {
+    ) -> Result<Self, ErrorHolder<'a, PkgLoadError<'a>>> {
         let srcpath = pkg_root_path.join(Path::new("src"));
 
         // トップレベルモジュールを起点にロードする
@@ -140,11 +140,11 @@ impl FileMap {
 
 // NOTE: `dir` must be directory path
 // NOTE: call with ModPath::Main to load from top level directory
-fn map_files_from_dir(
+fn map_files_from_dir<'a>(
     pkg_file_map: &mut FileMap,
     dir: &Path,
     modpath: ModPath,
-) -> Result<(), PkgLoadError> {
+) -> Result<(), PkgLoadError<'a>> {
     let mut work_dir_sub_dirs: HashMap<String, Box<PathBuf>> = HashMap::new();
     let mut work_dir_files: HashSet<String> = HashSet::new();
 

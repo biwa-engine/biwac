@@ -6,6 +6,8 @@ fn fact(n: Int) -> Int {
   }
 }
 
+hoge
+
 [[native(arch="typescript")]]
 fn native_sqrt(x: Int) -> Float {{
   return Math.sqrt(x);

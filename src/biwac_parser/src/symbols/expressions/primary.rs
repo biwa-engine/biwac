@@ -1,5 +1,5 @@
 use biwac_base::Span;
-use biwac_lexer::TkKind;
+use biwac_lexer::{TkKind, TkKindName};
 
 use biwac_ast::{
     BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Primary, QualifiedId,
@@ -9,37 +9,36 @@ use biwac_ast::{
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
 // Primary = Literal | Identifier ( "(" ")" )? | "(" Exprs ")"
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(super) fn consume_primary_expression(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<super::Exprs, ParseError> {
+    ) -> Result<Exprs, ParseError<'src>> {
         // Primary = Literal | "(" Expr ")"
-        let t = *self.peek().ok_or(ParseError::InvalidEOF(vec![
-            TkKind::Ident,
-            TkKind::IntegerLiteral,
-        ]))?;
+        let t = *self.peek().ok_or(ParseError::InvalidEOF {
+            expecteds: vec![TkKindName::Ident, TkKindName::LiteralInteger],
+        })?;
 
         match &t.kind {
-            TkKind::IntegerLiteral => {
+            TkKind::LiteralInteger(val) => {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Integer(
                     IntegerLiteral {
-                        val: t.unwrap_integer_value(),
+                        val: *val,
                         span: t.span.clone(),
                     },
                 ))))
             }
-            TkKind::StringLiteral => {
+            TkKind::LiteralString(str) => {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::String(
                     StringLiteral {
-                        val: t.unwrap_string_value(),
+                        val: str.to_string(),
                         span: t.span.clone(),
                     },
                 ))))
             }
-            TkKind::BoolLiteralTrue => {
+            TkKind::KwBoolTrue => {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Bool(
                     BoolLiteral {
@@ -48,7 +47,7 @@ impl<'t> TokenStream<'t> {
                     },
                 ))))
             }
-            TkKind::BoolLiteralFalse => {
+            TkKind::KwBoolFalse => {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Bool(
                     BoolLiteral {
@@ -57,12 +56,12 @@ impl<'t> TokenStream<'t> {
                     },
                 ))))
             }
-            TkKind::Ident => {
+            TkKind::Ident(_) => {
                 let begin = t.span.clone();
                 let qualed_id = self.consume_qualified_identifier()?;
 
                 if let Some(t2) = self.peek() {
-                    if let TkKind::LPare = t2.kind {
+                    if let TkKind::MarkLPare = t2.kind {
                         let (args, span) = self.consume_arguments(ctx)?;
 
                         Ok(Exprs::Primary(Primary::FnCall(FnCall {
@@ -70,7 +69,7 @@ impl<'t> TokenStream<'t> {
                             args,
                             span: Span::merge(&begin, &span),
                         })))
-                    } else if let TkKind::LBrace = t2.kind {
+                    } else if let TkKind::MarkLBrace = t2.kind {
                         let (members, span) = self.consume_struct_members(ctx)?;
 
                         Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
@@ -81,10 +80,10 @@ impl<'t> TokenStream<'t> {
                             },
                         ))))
                     } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                        Err(ParseError::InvalidToken(
-                            vec![TkKind::LPare, TkKind::LBrace],
-                            t2.to_owned().clone(),
-                        ))
+                        Err(ParseError::InvalidToken {
+                            expecteds: vec![TkKindName::MarkLPare, TkKindName::MarkLBrace],
+                            found: t2.to_owned().clone(),
+                        })
                     } else {
                         Ok(Exprs::Primary(Primary::Variable(Ident {
                             id: qualed_id.id,
@@ -92,7 +91,9 @@ impl<'t> TokenStream<'t> {
                         })))
                     }
                 } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                    Err(ParseError::InvalidEOF(vec![TkKind::LPare, TkKind::LBrace]))
+                    Err(ParseError::InvalidEOF {
+                        expecteds: vec![TkKindName::MarkLPare, TkKindName::MarkLBrace],
+                    })
                 } else {
                     Ok(Exprs::Primary(Primary::Variable(Ident {
                         id: qualed_id.id,
@@ -100,7 +101,7 @@ impl<'t> TokenStream<'t> {
                     })))
                 }
             }
-            TkKind::SelfTyp => {
+            TkKind::KwSelfTyp => {
                 let begin = t.span.clone();
 
                 if let Some(self_typ) = &ctx.self_typ {
@@ -112,7 +113,7 @@ impl<'t> TokenStream<'t> {
 
                     if let Some(t) = self.peek().copied() {
                         match t.kind {
-                            TkKind::DoubleColon => {
+                            TkKind::MarkDoubleColon => {
                                 self.next();
 
                                 let ident = self.consume_identifier()?;
@@ -129,7 +130,7 @@ impl<'t> TokenStream<'t> {
                                     span: Span::merge(&begin, &span),
                                 })))
                             }
-                            TkKind::LBrace => {
+                            TkKind::MarkLBrace => {
                                 let (members, span) = self.consume_struct_members(ctx)?;
 
                                 Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
@@ -140,25 +141,34 @@ impl<'t> TokenStream<'t> {
                                     },
                                 ))))
                             }
-                            _ => Err(ParseError::InvalidToken(
-                                vec![TkKind::DoubleColon, TkKind::LBrace],
-                                t.clone(),
-                            )),
+                            _ => Err(ParseError::InvalidToken {
+                                expecteds: vec![
+                                    TkKindName::MarkDoubleColon,
+                                    TkKindName::MarkLBrace,
+                                ],
+                                found: t.clone(),
+                            }),
                         }
                     } else {
-                        Err(ParseError::InvalidEOF(vec![
-                            TkKind::DoubleColon,
-                            TkKind::LBrace,
-                        ]))
+                        Err(ParseError::InvalidEOF {
+                            expecteds: vec![TkKindName::MarkDoubleColon, TkKindName::MarkLBrace],
+                        })
                     }
                 } else {
-                    Err(ParseError::InvalidEOF(vec![
-                        TkKind::Ident,
-                        TkKind::IntegerLiteral,
-                    ]))
+                    Err(ParseError::InvalidToken {
+                        expecteds: vec![
+                            TkKindName::Ident,
+                            TkKindName::LiteralInteger,
+                            TkKindName::LiteralString,
+                            TkKindName::KwBoolTrue,
+                            TkKindName::KwBoolFalse,
+                            TkKindName::MarkLPare,
+                        ],
+                        found: t.clone(),
+                    })
                 }
             }
-            TkKind::SelfVar => {
+            TkKind::KwSelfVar => {
                 let begin = t.span.clone();
 
                 if ctx.is_method {
@@ -170,38 +180,54 @@ impl<'t> TokenStream<'t> {
                         span: begin,
                     })))
                 } else {
-                    Err(ParseError::InvalidEOF(vec![
-                        TkKind::Ident,
-                        TkKind::IntegerLiteral,
-                    ]))
+                    Err(ParseError::InvalidToken {
+                        expecteds: vec![
+                            TkKindName::Ident,
+                            TkKindName::LiteralInteger,
+                            TkKindName::LiteralString,
+                            TkKindName::KwBoolTrue,
+                            TkKindName::KwBoolFalse,
+                            TkKindName::MarkLPare,
+                        ],
+                        found: t.clone(),
+                    })
                 }
             }
-            TkKind::LPare => {
+            TkKind::MarkLPare => {
                 self.next();
                 let expr = self.consume_expression(ctx)?;
 
-                let _ = self.must_consume_next(vec![TkKind::RPare])?;
+                let _ = self.must_consume_next(vec![TkKindName::MarkRPare])?;
 
                 Ok(expr)
             }
-            _ => Err(ParseError::InvalidEOF(vec![
-                TkKind::Ident,
-                TkKind::IntegerLiteral,
-            ])),
+            _ => Err(ParseError::InvalidEOF {
+                expecteds: vec![
+                    TkKindName::Ident,
+                    TkKindName::LiteralInteger,
+                    TkKindName::LiteralString,
+                    TkKindName::KwBoolTrue,
+                    TkKindName::KwBoolFalse,
+                    TkKindName::MarkLPare,
+                ],
+            }),
         }
     }
 
     pub(super) fn consume_arguments(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<(Vec<Exprs>, Span), ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::LPare])?.span.clone();
+    ) -> Result<(Vec<Exprs>, Span), ParseError<'src>> {
+        let begin = self
+            .must_consume_next(vec![TkKindName::MarkLPare])?
+            .span
+            .clone();
         let mut span = begin.clone();
 
         let mut args: Vec<Exprs> = vec![];
 
         while let Some(t3) = self.peek() {
-            if let TkKind::RPare = t3.kind {
+            if let TkKind::MarkRPare = t3.kind {
                 let end = t3.span.clone();
                 span = Span::merge(&begin, &end);
 
@@ -212,19 +238,21 @@ impl<'t> TokenStream<'t> {
                 args.push(expr);
 
                 if let Some(t) = self.peek() {
-                    if let TkKind::Comma = t.kind {
+                    if let TkKind::MarkComma = t.kind {
                         self.next();
                         continue;
-                    } else if let TkKind::RPare = t.kind {
+                    } else if let TkKind::MarkRPare = t.kind {
                         continue;
                     } else {
-                        return Err(ParseError::InvalidToken(
-                            vec![TkKind::RPare, TkKind::Comma],
-                            t.to_owned().clone(),
-                        ));
+                        return Err(ParseError::InvalidToken {
+                            expecteds: vec![TkKindName::MarkRPare, TkKindName::MarkComma],
+                            found: t.to_owned().clone(),
+                        });
                     }
                 } else {
-                    return Err(ParseError::InvalidEOF(vec![TkKind::RPare, TkKind::Comma]));
+                    return Err(ParseError::InvalidEOF {
+                        expecteds: vec![TkKindName::MarkRPare, TkKindName::MarkComma],
+                    });
                 }
             }
         }
@@ -235,39 +263,44 @@ impl<'t> TokenStream<'t> {
     fn consume_struct_members(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<(Vec<(Ident, Box<Exprs>)>, Span), ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
+    ) -> Result<(Vec<(Ident, Box<Exprs>)>, Span), ParseError<'src>> {
+        let begin = self
+            .must_consume_next(vec![TkKindName::MarkLBrace])?
+            .span
+            .clone();
         let mut span = begin.clone();
 
         let mut members: Vec<(Ident, Box<Exprs>)> = vec![];
 
         while let Some(t3) = self.peek() {
-            if let TkKind::RBrace = t3.kind {
+            if let TkKind::MarkRBrace = t3.kind {
                 let end = t3.span.clone();
                 span = Span::merge(&begin, &end);
                 self.next();
                 break;
             } else {
                 let member = self.consume_identifier()?;
-                let _ = self.must_consume_next(vec![TkKind::Assign])?;
+                let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
                 let expr = self.consume_expression(ctx)?;
 
                 members.push((member, Box::new(expr)));
 
                 if let Some(t) = self.peek() {
-                    if let TkKind::Comma = t.kind {
+                    if let TkKind::MarkComma = t.kind {
                         self.next();
                         continue;
-                    } else if let TkKind::RBrace = t.kind {
+                    } else if let TkKind::MarkRBrace = t.kind {
                         continue;
                     } else {
-                        return Err(ParseError::InvalidToken(
-                            vec![TkKind::RBrace, TkKind::Comma],
-                            t.to_owned().clone(),
-                        ));
+                        return Err(ParseError::InvalidToken {
+                            expecteds: vec![TkKindName::MarkRBrace, TkKindName::MarkComma],
+                            found: t.to_owned().clone(),
+                        });
                     }
                 } else {
-                    return Err(ParseError::InvalidEOF(vec![TkKind::RBrace, TkKind::Comma]));
+                    return Err(ParseError::InvalidEOF {
+                        expecteds: vec![TkKindName::MarkRBrace, TkKindName::MarkComma],
+                    });
                 }
             }
         }

@@ -1,8 +1,8 @@
 use biwac_base::Span;
 
 #[derive(Clone, Debug)]
-pub struct Token {
-    pub kind: TkKind,
+pub struct Token<'src> {
+    pub kind: TkKind<'src>,
     pub span: Span,
     pub val: Option<TkVal>,
 }
@@ -13,7 +13,7 @@ pub enum TkVal {
     String(String),
 }
 
-impl Token {
+impl Token<'_> {
     pub fn unwrap_integer_value(&self) -> u64 {
         if let Some(TkVal::Integer(i)) = &self.val {
             *i
@@ -32,113 +32,284 @@ impl Token {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TkKind {
+pub enum TkKind<'src> {
+    Ident(&'src str),         // identifier
+    LiteralInteger(u64),      // integer literal
+    LiteralString(&'src str), // string literal
+    KwBoolTrue,               // bool literal `TRUE`
+    KwBoolFalse,              // bool literal `FALSE`
+    KwImport,                 // import
+    KwPackage,                // package
+    KwFn,                     // fn
+    KwType,                   // type
+    KwLet,                    // let
+    KwIf,                     // if
+    KwElse,                   // else
+    KwWhile,                  // while
+    KwReturn,                 // return
+    KwUint,                   // Uint (reserved word of type)
+    KwInt,                    // Int (reserved word of type)
+    KwFloat,                  // Float (reserved word of type)
+    KwBool,                   // Bool (reserved word of type)
+    KwStruct,                 // struct (reserved word of type)
+    KwImpl,                   // impl (reserved word of implementation for type)
+    KwSelfTyp,                // Self (reserved word of type)
+    KwSelfVar,                // self (reserved word of method value)
+    KwScene,                  // scene (reserved word of novel scene)
+    MarkLPare,                // (
+    MarkRPare,                // )
+    MarkLBrace,               // {
+    MarkRBrace,               // }
+    MarkLBracket,             // [
+    MarkRBracket,             // ]
+    MarkPlus,                 // +
+    MarkMinus,                // -
+    MarkAsterisk,             // *
+    MarkSlash,                // /
+    MarkPercent,              // %
+    MarkAmpersand,            // &
+    MarkLesser,               // <
+    MarkGreater,              // >
+    MarkLesEq,                // <=
+    MarkGrtEq,                // >=
+    MarkEqual,                // ==
+    MarkNotEq,                // !=
+    MarkAssign,               // =
+    MarkComma,                // ,
+    MarkDot,                  // .
+    MarkArrow,                // ->
+    MarkColon,                // :
+    MarkSemiColon,            // ;
+    MarkDoubleColon,          // ::
+    MarkDoubleLBrace,         // {{
+    MarkDoubleRBrace,         // }}
+    DslLiteral,               // DSL
+}
+
+impl TkKind<'_> {
+    pub fn pattern(&self) -> String {
+        match self {
+            Self::Ident(i) => i.to_string(),
+            Self::LiteralInteger(i) => i.to_string(),
+            Self::LiteralString(s) => s.to_string(),
+            Self::KwBoolTrue => "TRUE".to_string(),
+            Self::KwBoolFalse => "FALSE".to_string(),
+            Self::KwImport => "import".to_string(),
+            Self::KwPackage => "package".to_string(),
+            Self::KwFn => "fn".to_string(),
+            Self::KwType => "type".to_string(),
+            Self::KwLet => "let".to_string(),
+            Self::KwIf => "if".to_string(),
+            Self::KwElse => "else".to_string(),
+            Self::KwWhile => "while".to_string(),
+            Self::KwReturn => "return".to_string(),
+            Self::KwUint => "Uint".to_string(),
+            Self::KwInt => "Int".to_string(),
+            Self::KwFloat => "Float".to_string(),
+            Self::KwBool => "Bool".to_string(),
+            Self::KwStruct => "struct".to_string(),
+            Self::KwImpl => "impl".to_string(),
+            Self::KwSelfTyp => "Self".to_string(),
+            Self::KwSelfVar => "self".to_string(),
+            Self::KwScene => "scene".to_string(),
+            Self::MarkLPare => "(".to_string(),
+            Self::MarkRPare => ")".to_string(),
+            Self::MarkLBrace => "{".to_string(),
+            Self::MarkRBrace => "}".to_string(),
+            Self::MarkLBracket => "[".to_string(),
+            Self::MarkRBracket => "]".to_string(),
+            Self::MarkPlus => "+".to_string(),
+            Self::MarkMinus => "-".to_string(),
+            Self::MarkAsterisk => "*".to_string(),
+            Self::MarkSlash => "/".to_string(),
+            Self::MarkPercent => "%".to_string(),
+            Self::MarkAmpersand => "&".to_string(),
+            Self::MarkLesser => "<".to_string(),
+            Self::MarkGreater => ">".to_string(),
+            Self::MarkLesEq => "<=".to_string(),
+            Self::MarkGrtEq => ">=".to_string(),
+            Self::MarkEqual => "==".to_string(),
+            Self::MarkNotEq => "!=".to_string(),
+            Self::MarkAssign => "=".to_string(),
+            Self::MarkComma => ",".to_string(),
+            Self::MarkDot => ".".to_string(),
+            Self::MarkArrow => "->".to_string(),
+            Self::MarkColon => ":".to_string(),
+            Self::MarkSemiColon => ";".to_string(),
+            Self::MarkDoubleColon => "::".to_string(),
+            Self::MarkDoubleLBrace => "{{".to_string(),
+            Self::MarkDoubleRBrace => "}}".to_string(),
+            Self::DslLiteral => "...".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TkKindName {
     Ident,            // identifier
-    IntegerLiteral,   // integer literal
-    StringLiteral,    // string literal
-    BoolLiteralTrue,  // bool literal `TRUE`
-    BoolLiteralFalse, // bool literal `FALSE`
-    Import,           // import
-    Package,          // package
-    Fn,               // fn
-    Type,             // type
-    Let,              // let
-    If,               // if
-    Else,             // else
-    While,            // while
-    Return,           // return
-    Uint,             // Uint (reserved word of type)
-    Int,              // Int (reserved word of type)
-    Float,            // Float (reserved word of type)
-    Bool,             // Bool (reserved word of type)
-    Struct,           // struct (reserved word of type)
-    Impl,             // impl (reserved word of implementation for type)
-    SelfTyp,          // Self (reserved word of type)
-    SelfVar,          // self (reserved word of method value)
-    Scene,            // scene (reserved word of novel scene)
-    LPare,            // (
-    RPare,            // )
-    LBrace,           // {
-    RBrace,           // }
-    LBracket,         // [
-    RBracket,         // ]
-    Plus,             // +
-    Minus,            // -
-    Asterisk,         // *
-    Slash,            // /
-    Percent,          // %
-    Ampersand,        // &
-    Lesser,           // <
-    Greater,          // >
-    LesEq,            // <=
-    GrtEq,            // >=
-    Equal,            // ==
-    NotEq,            // !=
-    Assign,           // =
-    Comma,            // ,
-    Dot,              // .
-    Arrow,            // ->
-    Colon,            // :
-    SemiColon,        // ;
-    DoubleColon,      // ::
-    DoubleLBrace,     // {{
-    DoubleRBrace,     // }}
+    LiteralInteger,   // integer literal
+    LiteralString,    // string literal
+    KwBoolTrue,       // bool literal `TRUE`
+    KwBoolFalse,      // bool literal `FALSE`
+    KwImport,         // import
+    KwPackage,        // package
+    KwFn,             // fn
+    KwType,           // type
+    KwLet,            // let
+    KwIf,             // if
+    KwElse,           // else
+    KwWhile,          // while
+    KwReturn,         // return
+    KwUint,           // Uint (reserved word of type)
+    KwInt,            // Int (reserved word of type)
+    KwFloat,          // Float (reserved word of type)
+    KwBool,           // Bool (reserved word of type)
+    KwStruct,         // struct (reserved word of type)
+    KwImpl,           // impl (reserved word of implementation for type)
+    KwSelfTyp,        // Self (reserved word of type)
+    KwSelfVar,        // self (reserved word of method value)
+    KwScene,          // scene (reserved word of novel scene)
+    MarkLPare,        // (
+    MarkRPare,        // )
+    MarkLBrace,       // {
+    MarkRBrace,       // }
+    MarkLBracket,     // [
+    MarkRBracket,     // ]
+    MarkPlus,         // +
+    MarkMinus,        // -
+    MarkAsterisk,     // *
+    MarkSlash,        // /
+    MarkPercent,      // %
+    MarkAmpersand,    // &
+    MarkLesser,       // <
+    MarkGreater,      // >
+    MarkLesEq,        // <=
+    MarkGrtEq,        // >=
+    MarkEqual,        // ==
+    MarkNotEq,        // !=
+    MarkAssign,       // =
+    MarkComma,        // ,
+    MarkDot,          // .
+    MarkArrow,        // ->
+    MarkColon,        // :
+    MarkSemiColon,    // ;
+    MarkDoubleColon,  // ::
+    MarkDoubleLBrace, // {{
+    MarkDoubleRBrace, // }}
     DslLiteral,       // DSL
 }
 
-impl TkKind {
+impl TkKind<'_> {
+    pub fn as_name(&self) -> TkKindName {
+        match self {
+            Self::Ident(_) => TkKindName::Ident, // identifier
+            Self::LiteralInteger(_) => TkKindName::LiteralInteger, // integer literal
+            Self::LiteralString(_) => TkKindName::LiteralString, // string literal
+            Self::KwBoolTrue => TkKindName::KwBoolTrue, // bool literal `TRUE`
+            Self::KwBoolFalse => TkKindName::KwBoolFalse, // bool literal `FALSE`
+            Self::KwImport => TkKindName::KwImport, // import
+            Self::KwPackage => TkKindName::KwPackage, // package
+            Self::KwFn => TkKindName::KwFn,      // fn
+            Self::KwType => TkKindName::KwType,  // type
+            Self::KwLet => TkKindName::KwLet,    // let
+            Self::KwIf => TkKindName::KwIf,      // if
+            Self::KwElse => TkKindName::KwElse,  // else
+            Self::KwWhile => TkKindName::KwWhile, // while
+            Self::KwReturn => TkKindName::KwReturn, // return
+            Self::KwUint => TkKindName::KwUint,  // Uint (reserved word of type)
+            Self::KwInt => TkKindName::KwInt,    // Int (reserved word of type)
+            Self::KwFloat => TkKindName::KwFloat, // Float (reserved word of type)
+            Self::KwBool => TkKindName::KwBool,  // Bool (reserved word of type)
+            Self::KwStruct => TkKindName::KwStruct, // struct (reserved word of type)
+            Self::KwImpl => TkKindName::KwImpl,  // impl (reserved word of implementation for type)
+            Self::KwSelfTyp => TkKindName::KwSelfTyp, // Self (reserved word of type)
+            Self::KwSelfVar => TkKindName::KwSelfVar, // self (reserved word of method value)
+            Self::KwScene => TkKindName::KwScene, // scene (reserved word of novel scene)
+            Self::MarkLPare => TkKindName::MarkLPare, // (
+            Self::MarkRPare => TkKindName::MarkRPare, // )
+            Self::MarkLBrace => TkKindName::MarkLBrace, // {
+            Self::MarkRBrace => TkKindName::MarkRBrace, // }
+            Self::MarkLBracket => TkKindName::MarkLBracket, // [
+            Self::MarkRBracket => TkKindName::MarkRBracket, // ]
+            Self::MarkPlus => TkKindName::MarkPlus, // +
+            Self::MarkMinus => TkKindName::MarkMinus, // -
+            Self::MarkAsterisk => TkKindName::MarkAsterisk, // *
+            Self::MarkSlash => TkKindName::MarkSlash, // /
+            Self::MarkPercent => TkKindName::MarkPercent, // %
+            Self::MarkAmpersand => TkKindName::MarkAmpersand, // &
+            Self::MarkLesser => TkKindName::MarkLesser, // <
+            Self::MarkGreater => TkKindName::MarkGreater, // >
+            Self::MarkLesEq => TkKindName::MarkLesEq, // <=
+            Self::MarkGrtEq => TkKindName::MarkGrtEq, // >=
+            Self::MarkEqual => TkKindName::MarkEqual, // ==
+            Self::MarkNotEq => TkKindName::MarkNotEq, // !=
+            Self::MarkAssign => TkKindName::MarkAssign, // =
+            Self::MarkComma => TkKindName::MarkComma, // ,
+            Self::MarkDot => TkKindName::MarkDot, // .
+            Self::MarkArrow => TkKindName::MarkArrow, // ->
+            Self::MarkColon => TkKindName::MarkColon, // :
+            Self::MarkSemiColon => TkKindName::MarkSemiColon, // ;
+            Self::MarkDoubleColon => TkKindName::MarkDoubleColon, // ::
+            Self::MarkDoubleLBrace => TkKindName::MarkDoubleLBrace, // {{
+            Self::MarkDoubleRBrace => TkKindName::MarkDoubleRBrace, // }}
+            Self::DslLiteral => TkKindName::DslLiteral, // DSL
+        }
+    }
+}
+
+impl TkKindName {
     pub fn pattern(&self) -> String {
         match self {
-            Self::Ident => "".to_string(),
-            Self::IntegerLiteral => "".to_string(),
-            Self::StringLiteral => "".to_string(),
-            Self::BoolLiteralTrue => "TRUE".to_string(),
-            Self::BoolLiteralFalse => "FALSE".to_string(),
-            Self::Import => "import".to_string(),
-            Self::Package => "package".to_string(),
-            Self::Fn => "fn".to_string(),
-            Self::Type => "type".to_string(),
-            Self::Let => "let".to_string(),
-            Self::If => "if".to_string(),
-            Self::Else => "else".to_string(),
-            Self::While => "while".to_string(),
-            Self::Return => "return".to_string(),
-            Self::Uint => "Uint".to_string(),
-            Self::Int => "Int".to_string(),
-            Self::Float => "Float".to_string(),
-            Self::Bool => "Bool".to_string(),
-            Self::Struct => "struct".to_string(),
-            Self::Impl => "impl".to_string(),
-            Self::SelfTyp => "Self".to_string(),
-            Self::SelfVar => "self".to_string(),
-            Self::Scene => "scene".to_string(),
-            Self::LPare => "(".to_string(),
-            Self::RPare => ")".to_string(),
-            Self::LBrace => "{".to_string(),
-            Self::RBrace => "}".to_string(),
-            Self::LBracket => "[".to_string(),
-            Self::RBracket => "]".to_string(),
-            Self::Plus => "+".to_string(),
-            Self::Minus => "-".to_string(),
-            Self::Asterisk => "*".to_string(),
-            Self::Slash => "/".to_string(),
-            Self::Percent => "%".to_string(),
-            Self::Ampersand => "&".to_string(),
-            Self::Lesser => "<".to_string(),
-            Self::Greater => ">".to_string(),
-            Self::LesEq => "<=".to_string(),
-            Self::GrtEq => ">=".to_string(),
-            Self::Equal => "==".to_string(),
-            Self::NotEq => "!=".to_string(),
-            Self::Assign => "=".to_string(),
-            Self::Comma => ",".to_string(),
-            Self::Dot => ".".to_string(),
-            Self::Arrow => "->".to_string(),
-            Self::Colon => ":".to_string(),
-            Self::SemiColon => ";".to_string(),
-            Self::DoubleColon => "::".to_string(),
-            Self::DoubleLBrace => "{{".to_string(),
-            Self::DoubleRBrace => "}}".to_string(),
+            Self::Ident => "<identifier>".to_string(),
+            Self::LiteralInteger => "<integer-literal>".to_string(),
+            Self::LiteralString => "<string-literal>".to_string(),
+            Self::KwBoolTrue => "TRUE".to_string(),
+            Self::KwBoolFalse => "FALSE".to_string(),
+            Self::KwImport => "import".to_string(),
+            Self::KwPackage => "package".to_string(),
+            Self::KwFn => "fn".to_string(),
+            Self::KwType => "type".to_string(),
+            Self::KwLet => "let".to_string(),
+            Self::KwIf => "if".to_string(),
+            Self::KwElse => "else".to_string(),
+            Self::KwWhile => "while".to_string(),
+            Self::KwReturn => "return".to_string(),
+            Self::KwUint => "Uint".to_string(),
+            Self::KwInt => "Int".to_string(),
+            Self::KwFloat => "Float".to_string(),
+            Self::KwBool => "Bool".to_string(),
+            Self::KwStruct => "struct".to_string(),
+            Self::KwImpl => "impl".to_string(),
+            Self::KwSelfTyp => "Self".to_string(),
+            Self::KwSelfVar => "self".to_string(),
+            Self::KwScene => "scene".to_string(),
+            Self::MarkLPare => "(".to_string(),
+            Self::MarkRPare => ")".to_string(),
+            Self::MarkLBrace => "{".to_string(),
+            Self::MarkRBrace => "}".to_string(),
+            Self::MarkLBracket => "[".to_string(),
+            Self::MarkRBracket => "]".to_string(),
+            Self::MarkPlus => "+".to_string(),
+            Self::MarkMinus => "-".to_string(),
+            Self::MarkAsterisk => "*".to_string(),
+            Self::MarkSlash => "/".to_string(),
+            Self::MarkPercent => "%".to_string(),
+            Self::MarkAmpersand => "&".to_string(),
+            Self::MarkLesser => "<".to_string(),
+            Self::MarkGreater => ">".to_string(),
+            Self::MarkLesEq => "<=".to_string(),
+            Self::MarkGrtEq => ">=".to_string(),
+            Self::MarkEqual => "==".to_string(),
+            Self::MarkNotEq => "!=".to_string(),
+            Self::MarkAssign => "=".to_string(),
+            Self::MarkComma => ",".to_string(),
+            Self::MarkDot => ".".to_string(),
+            Self::MarkArrow => "->".to_string(),
+            Self::MarkColon => ":".to_string(),
+            Self::MarkSemiColon => ";".to_string(),
+            Self::MarkDoubleColon => "::".to_string(),
+            Self::MarkDoubleLBrace => "{{".to_string(),
+            Self::MarkDoubleRBrace => "}}".to_string(),
             Self::DslLiteral => "...".to_string(),
         }
     }

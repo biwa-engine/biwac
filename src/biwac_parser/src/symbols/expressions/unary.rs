@@ -1,18 +1,18 @@
 use biwac_base::Span;
-use biwac_lexer::TkKind;
+use biwac_lexer::{TkKind, TkKindName};
 
 use biwac_ast::{Exprs, UnOperator, UnaryExpr};
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(super) fn consume_unary_expression(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError> {
+    ) -> Result<Exprs, ParseError<'src>> {
         if let Some(t) = self.peek() {
             match t.kind {
-                TkKind::Minus => {
+                TkKind::MarkMinus => {
                     let begin = t.span.clone();
                     self.next();
 
@@ -28,7 +28,9 @@ impl<'t> TokenStream<'t> {
                 _ => self.consume_postfix_expression(ctx),
             }
         } else {
-            Err(ParseError::InvalidEOF(vec![TkKind::Ident, TkKind::Minus]))
+            Err(ParseError::InvalidEOF {
+                expecteds: vec![TkKindName::Ident, TkKindName::MarkMinus],
+            })
         }
     }
 }

@@ -1,18 +1,22 @@
 // use std::fmt::Display;
 
 use biwac_base::BiwacError;
-use biwac_lexer::{TkKind, Token};
+use biwac_lexer::{Token, token::TkKindName};
 use biwac_novel_parser::NovelParseError;
 
 #[derive(Debug, Clone)]
-pub enum ParseError {
-    InvalidToken(Vec<TkKind>, Token), // expected TokenKind, ... or TokenKind, but found Token in Token.range
-    InvalidEOF(Vec<TkKind>),          // expected TokenKind, ... or TokenKind, but found EOF
-    StructMemberConflict(String, String, Box<Token>), // struct id, member id
+pub enum ParseError<'src> {
+    InvalidToken {
+        expecteds: Vec<TkKindName>,
+        found: Token<'src>,
+    },
+    InvalidEOF {
+        expecteds: Vec<TkKindName>,
+    },
     NovelParseError(NovelParseError),
 }
 
-impl BiwacError for ParseError {
+impl BiwacError for ParseError<'_> {
     fn print_error_message(
         &self,
         _metadata: &biwac_base::MetadataHolder,

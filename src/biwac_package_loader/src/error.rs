@@ -3,7 +3,7 @@ use biwac_lexer::TokenizeError;
 use biwac_parser::ParseError;
 
 #[derive(Debug, Clone)]
-pub enum PkgLoadError {
+pub enum PkgLoadError<'src> {
     RootModuleNotFound,
     LexError {
         modpath: ModPath,
@@ -11,11 +11,11 @@ pub enum PkgLoadError {
     },
     ParseError {
         modpath: ModPath,
-        err: Box<ParseError>,
+        err: Box<ParseError<'src>>,
     },
 }
 
-impl BiwacError for PkgLoadError {
+impl BiwacError for PkgLoadError<'_> {
     fn print_error_message(
         &self,
         metadata: &biwac_base::MetadataHolder,

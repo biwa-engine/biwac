@@ -4,16 +4,16 @@ use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(super) fn consume_equality_expression(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError> {
+    ) -> Result<Exprs, ParseError<'src>> {
         let left = self.consume_relational_expression(ctx)?;
 
         if let Some(t) = self.peek() {
             match t.kind {
-                TkKind::Equal => {
+                TkKind::MarkEqual => {
                     self.next();
 
                     // NOTE:
@@ -29,7 +29,7 @@ impl<'t> TokenStream<'t> {
                         right: Box::new(right),
                     }))
                 }
-                TkKind::NotEq => {
+                TkKind::MarkNotEq => {
                     self.next();
 
                     let right = self.consume_equality_expression(ctx)?;

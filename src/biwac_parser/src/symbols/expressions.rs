@@ -11,8 +11,11 @@ use biwac_ast::Exprs;
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
-    pub(crate) fn consume_expression(&mut self, ctx: &FnParseCtx) -> Result<Exprs, ParseError> {
+impl<'t, 'src> TokenStream<'t, 'src> {
+    pub(crate) fn consume_expression(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<Exprs, ParseError<'src>> {
         self.consume_equality_expression(ctx)
     }
 }

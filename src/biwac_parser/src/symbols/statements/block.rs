@@ -1,22 +1,25 @@
 use biwac_base::Span;
-use biwac_lexer::TkKind;
+use biwac_lexer::{TkKind, TkKindName};
 
 use biwac_ast::{AssignStmt, BlockStmt, ExprStmt, Exprs, ReturnStmt, Stmt};
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(crate) fn consume_block_statement(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<BlockStmt, ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
+    ) -> Result<BlockStmt, ParseError<'src>> {
+        let begin = self
+            .must_consume_next(vec![TkKindName::MarkLBrace])?
+            .span
+            .clone();
 
         let mut stmts: Vec<Stmt> = vec![];
 
         loop {
             if let Some(t) = self.peek() {
-                if let TkKind::RBrace = t.kind {
+                if let TkKind::MarkRBrace = t.kind {
                     let end = t.span.clone();
                     self.next();
                     return Ok(BlockStmt {
@@ -29,17 +32,19 @@ impl<'t> TokenStream<'t> {
                     stmts.push(stmt);
                 }
             } else {
-                return Err(ParseError::InvalidEOF(vec![TkKind::RBrace]));
+                return Err(ParseError::InvalidEOF {
+                    expecteds: vec![TkKindName::MarkRBrace],
+                });
             }
         }
     }
 
-    pub(crate) fn consume_statement(&mut self, ctx: &FnParseCtx) -> Result<Stmt, ParseError> {
+    pub(crate) fn consume_statement(&mut self, ctx: &FnParseCtx) -> Result<Stmt, ParseError<'src>> {
         if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::If => Ok(Stmt::If(self.consume_if_statement(ctx)?)),
-                TkKind::While => Ok(Stmt::While(self.consume_while_statement(ctx)?)),
-                TkKind::Return => {
+                TkKind::KwIf => Ok(Stmt::If(self.consume_if_statement(ctx)?)),
+                TkKind::KwWhile => Ok(Stmt::While(self.consume_while_statement(ctx)?)),
+                TkKind::KwReturn => {
                     // "return" <expression> ";"
                     self.next();
 
@@ -54,15 +59,15 @@ impl<'t> TokenStream<'t> {
                         span: Span::merge(&t.span, &end),
                     }))
                 }
-                TkKind::LBrace => Ok(Stmt::Block(self.consume_block_statement(ctx)?)),
-                TkKind::Let => Ok(Stmt::VarDecl(
+                TkKind::MarkLBrace => Ok(Stmt::Block(self.consume_block_statement(ctx)?)),
+                TkKind::KwLet => Ok(Stmt::VarDecl(
                     self.consume_variable_declaration_statment(Some(ctx))?,
                 )),
                 _ => {
                     let expr = self.consume_expression(ctx)?;
 
                     if let Some(t) = self.peek().copied()
-                        && let TkKind::Assign = t.kind
+                        && let TkKind::MarkAssign = t.kind
                     {
                         // <primary> "=" <expression> ";"
                         self.next();
@@ -80,10 +85,10 @@ impl<'t> TokenStream<'t> {
                                 src,
                             }))
                         } else {
-                            Err(ParseError::InvalidToken(
-                                vec![TkKind::SemiColon],
-                                t.to_owned(),
-                            ))
+                            Err(ParseError::InvalidToken {
+                                expecteds: vec![TkKindName::MarkSemiColon],
+                                found: t.to_owned(),
+                            })
                         }
                     } else {
                         // ";"
@@ -97,12 +102,14 @@ impl<'t> TokenStream<'t> {
                 }
             }
         } else {
-            Err(ParseError::InvalidEOF(vec![
-                TkKind::Let,
-                TkKind::If,
-                TkKind::While,
-                TkKind::Return,
-            ]))
+            Err(ParseError::InvalidEOF {
+                expecteds: vec![
+                    TkKindName::KwLet,
+                    TkKindName::KwIf,
+                    TkKindName::KwWhile,
+                    TkKindName::KwReturn,
+                ],
+            })
         }
     }
 }

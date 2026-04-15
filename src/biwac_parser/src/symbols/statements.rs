@@ -4,7 +4,7 @@ pub mod vardecl;
 pub mod while_stmt;
 
 use biwac_base::Span;
-use biwac_lexer::token::TkKind;
+use biwac_lexer::{TkKindName, token::TkKind};
 
 use biwac_ast::{AssignStmt, BlockExpr, BlockStmt, ExprStmt, Exprs, Primary, ReturnStmt, Stmt};
 
@@ -18,25 +18,25 @@ pub(crate) enum ExprOrStmt<E, S> {
     Stmt(S),
 }
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     // TODO: 将来的にはconsume_statement_or_expression
     // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
     pub(crate) fn consume_expression_or_statement(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<ExprOrStmt<Exprs, Stmt>, ParseError> {
+    ) -> Result<ExprOrStmt<Exprs, Stmt>, ParseError<'src>> {
         if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::If => match self.consume_if_expression_or_statement(ctx)? {
+                TkKind::KwIf => match self.consume_if_expression_or_statement(ctx)? {
                     ExprOrStmt::Expr(if_expr) => {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::IfExpr(if_expr))))
                     }
                     ExprOrStmt::Stmt(if_stmt) => Ok(ExprOrStmt::Stmt(Stmt::If(if_stmt))),
                 },
-                TkKind::While => Ok(ExprOrStmt::Stmt(Stmt::While(
+                TkKind::KwWhile => Ok(ExprOrStmt::Stmt(Stmt::While(
                     self.consume_while_statement(ctx)?,
                 ))),
-                TkKind::Return => {
+                TkKind::KwReturn => {
                     // "return" <expression> ";"
                     self.next();
 
@@ -51,20 +51,20 @@ impl<'t> TokenStream<'t> {
                         span: Span::merge(&t.span, &end),
                     })))
                 }
-                TkKind::LBrace => match self.consume_block_expression_or_statement(ctx)? {
+                TkKind::MarkLBrace => match self.consume_block_expression_or_statement(ctx)? {
                     ExprOrStmt::Expr(block_expr) => {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::Block(block_expr))))
                     }
                     ExprOrStmt::Stmt(block_stmt) => Ok(ExprOrStmt::Stmt(Stmt::Block(block_stmt))),
                 },
-                TkKind::Let => Ok(ExprOrStmt::Stmt(Stmt::VarDecl(
+                TkKind::KwLet => Ok(ExprOrStmt::Stmt(Stmt::VarDecl(
                     self.consume_variable_declaration_statment(Some(ctx))?,
                 ))),
                 _ => {
                     let expr = self.consume_expression(ctx)?;
 
                     if let Some(t) = self.peek().copied()
-                        && let TkKind::Assign = t.kind
+                        && let TkKind::MarkAssign = t.kind
                     {
                         // <primary> "=" <expression> ";"
                         self.next();
@@ -82,10 +82,10 @@ impl<'t> TokenStream<'t> {
                                 src,
                             })))
                         } else {
-                            Err(ParseError::InvalidToken(
-                                vec![TkKind::SemiColon],
-                                t.to_owned(),
-                            ))
+                            Err(ParseError::InvalidToken {
+                                expecteds: vec![TkKindName::MarkSemiColon],
+                                found: t.to_owned(),
+                            })
                         }
                     } else {
                         // ";"
@@ -107,26 +107,31 @@ impl<'t> TokenStream<'t> {
                 }
             }
         } else {
-            Err(ParseError::InvalidEOF(vec![
-                TkKind::Let,
-                TkKind::If,
-                TkKind::While,
-                TkKind::Return,
-            ]))
+            Err(ParseError::InvalidEOF {
+                expecteds: vec![
+                    TkKindName::KwLet,
+                    TkKindName::KwIf,
+                    TkKindName::KwWhile,
+                    TkKindName::KwReturn,
+                ],
+            })
         }
     }
 
     pub(crate) fn consume_block_expression_or_statement(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<ExprOrStmt<BlockExpr, BlockStmt>, ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::LBrace])?.span.clone();
+    ) -> Result<ExprOrStmt<BlockExpr, BlockStmt>, ParseError<'src>> {
+        let begin = self
+            .must_consume_next(vec![TkKindName::MarkLBrace])?
+            .span
+            .clone();
 
         let mut stmts: Vec<Stmt> = vec![];
 
         loop {
             if let Some(t) = self.peek().copied()
-                && TkKind::RBrace == t.kind
+                && TkKind::MarkRBrace == t.kind
             {
                 self.next();
 
@@ -137,7 +142,10 @@ impl<'t> TokenStream<'t> {
             } else {
                 match self.consume_expression_or_statement(ctx)? {
                     ExprOrStmt::Expr(expr) => {
-                        let end = self.must_consume_next(vec![TkKind::RBrace])?.span.clone();
+                        let end = self
+                            .must_consume_next(vec![TkKindName::MarkRBrace])?
+                            .span
+                            .clone();
 
                         return Ok(ExprOrStmt::Expr(BlockExpr {
                             stmts,

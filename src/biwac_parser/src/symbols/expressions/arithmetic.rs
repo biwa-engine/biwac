@@ -4,16 +4,16 @@ use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(super) fn consume_arithmetic_expression(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError> {
+    ) -> Result<Exprs, ParseError<'src>> {
         let left = self.consume_multiplication_expression(ctx)?;
 
         if let Some(t) = self.peek() {
             match t.kind {
-                TkKind::Plus => {
+                TkKind::MarkPlus => {
                     self.next();
 
                     // NOTE:
@@ -30,7 +30,7 @@ impl<'t> TokenStream<'t> {
                         right: Box::new(right),
                     }))
                 }
-                TkKind::Minus => {
+                TkKind::MarkMinus => {
                     self.next();
 
                     let right = self.consume_arithmetic_expression(ctx)?;

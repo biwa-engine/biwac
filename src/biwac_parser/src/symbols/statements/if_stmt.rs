@@ -1,23 +1,23 @@
 use biwac_base::Span;
-use biwac_lexer::TkKind;
+use biwac_lexer::{TkKind, TkKindName};
 
 use biwac_ast::{IfExpr, IfStmt};
 
 use crate::{ExprOrStmt, ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     // "if" <expression> <block-statement> ("else" <block-statement>)?
     pub(super) fn consume_if_expression_or_statement(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<ExprOrStmt<IfExpr, IfStmt>, ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::If])?.span.clone();
+    ) -> Result<ExprOrStmt<IfExpr, IfStmt>, ParseError<'src>> {
+        let begin = self.must_consume_next(vec![TkKindName::KwIf])?.span.clone();
 
         let cond = self.consume_expression(ctx)?;
 
         match self.consume_block_expression_or_statement(ctx)? {
             ExprOrStmt::Expr(then) => {
-                self.must_consume_next(vec![TkKind::Else])?;
+                self.must_consume_next(vec![TkKindName::KwElse])?;
 
                 let els = self.consume_block_expression(ctx)?;
 
@@ -30,7 +30,7 @@ impl<'t> TokenStream<'t> {
             }
             ExprOrStmt::Stmt(then) => {
                 if let Some(t) = self.peek()
-                    && let TkKind::Else = t.kind
+                    && let TkKind::KwElse = t.kind
                 {
                     self.next();
 
@@ -55,15 +55,18 @@ impl<'t> TokenStream<'t> {
     }
 
     // "if" <expression> <block-statement> ("else" <block-statement>)?
-    pub(super) fn consume_if_statement(&mut self, ctx: &FnParseCtx) -> Result<IfStmt, ParseError> {
-        let begin = self.must_consume_next(vec![TkKind::If])?.span.clone();
+    pub(super) fn consume_if_statement(
+        &mut self,
+        ctx: &FnParseCtx,
+    ) -> Result<IfStmt, ParseError<'src>> {
+        let begin = self.must_consume_next(vec![TkKindName::KwIf])?.span.clone();
 
         let cond = self.consume_expression(ctx)?;
 
         let then = self.consume_block_statement(ctx)?;
 
         if let Some(t) = self.peek()
-            && let TkKind::Else = t.kind
+            && let TkKind::KwElse = t.kind
         {
             self.next();
 

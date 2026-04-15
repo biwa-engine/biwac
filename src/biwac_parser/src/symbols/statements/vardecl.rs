@@ -1,20 +1,23 @@
 use biwac_base::Span;
-use biwac_lexer::TkKind;
+use biwac_lexer::TkKindName;
 
 use biwac_ast::{TypDecl, VarDecl};
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"
     // グローバル変数の初期化はctx None
     // グローバル変数に束縛できる値は限られる。リテラルだけでconstのみ許容でも良い
     pub(crate) fn consume_variable_declaration_statment(
         &mut self,
         ctx: Option<&FnParseCtx>,
-    ) -> Result<VarDecl, ParseError> {
+    ) -> Result<VarDecl, ParseError<'src>> {
         // "let"
-        let begin = self.must_consume_next(vec![TkKind::Let])?.span.clone();
+        let begin = self
+            .must_consume_next(vec![TkKindName::KwLet])?
+            .span
+            .clone();
         // <identifier>
         let id = self.consume_identifier()?;
 
@@ -28,7 +31,7 @@ impl<'t> TokenStream<'t> {
         // "="
         // NOTE: 変数宣言時、初期化は必須
         // 代入漏れバリデーション能力が向上したら初期化しないパターンもサポートするかも
-        let _ = self.must_consume_next(vec![TkKind::Assign])?;
+        let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
 
         // <expression>
         let init =

@@ -1,58 +1,60 @@
 use biwac_ast::{
     BoolLiteral, CompilerFlag, CompilerFlagArg, CompilerFlagLiteral, IntegerLiteral, StringLiteral,
 };
-use biwac_lexer::TkKind;
+use biwac_lexer::{TkKind, TkKindName};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t> TokenStream<'t> {
-    fn consume_compiler_flag_literal(&mut self) -> Result<CompilerFlagLiteral, ParseError> {
+impl<'t, 'src> TokenStream<'t, 'src> {
+    fn consume_compiler_flag_literal(&mut self) -> Result<CompilerFlagLiteral, ParseError<'src>> {
         if let Some(t) = self.next() {
             match t.kind {
-                TkKind::IntegerLiteral => Ok(CompilerFlagLiteral::Integer(IntegerLiteral {
+                TkKind::LiteralInteger(val) => Ok(CompilerFlagLiteral::Integer(IntegerLiteral {
                     span: t.span.clone(),
-                    val: t.unwrap_integer_value(),
+                    val,
                 })),
-                TkKind::BoolLiteralTrue => Ok(CompilerFlagLiteral::Bool(BoolLiteral {
+                TkKind::KwBoolTrue => Ok(CompilerFlagLiteral::Bool(BoolLiteral {
                     span: t.span.clone(),
                     val: true,
                 })),
-                TkKind::BoolLiteralFalse => Ok(CompilerFlagLiteral::Bool(BoolLiteral {
+                TkKind::KwBoolFalse => Ok(CompilerFlagLiteral::Bool(BoolLiteral {
                     span: t.span.clone(),
                     val: false,
                 })),
-                TkKind::StringLiteral => Ok(CompilerFlagLiteral::String(StringLiteral {
+                TkKind::LiteralString(str) => Ok(CompilerFlagLiteral::String(StringLiteral {
                     span: t.span.clone(),
-                    val: t.unwrap_string_value(),
+                    val: str.to_string(),
                 })),
-                _ => Err(ParseError::InvalidToken(
-                    vec![
-                        TkKind::IntegerLiteral,
-                        TkKind::BoolLiteralTrue,
-                        TkKind::BoolLiteralFalse,
-                        TkKind::StringLiteral,
+                _ => Err(ParseError::InvalidToken {
+                    expecteds: vec![
+                        TkKindName::LiteralInteger,
+                        TkKindName::LiteralString,
+                        TkKindName::KwBoolTrue,
+                        TkKindName::KwBoolFalse,
                     ],
-                    t.clone(),
-                )),
+                    found: t.clone(),
+                }),
             }
         } else {
-            Err(ParseError::InvalidEOF(vec![
-                TkKind::IntegerLiteral,
-                TkKind::BoolLiteralTrue,
-                TkKind::BoolLiteralFalse,
-                TkKind::StringLiteral,
-            ]))
+            Err(ParseError::InvalidEOF {
+                expecteds: vec![
+                    TkKindName::LiteralInteger,
+                    TkKindName::LiteralString,
+                    TkKindName::KwBoolTrue,
+                    TkKindName::KwBoolFalse,
+                ],
+            })
         }
     }
 
-    fn consume_compiler_flag_args(&mut self) -> Result<Vec<CompilerFlagArg>, ParseError> {
-        let _ = self.must_consume_next(vec![TkKind::LPare])?;
+    fn consume_compiler_flag_args(&mut self) -> Result<Vec<CompilerFlagArg>, ParseError<'src>> {
+        let _ = self.must_consume_next(vec![TkKindName::MarkLPare])?;
 
         let mut args = vec![];
 
         loop {
             if let Some(t) = self.peek().copied()
-                && TkKind::RPare == t.kind
+                && TkKind::MarkRPare == t.kind
             {
                 self.next();
                 return Ok(args);
@@ -60,7 +62,7 @@ impl<'t> TokenStream<'t> {
                 let arg = self.consume_identifier()?;
 
                 if let Some(t) = self.peek().copied()
-                    && TkKind::Assign == t.kind
+                    && TkKind::MarkAssign == t.kind
                 {
                     self.next();
 
@@ -72,20 +74,22 @@ impl<'t> TokenStream<'t> {
                     });
 
                     if let Some(t) = self.peek().copied() {
-                        if TkKind::RPare == t.kind {
+                        if TkKind::MarkRPare == t.kind {
                             self.next();
                             return Ok(args);
-                        } else if TkKind::Comma == t.kind {
+                        } else if TkKind::MarkComma == t.kind {
                             self.next();
                             continue;
                         } else {
-                            return Err(ParseError::InvalidToken(
-                                vec![TkKind::Comma, TkKind::RPare],
-                                t.clone(),
-                            ));
+                            return Err(ParseError::InvalidToken {
+                                expecteds: vec![TkKindName::MarkComma, TkKindName::MarkRPare],
+                                found: t.clone(),
+                            });
                         }
                     } else {
-                        return Err(ParseError::InvalidEOF(vec![TkKind::Comma, TkKind::RPare]));
+                        return Err(ParseError::InvalidEOF {
+                            expecteds: vec![TkKindName::MarkComma, TkKindName::MarkRPare],
+                        });
                     }
                 } else {
                     args.push(CompilerFlagArg { arg, val: None });
@@ -94,30 +98,30 @@ impl<'t> TokenStream<'t> {
         }
     }
 
-    fn opt_consume_compiler_flag(&mut self) -> Result<Option<CompilerFlag>, ParseError> {
+    fn opt_consume_compiler_flag(&mut self) -> Result<Option<CompilerFlag>, ParseError<'src>> {
         // "[" "[" <identifier> ( "(" ( <identifier> ( "=" <compiler-flag-literal> )? "," )* ")" )? "]" "]"
         if let Some(t) = self.peek().copied()
-            && TkKind::LBracket == t.kind
+            && TkKind::MarkLBracket == t.kind
         {
             self.next();
             if let Some(t2) = self.peek().copied()
-                && TkKind::LBracket == t2.kind
+                && TkKind::MarkLBracket == t2.kind
             {
                 self.next();
                 let flag = self.consume_identifier()?;
 
                 if let Some(t) = self.peek().copied()
-                    && TkKind::LPare == t.kind
+                    && TkKind::MarkLPare == t.kind
                 {
                     let args = self.consume_compiler_flag_args()?;
 
-                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
-                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
+                    let _ = self.must_consume_next(vec![TkKindName::MarkRBracket])?;
+                    let _ = self.must_consume_next(vec![TkKindName::MarkRBracket])?;
 
                     Ok(Some(CompilerFlag { flag, args }))
                 } else {
-                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
-                    let _ = self.must_consume_next(vec![TkKind::RBracket])?;
+                    let _ = self.must_consume_next(vec![TkKindName::MarkRBracket])?;
+                    let _ = self.must_consume_next(vec![TkKindName::MarkRBracket])?;
 
                     Ok(Some(CompilerFlag { flag, args: vec![] }))
                 }
@@ -129,7 +133,7 @@ impl<'t> TokenStream<'t> {
         }
     }
 
-    pub(crate) fn consume_compiler_flags(&mut self) -> Result<Vec<CompilerFlag>, ParseError> {
+    pub(crate) fn consume_compiler_flags(&mut self) -> Result<Vec<CompilerFlag>, ParseError<'src>> {
         let mut flags = vec![];
 
         while let Some(flag) = self.opt_consume_compiler_flag()? {

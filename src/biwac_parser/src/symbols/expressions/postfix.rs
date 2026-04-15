@@ -5,11 +5,11 @@ use biwac_ast::{Exprs, MemberAccess, MethodCall, Primary};
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(super) fn consume_postfix_expression(
         &mut self,
         ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError> {
+    ) -> Result<Exprs, ParseError<'src>> {
         let expr = self.consume_primary_expression(ctx)?;
 
         self.consume_postfix_after_expression(expr, ctx)
@@ -19,16 +19,16 @@ impl<'t> TokenStream<'t> {
         &mut self,
         expr: Exprs,
         ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError> {
+    ) -> Result<Exprs, ParseError<'src>> {
         if let Some(t) = self.peek() {
             match t.kind {
-                TkKind::Dot => {
+                TkKind::MarkDot => {
                     self.next();
 
                     let mem_or_method = self.consume_identifier()?;
 
                     if let Some(t) = self.peek() {
-                        if let TkKind::LPare = t.kind {
+                        if let TkKind::MarkLPare = t.kind {
                             let (args, span) = self.consume_arguments(ctx)?;
 
                             Ok(Exprs::Primary(Primary::MethodCall(MethodCall {

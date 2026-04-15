@@ -129,20 +129,24 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
 }
 
 #[derive(Debug)]
-pub(crate) struct PreToken {
-    pub kind: PreTkKind,
+pub(crate) struct PreToken<'src> {
+    pub kind: PreTkKind<'src>,
     pub span: Span,
 }
 
 #[derive(Debug)]
-pub(crate) enum PreTkKind {
+pub(crate) enum PreTkKind<'src> {
     Word, // 識別子または予約語; identifier ([a-zA-Z_][a-zA-Z0-9_]) or reserved word (only alphabet)
-    Mark(TkKind), // 記号; reserved mark, such as `+`, `/`, `::`
+    Mark(TkKind<'src>), // 記号; reserved mark, such as `+`, `/`, `::`
     StringLiteral, // 文字列リテラル; string literal `"..."`, span contains double quotes
     Dsl,
 }
 
-pub(crate) fn pre_lex(mod_id: ModId, src: &str, regions: Vec<SrcRegion>) -> Vec<PreToken> {
+pub(crate) fn pre_lex<'src>(
+    mod_id: ModId,
+    src: &'src str,
+    regions: Vec<SrcRegion>,
+) -> Vec<PreToken<'src>> {
     let mut pretokens = vec![];
 
     for r in &regions {
@@ -167,12 +171,12 @@ pub(crate) fn pre_lex(mod_id: ModId, src: &str, regions: Vec<SrcRegion>) -> Vec<
                         token_begin_idx = idx;
                     } else if let Some(c2) = region_src.get(idx + 1)
                         && let Some(kind) = match (*c, *c2) {
-                            ('<', '=') => Some(TkKind::LesEq),
-                            ('>', '=') => Some(TkKind::GrtEq),
-                            ('=', '=') => Some(TkKind::Equal),
-                            ('!', '=') => Some(TkKind::NotEq),
-                            ('-', '>') => Some(TkKind::Arrow),
-                            (':', ':') => Some(TkKind::DoubleColon),
+                            ('<', '=') => Some(TkKind::MarkLesEq),
+                            ('>', '=') => Some(TkKind::MarkGrtEq),
+                            ('=', '=') => Some(TkKind::MarkEqual),
+                            ('!', '=') => Some(TkKind::MarkNotEq),
+                            ('-', '>') => Some(TkKind::MarkArrow),
+                            (':', ':') => Some(TkKind::MarkDoubleColon),
                             _ => None,
                         }
                     {
@@ -199,25 +203,25 @@ pub(crate) fn pre_lex(mod_id: ModId, src: &str, regions: Vec<SrcRegion>) -> Vec<
                         idx += 2;
                         token_begin_idx = idx;
                     } else if let Some(kind) = match *c {
-                        '.' => Some(TkKind::Dot),
-                        '(' => Some(TkKind::LPare),
-                        ')' => Some(TkKind::RPare),
-                        '{' => Some(TkKind::LBrace),
-                        '}' => Some(TkKind::RBrace),
-                        '[' => Some(TkKind::LBracket),
-                        ']' => Some(TkKind::RBracket),
-                        '+' => Some(TkKind::Plus),
-                        '-' => Some(TkKind::Minus),
-                        '*' => Some(TkKind::Asterisk),
-                        '/' => Some(TkKind::Slash),
-                        '%' => Some(TkKind::Percent),
-                        '&' => Some(TkKind::Ampersand),
-                        '<' => Some(TkKind::Lesser),
-                        '>' => Some(TkKind::Greater),
-                        '=' => Some(TkKind::Assign),
-                        ',' => Some(TkKind::Comma),
-                        ':' => Some(TkKind::Colon),
-                        ';' => Some(TkKind::SemiColon),
+                        '.' => Some(TkKind::MarkDot),
+                        '(' => Some(TkKind::MarkLPare),
+                        ')' => Some(TkKind::MarkRPare),
+                        '{' => Some(TkKind::MarkLBrace),
+                        '}' => Some(TkKind::MarkRBrace),
+                        '[' => Some(TkKind::MarkLBracket),
+                        ']' => Some(TkKind::MarkRBracket),
+                        '+' => Some(TkKind::MarkPlus),
+                        '-' => Some(TkKind::MarkMinus),
+                        '*' => Some(TkKind::MarkAsterisk),
+                        '/' => Some(TkKind::MarkSlash),
+                        '%' => Some(TkKind::MarkPercent),
+                        '&' => Some(TkKind::MarkAmpersand),
+                        '<' => Some(TkKind::MarkLesser),
+                        '>' => Some(TkKind::MarkGreater),
+                        '=' => Some(TkKind::MarkAssign),
+                        ',' => Some(TkKind::MarkComma),
+                        ':' => Some(TkKind::MarkColon),
+                        ';' => Some(TkKind::MarkSemiColon),
                         _ => None,
                     } {
                         if token_begin_idx < idx {

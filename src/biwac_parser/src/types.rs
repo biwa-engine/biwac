@@ -1,37 +1,44 @@
 use biwac_ast::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
-use biwac_lexer::TkKind;
+use biwac_lexer::{TkKind, TkKindName};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t> TokenStream<'t> {
+impl<'t, 'src> TokenStream<'t, 'src> {
     pub(crate) fn must_consume_type_annotation(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<TypRepr, ParseError> {
+    ) -> Result<TypRepr, ParseError<'src>> {
         let t = self
             .peek()
-            .ok_or(ParseError::InvalidEOF(vec![TkKind::Colon]))?
+            .ok_or(ParseError::InvalidEOF {
+                expecteds: vec![TkKindName::MarkColon],
+            })?
             .to_owned();
 
-        if let TkKind::Colon = t.kind {
+        if let TkKind::MarkColon = t.kind {
             self.next();
 
             Ok(self.consume_type_representaion(self_typ)?)
         } else {
-            Err(ParseError::InvalidToken(vec![TkKind::Colon], t.clone()))
+            Err(ParseError::InvalidToken {
+                expecteds: vec![TkKindName::MarkColon],
+                found: t.clone(),
+            })
         }
     }
 
     pub(crate) fn opt_consume_type_annotation(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<Option<TypRepr>, ParseError> {
+    ) -> Result<Option<TypRepr>, ParseError<'src>> {
         let t = self
             .peek()
-            .ok_or(ParseError::InvalidEOF(vec![TkKind::Colon]))?
+            .ok_or(ParseError::InvalidEOF {
+                expecteds: vec![TkKindName::MarkColon],
+            })?
             .to_owned();
 
-        if let TkKind::Colon = t.kind {
+        if let TkKind::MarkColon = t.kind {
             self.next();
 
             Ok(Some(self.consume_type_representaion(self_typ)?))
@@ -43,37 +50,37 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn consume_type_representaion(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<TypRepr, ParseError> {
+    ) -> Result<TypRepr, ParseError<'src>> {
         if let Some(t) = self.peek() {
-            if let TkKind::Uint = t.kind {
+            if let TkKind::KwUint = t.kind {
                 let span = t.span.clone();
                 self.next();
                 Ok(TypRepr {
                     val: TypReprVal::Primitive(PrimTyp::Uint),
                     span,
                 })
-            } else if let TkKind::Int = t.kind {
+            } else if let TkKind::KwInt = t.kind {
                 let span = t.span.clone();
                 self.next();
                 Ok(TypRepr {
                     val: TypReprVal::Primitive(PrimTyp::Int),
                     span,
                 })
-            } else if let TkKind::Float = t.kind {
+            } else if let TkKind::KwFloat = t.kind {
                 let span = t.span.clone();
                 self.next();
                 Ok(TypRepr {
                     val: TypReprVal::Primitive(PrimTyp::Float),
                     span,
                 })
-            } else if let TkKind::Bool = t.kind {
+            } else if let TkKind::KwBool = t.kind {
                 let span = t.span.clone();
                 self.next();
                 Ok(TypRepr {
                     val: TypReprVal::Primitive(PrimTyp::Bool),
                     span,
                 })
-            } else if let TkKind::Ident = t.kind {
+            } else if let TkKind::Ident(_) = t.kind {
                 // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
                 let qualid = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args(self_typ)?;
@@ -82,7 +89,7 @@ impl<'t> TokenStream<'t> {
                     span: qualid.span.clone(),
                     val: TypReprVal::Defined(DefTyp { qualid, genargs }),
                 })
-            } else if let TkKind::Package = t.kind {
+            } else if let TkKind::KwPackage = t.kind {
                 let qualid = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args(self_typ)?;
 
@@ -90,26 +97,33 @@ impl<'t> TokenStream<'t> {
                     span: qualid.span.clone(),
                     val: TypReprVal::Defined(DefTyp { qualid, genargs }),
                 })
-            } else if let TkKind::SelfTyp = t.kind
+            } else if let TkKind::KwSelfTyp = t.kind
                 && let Some(self_typ) = self_typ
             {
                 // Self型がある場合のみSelfは有効
                 self.next();
                 Ok(self_typ.clone())
             } else {
-                Err(ParseError::InvalidToken(
-                    vec![TkKind::Uint, TkKind::Int, TkKind::Bool, TkKind::Ident],
-                    t.to_owned().clone(),
-                ))
+                Err(ParseError::InvalidToken {
+                    expecteds: vec![
+                        TkKindName::KwUint,
+                        TkKindName::KwInt,
+                        TkKindName::KwBool,
+                        TkKindName::Ident,
+                    ],
+                    found: t.to_owned().clone(),
+                })
             }
         } else {
-            Err(ParseError::InvalidEOF(vec![
-                TkKind::Uint,
-                TkKind::Int,
-                TkKind::Bool,
-                TkKind::Ident,
-                TkKind::Package,
-            ]))
+            Err(ParseError::InvalidEOF {
+                expecteds: vec![
+                    TkKindName::KwUint,
+                    TkKindName::KwInt,
+                    TkKindName::KwBool,
+                    TkKindName::Ident,
+                    TkKindName::KwPackage,
+                ],
+            })
         }
     }
 
@@ -134,10 +148,10 @@ impl<'t> TokenStream<'t> {
     /// ジェネリック型を具体化するときのジェネリック型引数の代入列とは別の意味合いである。
     pub(crate) fn opt_consume_generic_argument_declaration(
         &mut self,
-    ) -> Result<Vec<Ident>, ParseError> {
+    ) -> Result<Vec<Ident>, ParseError<'src>> {
         let mut genargs = vec![];
         if let Some(t) = self.peek()
-            && matches!(t.kind, TkKind::LBracket)
+            && matches!(t.kind, TkKind::MarkLBracket)
         {
             self.next();
         } else {
@@ -146,7 +160,7 @@ impl<'t> TokenStream<'t> {
 
         loop {
             if let Some(t) = self.peek()
-                && let TkKind::RBracket = t.kind
+                && let TkKind::MarkRBracket = t.kind
             {
                 self.next();
 
@@ -155,21 +169,20 @@ impl<'t> TokenStream<'t> {
                 genargs.push(self.consume_identifier()?);
 
                 if let Some(t) = self.next() {
-                    if let TkKind::RBracket = t.kind {
+                    if let TkKind::MarkRBracket = t.kind {
                         return Ok(genargs);
-                    } else if let TkKind::Comma = t.kind {
+                    } else if let TkKind::MarkComma = t.kind {
                         continue;
                     } else {
-                        return Err(ParseError::InvalidToken(
-                            vec![TkKind::RBracket, TkKind::Comma],
-                            t.clone(),
-                        ));
+                        return Err(ParseError::InvalidToken {
+                            expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
+                            found: t.clone(),
+                        });
                     }
                 } else {
-                    return Err(ParseError::InvalidEOF(vec![
-                        TkKind::RBracket,
-                        TkKind::Comma,
-                    ]));
+                    return Err(ParseError::InvalidEOF {
+                        expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
+                    });
                 }
             }
         }
@@ -184,9 +197,9 @@ impl<'t> TokenStream<'t> {
     pub(crate) fn opt_consume_generic_args(
         &mut self,
         self_typ: &Option<TypRepr>,
-    ) -> Result<Option<Vec<TypRepr>>, ParseError> {
+    ) -> Result<Option<Vec<TypRepr>>, ParseError<'src>> {
         if let Some(t) = self.peek()
-            && matches!(t.kind, TkKind::LBracket)
+            && matches!(t.kind, TkKind::MarkLBracket)
         {
             self.next();
         } else {
@@ -196,7 +209,7 @@ impl<'t> TokenStream<'t> {
         let mut genargs = vec![];
         loop {
             if let Some(t) = self.peek()
-                && let TkKind::RBracket = t.kind
+                && let TkKind::MarkRBracket = t.kind
             {
                 self.next();
 
@@ -205,21 +218,20 @@ impl<'t> TokenStream<'t> {
                 genargs.push(self.consume_type_representaion(self_typ)?);
 
                 if let Some(t) = self.next() {
-                    if let TkKind::RBracket = t.kind {
+                    if let TkKind::MarkRBracket = t.kind {
                         return Ok(Some(genargs));
-                    } else if let TkKind::Comma = t.kind {
+                    } else if let TkKind::MarkComma = t.kind {
                         continue;
                     } else {
-                        return Err(ParseError::InvalidToken(
-                            vec![TkKind::RBracket, TkKind::Comma],
-                            t.clone(),
-                        ));
+                        return Err(ParseError::InvalidToken {
+                            expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
+                            found: t.clone(),
+                        });
                     }
                 } else {
-                    return Err(ParseError::InvalidEOF(vec![
-                        TkKind::RBracket,
-                        TkKind::Comma,
-                    ]));
+                    return Err(ParseError::InvalidEOF {
+                        expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
+                    });
                 }
             }
         }
