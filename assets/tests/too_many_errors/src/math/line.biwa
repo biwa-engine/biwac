@@ -1,0 +1,15 @@
+import package::math::pos::Pos;
+
+struct Line {
+  begin: Pos,
+  end: Pos,
+}
+
+impl Line {
+  fn len(self) -> Float {
+    (
+      (self.begin.x - self.end.x) * (self.begin.x - self.end.x)
+      + (self.begin.y - self.end.y) * (self.begin.y - self.end.y)
+    ).sqrt()
+  }
+}

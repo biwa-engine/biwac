@@ -7,18 +7,17 @@ use std::{
     str::FromStr,
 };
 
-use biwac_base::{DependedPackage, PackageMetadata, PackageName, PackageVersion};
+use biwac_base::{DependedPackage, MetadataHolder, PackageMetadata, PackageName, PackageVersion};
 use serde::Deserialize;
 
 pub use error::PkgMetadataLoadError;
 
-const METADATA_FILE_NAME: &str = "biwa-package.json";
-
 // pkg_root_path はdirであることが保証されている必要がある
 pub fn try_load_package_metadata(
+    metadata: &mut MetadataHolder,
     pkg_root_path: PathBuf,
-) -> Result<PackageMetadata, PkgMetadataLoadError> {
-    let metadata_path = pkg_root_path.join(Path::new(METADATA_FILE_NAME));
+) -> Result<(), PkgMetadataLoadError> {
+    let metadata_path = pkg_root_path.join(Path::new(biwac_base::METADATA_FILE_NAME));
 
     if !metadata_path.exists() || !metadata_path.is_file() {
         Err(PkgMetadataLoadError::MetadataFileNotFound)
@@ -27,16 +26,19 @@ pub fn try_load_package_metadata(
         let mut contents = String::new();
         f.read_to_string(&mut contents).unwrap();
 
-        let metadata: PkgMetadata = serde_json::from_str(&contents)
-            .map_err(|e| PkgMetadataLoadError::InvalidFormat(e.to_string()))?;
+        let m: PkgMetadata =
+            serde_json::from_str(&contents).map_err(|e| PkgMetadataLoadError::InvalidFormat {
+                err_msg: e.to_string(),
+                line: e.line(),
+                column: e.column(),
+            })?;
 
-        Ok(PackageMetadata {
-            name: PackageName::from_str(&metadata.name)
-                .map_err(PkgMetadataLoadError::PackageNameError)?,
-            version: PackageVersion::from_str(metadata.version.as_str())
+        metadata.metadata = Some(PackageMetadata {
+            name: PackageName::from_str(&m.name).map_err(PkgMetadataLoadError::PackageNameError)?,
+            version: PackageVersion::from_str(m.version.as_str())
                 .map_err(PkgMetadataLoadError::PackageVersionError)?,
-            description: metadata.description,
-            dependencies: metadata
+            description: m.description,
+            dependencies: m
                 .dependencies
                 .into_iter()
                 .map(|d| {
@@ -54,7 +56,10 @@ pub fn try_load_package_metadata(
                     })
                 })
                 .collect::<Result<_, _>>()?,
-        })
+        });
+        metadata.src = contents;
+
+        Ok(())
     }
 }
 

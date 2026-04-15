@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::ModPath;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SourceHolder {
     pub mods: HashMap<ModId, ModSource>,
 }

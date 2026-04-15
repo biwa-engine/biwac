@@ -16,9 +16,13 @@ pub enum PkgLoadError {
 }
 
 impl BiwacError for PkgLoadError {
-    fn print_error_message(&self, srcs: &biwac_base::SourceHolder) {
+    fn print_error_message(
+        &self,
+        metadata: &biwac_base::MetadataHolder,
+        srcs: &biwac_base::SourceHolder,
+    ) {
         match self {
-            Self::LexError { err, .. } => err.print_error_message(srcs),
+            Self::LexError { err, .. } => err.print_error_message(metadata, srcs),
             _ => todo!(),
         }
     }

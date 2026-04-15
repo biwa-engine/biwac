@@ -1,0 +1,57 @@
+[[native(arch="typescript")]]
+type Vec[T] = {{
+  Array<T>
+}};
+
+impl[T] Vec[T] {
+  [[native(arch="typescript")]]
+  fn push(self, v: T) {{
+    self.push(v);
+    return;
+  }}
+  
+  [[native(arch="typescript")]]
+  fn new() -> Self {{
+    return [];
+  }}
+}
+
+struct Pair[T, U] {
+  x: T,
+  y: U,
+}
+
+impl[T, U] Pair[T, U] {
+  fn new(x: T, y: U) -> Self {
+    Self {
+      x = x,
+      y = y,
+    }
+  }
+  
+  fn x(self) -> T {
+    self.x
+  }
+
+  fn y(self) -> U {
+    self.y
+  }
+}
+
+impl Pair[Int, Int] {
+  fn add(self) -> Int {
+    self.x + self.y
+  }
+}
+
+impl Pair[Float, Float] {
+  fn add(self) -> Float {
+    self.x + self.y
+  }
+}
+
+impl[T] Pair[T, Int] {
+  fn y_int(self) -> Int {
+    self.y
+  }
+}

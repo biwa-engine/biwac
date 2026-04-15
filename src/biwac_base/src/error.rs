@@ -1,19 +1,20 @@
-use crate::SourceHolder;
+use crate::{MetadataHolder, SourceHolder};
 
 pub trait BiwacError {
-    fn print_error_message(&self, srcs: &SourceHolder);
+    fn print_error_message(&self, metadata: &MetadataHolder, srcs: &SourceHolder);
 }
 
 #[derive(Debug)]
-pub struct ErrorHolder<E: BiwacError> {
+pub struct ErrorHolder<'a, E: BiwacError> {
     pub errs: Vec<E>,
-    pub srcs: SourceHolder,
+    pub srcs: &'a SourceHolder,
+    pub metadata: &'a MetadataHolder,
 }
 
-impl<E: BiwacError> ErrorHolder<E> {
+impl<'a, E: BiwacError> ErrorHolder<'a, E> {
     pub fn panic_with_error_messages(&self) -> ! {
         for e in &self.errs {
-            e.print_error_message(&self.srcs);
+            e.print_error_message(self.metadata, self.srcs);
         }
 
         panic!()

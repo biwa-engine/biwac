@@ -13,45 +13,49 @@ use std::{
 pub use error::PkgLoadError;
 
 use biwac_ast::ModAst;
-use biwac_base::{BIWA_EXTENSION, ErrorHolder, ModId, ModPath, ModSource, SourceHolder};
+use biwac_base::{
+    BIWA_EXTENSION, ErrorHolder, MetadataHolder, ModId, ModPath, ModSource, SourceHolder,
+};
 
 #[derive(Debug)]
 pub struct Pkg {
     pub modules: HashMap<ModId, ModAst>,
-    pub srcs: SourceHolder,
 }
 
 impl Pkg {
     // pkg_root_path はdirであることが保証されている必要がある
-    pub fn try_load(pkg_root_path: PathBuf) -> Result<Self, ErrorHolder<PkgLoadError>> {
+    pub fn try_load<'a>(
+        metadata: &'a MetadataHolder,
+        srcs: &'a mut SourceHolder, // 空の SourceHolder を受け取る
+        pkg_root_path: PathBuf,
+    ) -> Result<Self, ErrorHolder<'a, PkgLoadError>> {
         let srcpath = pkg_root_path.join(Path::new("src"));
 
         // トップレベルモジュールを起点にロードする
         // それにはMainを指定する
         let mut file_map = FileMap::new();
-        map_files_from_dir(&mut file_map, &srcpath, ModPath::Main).map_err(|e| ErrorHolder {
-            errs: vec![e],
-            srcs: SourceHolder {
-                mods: HashMap::new(),
-            },
-        })?;
+        if let Err(e) = map_files_from_dir(&mut file_map, &srcpath, ModPath::Main) {
+            return Err(ErrorHolder {
+                errs: vec![e],
+                srcs,
+                metadata,
+            });
+        }
 
         if !file_map.contains_lib && !file_map.contains_main {
             return Err(ErrorHolder {
                 errs: vec![PkgLoadError::RootModuleNotFound],
-                srcs: SourceHolder {
-                    mods: HashMap::new(),
-                },
+                srcs,
+                metadata,
             });
         }
 
         // 先にすべてのファイルを読む
-        let mut srcs = HashMap::new();
         for (mod_id, (modpath, path)) in file_map.files {
             let mut f = File::open(path.as_path()).unwrap();
             let mut contents = String::new();
             f.read_to_string(&mut contents).unwrap();
-            srcs.insert(
+            srcs.mods.insert(
                 mod_id,
                 ModSource {
                     modu: modpath,
@@ -65,7 +69,7 @@ impl Pkg {
         // エラーに互いに依存がないので、複数エラーを束ねるべき
         let mut modules = HashMap::new();
         let mut errs = Vec::new();
-        for (mod_id, mod_src) in &srcs {
+        for (mod_id, mod_src) in &srcs.mods {
             match biwac_lexer::lex(*mod_id, &mod_src.src) {
                 Ok(tokens) => {
                     match biwac_parser::Parser::new(mod_src.modu.clone(), tokens).try_parse() {
@@ -93,13 +97,11 @@ impl Pkg {
         if !errs.is_empty() {
             Err(ErrorHolder {
                 errs,
-                srcs: SourceHolder { mods: srcs },
+                srcs,
+                metadata,
             })
         } else {
-            Ok(Self {
-                modules,
-                srcs: SourceHolder { mods: srcs },
-            })
+            Ok(Self { modules })
         }
     }
 }

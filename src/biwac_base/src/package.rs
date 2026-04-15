@@ -3,6 +3,12 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::BiwacError;
 
+#[derive(Debug, Default)]
+pub struct MetadataHolder {
+    pub metadata: Option<PackageMetadata>, // 未初期化ならNone (one shot)
+    pub src: String,                       // metadata file string content
+}
+
 #[derive(Debug)]
 pub struct PackageMetadata {
     pub name: PackageName,
@@ -58,7 +64,7 @@ impl PackageName {
 }
 
 impl BiwacError for PackageNameError {
-    fn print_error_message(&self, _srcs: &crate::SourceHolder) {
+    fn print_error_message(&self, _metadata: &MetadataHolder, _srcs: &crate::SourceHolder) {
         match self {
             Self::InvalidPackageName(name) => {
                 println!(
@@ -127,13 +133,13 @@ impl PackageVersion {
 }
 
 impl BiwacError for PackageVersionError {
-    fn print_error_message(&self, _srcs: &crate::SourceHolder) {
+    fn print_error_message(&self, _metadata: &MetadataHolder, _srcs: &crate::SourceHolder) {
         match self {
             Self::InvalidPackageVersion(version) => {
                 println!(
                     r#"{} Invalid package version: `{version}`
 Package version must be `[0-9].[0-9].[0-9]`"#,
-                    "Error".red()
+                    "Error:".red()
                 )
             }
         }

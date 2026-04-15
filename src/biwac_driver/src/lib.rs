@@ -1,26 +1,34 @@
+use colored::Colorize;
 use std::{
     io::Write,
     path::{Path, PathBuf},
 };
 
-use biwac_base::PackageName;
+use biwac_base::{BiwacError, MetadataHolder, PackageName, SourceHolder};
 
 pub fn compile(pkg_root_path: PathBuf) {
-    let metadata = match biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone()) {
+    // 空のソースファイルリストを作成
+    let mut srcs = SourceHolder::default();
+    // 空のメタデータを作成
+    let mut metadata = MetadataHolder::default();
+
+    match biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.clone()) {
         Ok(metadata) => metadata,
         Err(e) => {
-            todo!()
+            e.print_error_message(&metadata, &srcs);
+            panic!()
         }
     };
 
+    let meta = metadata.metadata.as_ref().unwrap();
     println!(
-        "Compiling {} v{}.{}.{}",
-        metadata.name.value(),
-        metadata.version.major(),
-        metadata.version.minor(),
-        metadata.version.patch()
+        "{} {} v{}.{}.{}",
+        "Compiling".green().bold(),
+        meta.name.value(),
+        meta.version.major(),
+        meta.version.minor(),
+        meta.version.patch()
     );
-
     println!();
 
     // build directory preparation
@@ -40,7 +48,11 @@ pub fn compile(pkg_root_path: PathBuf) {
         );
     }
 
-    let pkg = match biwac_package_loader::Pkg::try_load(pkg_root_path.to_path_buf()) {
+    let pkg = match biwac_package_loader::Pkg::try_load(
+        &metadata,
+        &mut srcs,
+        pkg_root_path.to_path_buf(),
+    ) {
         Ok(pkg) => pkg,
         Err(e) => {
             e.panic_with_error_messages();
@@ -62,7 +74,7 @@ pub fn compile(pkg_root_path: PathBuf) {
 
     let bin = biwac_generator::arch::typescript::generate(&hir);
 
-    write_bin(build_dir_path.to_path_buf(), &metadata.name, &bin).unwrap();
+    write_bin(build_dir_path.to_path_buf(), &meta.name, &bin).unwrap();
 }
 
 // build_dir_path はdirであることが保証されている必要がある

@@ -1,0 +1,18 @@
+fn fact(n: Int) -> Int {
+  if n == 0 {
+    1
+  } else {
+    n * fact(n - 1)
+  }
+}
+
+[[native(arch="typescript")]]
+fn native_sqrt(x: Int) -> Float {{
+  return Math.sqrt(x);
+}}
+
+impl Int {
+  fn sqrt(self) -> Float {
+    native_sqrt(self)
+  }
+}

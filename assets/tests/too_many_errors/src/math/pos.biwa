@@ -1,0 +1,10 @@
+struct Pos {
+  x: Int,
+  y: Int,
+}
+
+impl Pos {
+  fn new(x: Int, y: Int) -> Self {
+    Self { x = x, y = y }
+  }
+}

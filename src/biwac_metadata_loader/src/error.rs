@@ -4,34 +4,49 @@ use colored::Colorize;
 #[derive(Debug)]
 pub enum PkgMetadataLoadError {
     MetadataFileNotFound,
-    InvalidFormat(String),
+    InvalidFormat {
+        err_msg: String,
+        line: usize,
+        column: usize,
+    },
     PackageNameError(PackageNameError),
     PackageVersionError(PackageVersionError),
 }
 
 impl BiwacError for PkgMetadataLoadError {
-    fn print_error_message(&self, srcs: &biwac_base::SourceHolder) {
+    fn print_error_message(
+        &self,
+        metadata: &biwac_base::MetadataHolder,
+        srcs: &biwac_base::SourceHolder,
+    ) {
         match self {
             Self::MetadataFileNotFound => {
                 println!(
-                    r#"{} Metadata file `{}` not found."#,
+                    r#"{} Package profile `{}` not found."#,
                     "Error:".red(),
-                    crate::METADATA_FILE_NAME
+                    biwac_base::METADATA_FILE_NAME
                 )
             }
-            Self::InvalidFormat(e) => {
+            Self::InvalidFormat {
+                err_msg,
+                line,
+                column,
+            } => {
                 println!(
-                    r#"{} Invalid metadata file `{}` format.
-    --> {e}"#,
+                    r#"{} Invalid package profile format.
+    --> {}:{}:{}
+    --> {err_msg}"#,
                     "Error:".red(),
-                    crate::METADATA_FILE_NAME
+                    biwac_base::METADATA_FILE_NAME,
+                    line,
+                    column
                 )
             }
             Self::PackageNameError(e) => {
-                e.print_error_message(srcs);
+                e.print_error_message(metadata, srcs);
             }
             Self::PackageVersionError(e) => {
-                e.print_error_message(srcs);
+                e.print_error_message(metadata, srcs);
             }
         }
     }

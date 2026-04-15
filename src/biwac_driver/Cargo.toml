@@ -11,6 +11,7 @@ biwac_package_loader = { path = "../biwac_package_loader"}
 biwac_name_resolver = { path = "../biwac_name_resolver"}
 biwac_type_inferrer = { path = "../biwac_type_inferrer"}
 biwac_generator = { path = "../biwac_generator"}
+colored.workspace = true
 
 [features]
 default = [ "typescript" ]

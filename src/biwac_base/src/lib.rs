@@ -5,8 +5,8 @@ mod src;
 
 pub use error::{BiwacError, ErrorHolder};
 pub use package::{
-    DependedPackage, PackageMetadata, PackageName, PackageNameError, PackageVersion,
-    PackageVersionError,
+    DependedPackage, MetadataHolder, PackageMetadata, PackageName, PackageNameError,
+    PackageVersion, PackageVersionError,
 };
 pub use span::{ModPath, SSpan, Span};
 pub use src::{ModId, ModSource, SourceHolder};
@@ -16,3 +16,5 @@ pub const BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME: &str = "lib";
 pub const BIWA_EXTENSION: &str = "biwa";
 
 pub const BIWA_BUILD_DIRECTORY_NAME: &str = ".biwa_build";
+
+pub const METADATA_FILE_NAME: &str = "biwa-package.json";

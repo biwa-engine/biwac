@@ -195,12 +195,13 @@ pub struct ResolveCtx {
 
 impl ResolveCtx {
     pub fn new(
-        metadata: &biwac_base::PackageMetadata,
+        metadata: &biwac_base::MetadataHolder,
         deps: &biwac_dependency_loader::Deps,
     ) -> Result<Self, ResolveError> {
         // dependencies に重複したパッケージ名がないか検査
         let mut dep_pkg_names = HashSet::new();
-        for pkg in &metadata.dependencies {
+        let meta = metadata.metadata.as_ref().unwrap(); // ロード済みなのでSome
+        for pkg in &meta.dependencies {
             if !dep_pkg_names.insert(pkg.name.value()) {
                 // not newly inserted
                 return Err(ResolveError::DuplicatedDepsPackageName {
@@ -216,7 +217,7 @@ impl ResolveCtx {
             .map(|pkg| (pkg.name.value(), &pkg.symbols))
             .collect();
 
-        for pkg in &metadata.dependencies {
+        for pkg in &meta.dependencies {
             if !deps_pkgs.contains_key(pkg.name.value()) {
                 return Err(ResolveError::InsufficientDependencyPackageData {
                     pkg: pkg.name.clone(),
@@ -224,9 +225,9 @@ impl ResolveCtx {
             }
         }
 
-        if deps_pkgs.contains_key(metadata.name.value()) {
+        if deps_pkgs.contains_key(meta.name.value()) {
             return Err(ResolveError::DependsOnSamePackageName {
-                pkg: metadata.name.clone(),
+                pkg: meta.name.clone(),
             });
         }
 
@@ -266,8 +267,8 @@ impl ResolveCtx {
         }
 
         Ok(Self {
-            hir: Hir::new(metadata.name.clone(), external_tys, external_vals),
-            pkg_name: metadata.name.clone(),
+            hir: Hir::new(meta.name.clone(), external_tys, external_vals),
+            pkg_name: meta.name.clone(),
         })
     }
 
