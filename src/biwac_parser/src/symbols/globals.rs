@@ -58,7 +58,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
         if flags.iter().any(|f| &f.flag.id == "native") {
             if let Some(t) = self.next() {
-                if TkKind::DslLiteral == t.kind {
+                if let TkKind::DslLiteral(str) = t.kind {
                     if let Some(impl_ctx) = impl_ctx {
                         if let Some(self_ident) = self_ident {
                             Ok(Globals::NativeMethodDef(NativeMethodDef {
@@ -68,7 +68,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                                 id,
                                 args,
                                 rtype,
-                                native: t.unwrap_string_value(),
+                                native: str.to_string(),
                                 native_span: t.span.clone(),
                                 span: Span::merge(&begin, &t.span),
                                 flags,
@@ -79,7 +79,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                                 impl_ctx: Some(impl_ctx),
                                 id,
                                 args,
-                                native: t.unwrap_string_value(),
+                                native: str.to_string(),
                                 rtype,
                                 span: Span::merge(&begin, &t.span),
                                 native_span: t.span.clone(),
@@ -92,7 +92,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                             impl_ctx: None,
                             id,
                             args,
-                            native: t.unwrap_string_value(),
+                            native: str.to_string(),
                             rtype,
                             span: Span::merge(&begin, &t.span),
                             native_span: t.span.clone(),
@@ -267,20 +267,28 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                         let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
 
-                        let t = self.must_consume_next(vec![TkKindName::DslLiteral])?;
-                        let native = t.unwrap_string_value();
-                        let native_span = t.span.clone();
+                        let t = self.next().ok_or(ParseError::InvalidEOF {
+                            expecteds: vec![TkKindName::DslLiteral],
+                        })?;
+                        if let TkKind::DslLiteral(str) = t.kind {
+                            let native = str.to_string();
+                            let native_span = t.span.clone();
 
-                        let _ = self.must_consume_next(vec![TkKindName::MarkSemiColon])?;
+                            let _ = self.must_consume_next(vec![TkKindName::MarkSemiColon])?;
 
-                        Ok(vec![Globals::TypeDef(TypeDef::NativeTypeAlias(
-                            NativeTypeAlias {
-                                ident,
-                                genargs,
-                                native,
-                                native_span,
-                            },
-                        ))])
+                            Ok(vec![Globals::TypeDef(TypeDef::NativeTypeAlias(
+                                NativeTypeAlias {
+                                    ident,
+                                    genargs,
+                                    native,
+                                    native_span,
+                                },
+                            ))])
+                        } else {
+                            Err(ParseError::InvalidEOF {
+                                expecteds: vec![TkKindName::DslLiteral],
+                            })
+                        }
                     } else {
                         // "type" <identifier> ( <generic-argument-declaration> )? "=" <type-representation> ";"
                         self.next();
@@ -335,8 +343,8 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         }
                     }
                 }
-                TkKind::DslLiteral => {
-                    let native = t.unwrap_string_value();
+                TkKind::DslLiteral(str) => {
+                    let native = str.to_string();
                     let native_span = t.span.clone();
                     self.next();
 
@@ -367,22 +375,28 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         ))
                     };
 
-                    let dsl = self.must_consume_next(vec![TkKindName::DslLiteral])?;
-                    let novel_stmts = biwac_novel_parser::NovelSourceStream::new(
-                        &dsl.unwrap_string_value(),
-                        dsl.span.clone(),
-                    )
-                    .parse()
-                    .map_err(ParseError::NovelParseError)?;
+                    let t = self.next().ok_or(ParseError::InvalidEOF {
+                        expecteds: vec![TkKindName::DslLiteral],
+                    })?;
+                    if let TkKind::DslLiteral(str) = t.kind {
+                        let novel_stmts =
+                            biwac_novel_parser::NovelSourceStream::new(str, t.span.clone())
+                                .parse()
+                                .map_err(ParseError::NovelParseError)?;
 
-                    Ok(vec![Globals::NovelScene(NovelScene {
-                        id,
-                        args,
-                        rtype,
-                        stmts: novel_stmts,
-                        span: Span::merge(&begin, &dsl.span),
-                        flags,
-                    })])
+                        Ok(vec![Globals::NovelScene(NovelScene {
+                            id,
+                            args,
+                            rtype,
+                            stmts: novel_stmts,
+                            span: Span::merge(&begin, &t.span),
+                            flags,
+                        })])
+                    } else {
+                        Err(ParseError::InvalidEOF {
+                            expecteds: vec![TkKindName::DslLiteral],
+                        })
+                    }
                 }
                 _ => Err(ParseError::InvalidToken {
                     expecteds: vec![

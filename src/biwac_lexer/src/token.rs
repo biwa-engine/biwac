@@ -4,31 +4,12 @@ use biwac_base::Span;
 pub struct Token<'src> {
     pub kind: TkKind<'src>,
     pub span: Span,
-    pub val: Option<TkVal>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TkVal {
     Integer(u64),
     String(String),
-}
-
-impl Token<'_> {
-    pub fn unwrap_integer_value(&self) -> u64 {
-        if let Some(TkVal::Integer(i)) = &self.val {
-            *i
-        } else {
-            panic!("compiler bug: no integer value token unwrapped as integer")
-        }
-    }
-
-    pub fn unwrap_string_value(&self) -> String {
-        if let Some(TkVal::String(s)) = &self.val {
-            s.clone()
-        } else {
-            panic!("compiler bug: no string value token unwrapped as string")
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,7 +64,7 @@ pub enum TkKind<'src> {
     MarkDoubleColon,          // ::
     MarkDoubleLBrace,         // {{
     MarkDoubleRBrace,         // }}
-    DslLiteral,               // DSL
+    DslLiteral(&'src str),    // DSL
 }
 
 impl TkKind<'_> {
@@ -139,7 +120,7 @@ impl TkKind<'_> {
             Self::MarkDoubleColon => "::".to_string(),
             Self::MarkDoubleLBrace => "{{".to_string(),
             Self::MarkDoubleRBrace => "}}".to_string(),
-            Self::DslLiteral => "...".to_string(),
+            Self::DslLiteral(_) => "...".to_string(),
         }
     }
 }
@@ -252,7 +233,7 @@ impl TkKind<'_> {
             Self::MarkDoubleColon => TkKindName::MarkDoubleColon, // ::
             Self::MarkDoubleLBrace => TkKindName::MarkDoubleLBrace, // {{
             Self::MarkDoubleRBrace => TkKindName::MarkDoubleRBrace, // }}
-            Self::DslLiteral => TkKindName::DslLiteral, // DSL
+            Self::DslLiteral(_) => TkKindName::DslLiteral, // DSL
         }
     }
 }

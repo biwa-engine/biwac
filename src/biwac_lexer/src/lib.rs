@@ -9,7 +9,7 @@ use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_
 use biwac_base::ModId;
 
 pub use error::TokenizeError;
-pub use token::{TkKind, TkKindName, TkVal, Token};
+pub use token::{TkKind, TkKindName, Token};
 
 pub fn lex<'src>(file_id: ModId, src: &'src str) -> Result<Vec<Token<'src>>, TokenizeError> {
     let regions = divide_regions(file_id, src)?;
@@ -22,60 +22,48 @@ pub fn lex<'src>(file_id: ModId, src: &'src str) -> Result<Vec<Token<'src>>, Tok
             PreTkKind::Word => {
                 let w = &src[p.span.begin()..p.span.end()];
 
-                let (kind, val) = match w {
-                    "TRUE" => (TkKind::KwBoolTrue, None),
-                    "FALSE" => (TkKind::KwBoolFalse, None),
-                    "import" => (TkKind::KwImport, None),
-                    "package" => (TkKind::KwPackage, None),
-                    "fn" => (TkKind::KwFn, None),
-                    "type" => (TkKind::KwType, None),
-                    "let" => (TkKind::KwLet, None),
-                    "if" => (TkKind::KwIf, None),
-                    "else" => (TkKind::KwElse, None),
-                    "while" => (TkKind::KwWhile, None),
-                    "return" => (TkKind::KwReturn, None),
-                    "Uint" => (TkKind::KwUint, None),
-                    "Int" => (TkKind::KwInt, None),
-                    "Float" => (TkKind::KwFloat, None),
-                    "Bool" => (TkKind::KwBool, None),
-                    "struct" => (TkKind::KwStruct, None),
-                    "impl" => (TkKind::KwImpl, None),
-                    "Self" => (TkKind::KwSelfTyp, None),
-                    "self" => (TkKind::KwSelfVar, None),
-                    "scene" => (TkKind::KwScene, None),
+                let kind = match w {
+                    "TRUE" => TkKind::KwBoolTrue,
+                    "FALSE" => TkKind::KwBoolFalse,
+                    "import" => TkKind::KwImport,
+                    "package" => TkKind::KwPackage,
+                    "fn" => TkKind::KwFn,
+                    "type" => TkKind::KwType,
+                    "let" => TkKind::KwLet,
+                    "if" => TkKind::KwIf,
+                    "else" => TkKind::KwElse,
+                    "while" => TkKind::KwWhile,
+                    "return" => TkKind::KwReturn,
+                    "Uint" => TkKind::KwUint,
+                    "Int" => TkKind::KwInt,
+                    "Float" => TkKind::KwFloat,
+                    "Bool" => TkKind::KwBool,
+                    "struct" => TkKind::KwStruct,
+                    "impl" => TkKind::KwImpl,
+                    "Self" => TkKind::KwSelfTyp,
+                    "self" => TkKind::KwSelfVar,
+                    "scene" => TkKind::KwScene,
                     _ => {
                         if let Some(i) = try_get_dec_integer(w) {
-                            (TkKind::LiteralInteger(i), Some(TkVal::Integer(i)))
+                            TkKind::LiteralInteger(i)
                         } else if let Some(i) = try_get_prefixed_int(w) {
-                            (TkKind::LiteralInteger(i), Some(TkVal::Integer(i)))
+                            TkKind::LiteralInteger(i)
                         } else {
-                            (TkKind::Ident(w), Some(TkVal::String(w.to_string())))
+                            TkKind::Ident(w)
                         }
                     }
                 };
 
-                Token {
-                    kind,
-                    span: p.span,
-                    val,
-                }
+                Token { kind, span: p.span }
             }
-            PreTkKind::Mark(kind) => Token {
-                kind,
-                span: p.span,
-                val: None,
-            },
+            PreTkKind::Mark(kind) => Token { kind, span: p.span },
             PreTkKind::StringLiteral => Token {
                 kind: TkKind::LiteralString(&src[p.span.begin() + 1..p.span.end() - 1]),
                 span: p.span.clone(),
-                val: Some(TkVal::String(
-                    src[p.span.begin() + 1..p.span.end() - 1].to_string(),
-                )),
             },
             PreTkKind::Dsl => Token {
-                kind: TkKind::DslLiteral,
+                kind: TkKind::DslLiteral(&src[p.span.begin() + 1..p.span.end() - 1]),
                 span: p.span.clone(),
-                val: Some(TkVal::String(src[p.span.begin()..p.span.end()].to_string())),
             },
         })
         .collect();
