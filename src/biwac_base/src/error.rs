@@ -1,3 +1,5 @@
+use colored::Colorize;
+
 use crate::{MetadataHolder, SourceHolder};
 
 pub trait BiwacError {
@@ -16,6 +18,13 @@ impl<'a, E: BiwacError> ErrorHolder<'a, E> {
         for e in &self.errs {
             e.print_error_message(self.metadata, self.srcs);
         }
+
+        println!(
+            r#"{}
+Compile failed because of {} previous error(s)."#,
+            "Error!".red().bold(),
+            self.errs.len()
+        );
 
         panic!()
     }

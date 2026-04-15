@@ -29,7 +29,6 @@ pub fn compile(pkg_root_path: PathBuf) {
         meta.version.minor(),
         meta.version.patch()
     );
-    println!();
 
     // build directory preparation
     let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
@@ -75,6 +74,8 @@ pub fn compile(pkg_root_path: PathBuf) {
     let bin = biwac_generator::arch::typescript::generate(&hir);
 
     write_bin(build_dir_path.to_path_buf(), &meta.name, &bin).unwrap();
+
+    println!("{}", "Finished!".green().bold(),);
 }
 
 // build_dir_path はdirであることが保証されている必要がある
