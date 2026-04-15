@@ -7,6 +7,8 @@ use std::{
 use biwac_base::{BiwacError, MetadataHolder, PackageName, SourceHolder};
 
 pub fn compile(pkg_root_path: PathBuf) {
+    println!("{}", "Compiling...".green().bold(),);
+
     // 空のソースファイルリストを作成
     let mut srcs = SourceHolder::default();
     // 空のメタデータを作成
@@ -16,14 +18,16 @@ pub fn compile(pkg_root_path: PathBuf) {
         Ok(metadata) => metadata,
         Err(e) => {
             e.print_error_message(&metadata, &srcs);
+
+            biwac_base::print_error_finish_message(1);
+
             panic!()
         }
     };
 
     let meta = metadata.metadata.as_ref().unwrap();
     println!(
-        "{} {} v{}.{}.{}",
-        "Compiling".green().bold(),
+        "Package: {} v{}.{}.{}",
         meta.name.value(),
         meta.version.major(),
         meta.version.minor(),

@@ -19,13 +19,16 @@ impl<'a, E: BiwacError> ErrorHolder<'a, E> {
             e.print_error_message(self.metadata, self.srcs);
         }
 
-        println!(
-            r#"{}
-Compile failed because of {} previous error(s)."#,
-            "Error!".red().bold(),
-            self.errs.len()
-        );
+        print_error_finish_message(self.errs.len());
 
         panic!()
     }
+}
+
+pub fn print_error_finish_message(err_count: usize) {
+    println!(
+        "{} Compile failed because of {} previous error(s).",
+        "Error!".red().bold(),
+        err_count
+    );
 }

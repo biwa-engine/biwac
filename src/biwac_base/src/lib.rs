@@ -3,7 +3,7 @@ mod package;
 mod span;
 mod src;
 
-pub use error::{BiwacError, ErrorHolder};
+pub use error::{BiwacError, ErrorHolder, print_error_finish_message};
 pub use package::{
     DependedPackage, MetadataHolder, PackageMetadata, PackageName, PackageNameError,
     PackageVersion, PackageVersionError,
