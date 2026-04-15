@@ -6,7 +6,12 @@ use std::{
 use biwac_base::PackageName;
 
 pub fn compile(pkg_root_path: PathBuf) {
-    let metadata = biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone()).unwrap();
+    let metadata = match biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone()) {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            todo!()
+        }
+    };
 
     println!(
         "Compiling {} v{}.{}.{}",

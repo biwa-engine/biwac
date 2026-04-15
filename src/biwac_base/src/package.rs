@@ -1,3 +1,4 @@
+use colored::Colorize;
 use std::{fmt::Display, str::FromStr};
 
 use crate::BiwacError;
@@ -57,12 +58,13 @@ impl PackageName {
 }
 
 impl BiwacError for PackageNameError {
-    fn error_message(&self, _srcs: &crate::SourceHolder) -> String {
+    fn print_error_message(&self, _srcs: &crate::SourceHolder) {
         match self {
             Self::InvalidPackageName(name) => {
-                format!(
-                    r#"Invalid package name: `{name}`
+                println!(
+                    r#"{} Invalid package name: `{name}`
 Package name must be `[a-z][0-9a-z_]*`"#,
+                    "Error:".red()
                 )
             }
         }
@@ -125,12 +127,13 @@ impl PackageVersion {
 }
 
 impl BiwacError for PackageVersionError {
-    fn error_message(&self, _srcs: &crate::SourceHolder) -> String {
+    fn print_error_message(&self, _srcs: &crate::SourceHolder) {
         match self {
             Self::InvalidPackageVersion(version) => {
-                format!(
-                    r#"Invalid package version: `{version}`
+                println!(
+                    r#"{} Invalid package version: `{version}`
 Package version must be `[0-9].[0-9].[0-9]`"#,
+                    "Error".red()
                 )
             }
         }

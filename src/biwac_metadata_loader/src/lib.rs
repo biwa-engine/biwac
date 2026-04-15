@@ -1,3 +1,5 @@
+mod error;
+
 use std::{
     fs::File,
     io::Read,
@@ -5,25 +7,18 @@ use std::{
     str::FromStr,
 };
 
-use biwac_base::{
-    DependedPackage, PackageMetadata, PackageName, PackageNameError, PackageVersion,
-    PackageVersionError,
-};
+use biwac_base::{DependedPackage, PackageMetadata, PackageName, PackageVersion};
 use serde::Deserialize;
 
-#[derive(Debug)]
-pub enum PkgMetadataLoadError {
-    MetadataFileNotFound,
-    InvalidFormat(String),
-    PackageNameError(PackageNameError),
-    PackageVersionError(PackageVersionError),
-}
+pub use error::PkgMetadataLoadError;
+
+const METADATA_FILE_NAME: &str = "biwa-package.json";
 
 // pkg_root_path はdirであることが保証されている必要がある
 pub fn try_load_package_metadata(
     pkg_root_path: PathBuf,
 ) -> Result<PackageMetadata, PkgMetadataLoadError> {
-    let metadata_path = pkg_root_path.join(Path::new("biwa-package.json"));
+    let metadata_path = pkg_root_path.join(Path::new(METADATA_FILE_NAME));
 
     if !metadata_path.exists() || !metadata_path.is_file() {
         Err(PkgMetadataLoadError::MetadataFileNotFound)

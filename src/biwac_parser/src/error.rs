@@ -13,7 +13,7 @@ pub enum ParseError {
 }
 
 impl BiwacError for ParseError {
-    fn error_message(&self, srcs: &biwac_base::SourceHolder) -> String {
+    fn print_error_message(&self, _srcs: &biwac_base::SourceHolder) {
         todo!()
     }
 }

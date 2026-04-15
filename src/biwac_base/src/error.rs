@@ -1,7 +1,7 @@
 use crate::SourceHolder;
 
 pub trait BiwacError {
-    fn error_message(&self, srcs: &SourceHolder) -> String;
+    fn print_error_message(&self, srcs: &SourceHolder);
 }
 
 #[derive(Debug)]
@@ -13,7 +13,7 @@ pub struct ErrorHolder<E: BiwacError> {
 impl<E: BiwacError> ErrorHolder<E> {
     pub fn panic_with_error_messages(&self) -> ! {
         for e in &self.errs {
-            println!("{}", e.error_message(&self.srcs))
+            e.print_error_message(&self.srcs);
         }
 
         panic!()

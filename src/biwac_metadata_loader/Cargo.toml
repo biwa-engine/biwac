@@ -7,3 +7,4 @@ edition.workspace = true
 biwac_base = { path = "../biwac_base"}
 serde.workspace = true
 serde_json.workspace = true
+colored.workspace = true

@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
+ariadne.workspace = true
