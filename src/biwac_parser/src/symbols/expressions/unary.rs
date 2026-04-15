@@ -29,6 +29,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             }
         } else {
             Err(ParseError::InvalidEOF {
+                mod_id: self.mod_id,
                 expecteds: vec![TkKindName::Ident, TkKindName::MarkMinus],
             })
         }

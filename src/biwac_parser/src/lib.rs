@@ -7,7 +7,7 @@ pub mod types;
 mod tests;
 
 use biwac_ast::{Ident, QualifiedId};
-use biwac_base::{ModPath, Span};
+use biwac_base::{ModId, ModPath, Span};
 use biwac_lexer::{TkKind, TkKindName, Token};
 
 pub(crate) use symbols::statements::ExprOrStmt;
@@ -16,24 +16,33 @@ pub use error::ParseError;
 
 #[derive(Debug, Clone)]
 pub struct Parser<'src> {
+    mod_id: ModId,
     modpath: ModPath,
     tokens: Vec<Token<'src>>,
 }
 
 impl<'src> Parser<'src> {
-    pub fn new(modpath: ModPath, tokens: Vec<Token<'src>>) -> Self {
-        Self { modpath, tokens }
+    pub fn new(mod_id: ModId, modpath: ModPath, tokens: Vec<Token<'src>>) -> Self {
+        Self {
+            mod_id,
+            modpath,
+            tokens,
+        }
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct TokenStream<'t, 'src> {
+    mod_id: ModId,
     tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
 }
 
 impl<'t, 'src> TokenStream<'t, 'src> {
-    pub(crate) fn new(tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>) -> Self {
-        Self { tokens }
+    pub(crate) fn new(
+        mod_id: ModId,
+        tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
+    ) -> Self {
+        Self { mod_id, tokens }
     }
 
     pub(crate) fn next(&mut self) -> Option<&Token<'src>> {
@@ -61,7 +70,9 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         &mut self,
         expecteds: Vec<TkKindName>,
     ) -> Result<&Token<'src>, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let t: &Token<'src> = self.next().ok_or(ParseError::InvalidEOF {
+            mod_id,
             expecteds: expecteds.clone(),
         })?;
 
@@ -78,9 +89,11 @@ impl<'t, 'src> TokenStream<'t, 'src> {
     }
 
     pub(crate) fn must_consume_semicolon(&mut self) -> Result<Token<'src>, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let t = self
             .next()
             .ok_or(ParseError::InvalidEOF {
+                mod_id,
                 expecteds: vec![TkKindName::MarkSemiColon],
             })?
             .clone();
@@ -107,7 +120,9 @@ impl<'t, 'src> TokenStream<'t, 'src> {
     }
 
     pub(crate) fn consume_identifier(&mut self) -> Result<Ident, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let t = self.next().ok_or(ParseError::InvalidEOF {
+            mod_id,
             expecteds: vec![TkKindName::Ident],
         })?;
 

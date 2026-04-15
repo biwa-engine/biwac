@@ -8,7 +8,7 @@ use crate::{ParseError, Parser, TokenStream};
 
 impl<'src> Parser<'src> {
     pub fn try_parse(self) -> Result<ModAst, ParseError<'src>> {
-        let mut stream = TokenStream::new(self.tokens.iter().peekable());
+        let mut stream = TokenStream::new(self.mod_id, self.tokens.iter().peekable());
 
         let mut globals = vec![];
 

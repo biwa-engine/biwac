@@ -1,7 +1,7 @@
-// use std::fmt::Display;
+use ariadne::{Color, Label, Report, ReportKind, Source};
 
-use biwac_base::BiwacError;
-use biwac_lexer::{Token, token::TkKindName};
+use biwac_base::{BiwacError, ModId};
+use biwac_lexer::{TkKindName, Token};
 use biwac_novel_parser::NovelParseError;
 
 #[derive(Debug, Clone)]
@@ -11,6 +11,8 @@ pub enum ParseError<'src> {
         found: Token<'src>,
     },
     InvalidEOF {
+        // EOF の場合トークンがないのでファイルを特定するために ModId を使用
+        mod_id: ModId,
         expecteds: Vec<TkKindName>,
     },
     NovelParseError(NovelParseError),
@@ -20,92 +22,94 @@ impl BiwacError for ParseError<'_> {
     fn print_error_message(
         &self,
         _metadata: &biwac_base::MetadataHolder,
-        _srcs: &biwac_base::SourceHolder,
+        srcs: &biwac_base::SourceHolder,
     ) {
-        todo!()
+        match self {
+            Self::InvalidToken { expecteds, found } => {
+                let modsrc = srcs.mods.get(&found.span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = found.span.begin();
+                let end = found.span.end();
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("Unexpected token found.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message(if expecteds.is_empty() {
+                                format!("Another token expected, but found {}.", found.kind)
+                            } else if expecteds.len() == 1 {
+                                format!(
+                                    "Expected {}, but found {}.",
+                                    format_token_kinds(expecteds),
+                                    found.kind
+                                )
+                            } else {
+                                format!(
+                                    "Expected one of {}, but found {}.",
+                                    format_token_kinds(expecteds),
+                                    found.kind
+                                )
+                            })
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::InvalidEOF { expecteds, mod_id } => {
+                let modsrc = srcs.mods.get(mod_id).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.src.len();
+                let end = begin;
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("Unexpected end of file found.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message(if expecteds.is_empty() {
+                                "Another token expected, but found end of file.".into()
+                            } else if expecteds.len() == 1 {
+                                format!(
+                                    "Expected {}, but found end of file.",
+                                    format_token_kinds(expecteds),
+                                )
+                            } else {
+                                format!(
+                                    "Expected one of {}, but found end of file.",
+                                    format_token_kinds(expecteds),
+                                )
+                            })
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::NovelParseError(_) => {
+                todo!()
+            }
+        }
     }
 }
 
-// impl Display for TkKind {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             Self::Ident(s) => {
-//                 if s.is_empty() {
-//                     write!(f, "identifier")
-//                 } else {
-//                     write!(f, "identifier `{s}`")
-//                 }
-//             }
-//             Self::IntLiteral(i) => write!(f, "literal `{i}`"),
-//             Self::CharLiteral(c) => write!(f, "literal `'{c}'`"),
-//             Self::StringLiteral(s) => write!(f, "literal `\"{s}\"`"),
-//             _ => write!(f, "`{}`", self.pattern()),
-//         }
-//     }
-// }
-
-//
-// impl ParseError {
-//     pub fn panic_with_error_message(&self, src: &str) -> ! {
-//         eprint!("\x1b[1;38;2;255;20;0merror\x1b[m: ");
-//         match self {
-//             Self::InvalidToken(expecteds, found) => {
-//                 eprintln!(
-//                     "\x1b[1mexpected {}, but found {} in the {}th character\x1b[m",
-//                     string_of(expecteds),
-//                     found.kind,
-//                     found.range.begin
-//                 );
-//                 eprintln!(
-//                     "... {}\x1b[4m{}\x1b[m{} ...",
-//                     &src[0.max(found.range.begin - 10)..found.range.begin],
-//                     &src[found.range.begin..found.range.end],
-//                     &src[found.range.end..src.len().min(found.range.end + 10)],
-//                 );
-//             }
-//             Self::InvalidEOF(expecteds) => {
-//                 eprintln!(
-//                     "\x1b[1mexpected {}, but found EOF\x1b[m",
-//                     string_of(expecteds),
-//                 );
-//                 eprintln!(
-//                     "... {}\x1b[4m{}\x1b[m",
-//                     &src[0.max(src.len() - 20)..0.max(src.len() - 5)],
-//                     &src[0.max(src.len() - 5)..],
-//                 );
-//             }
-//             Self::StructMemberConflict(structid, memberid, range) => {
-//                 eprintln!("\x1b[1mmember `{memberid}` in struct `{structid}` is conflicted\x1b[m",);
-//                 eprintln!(
-//                     "... {}\x1b[4m{}\x1b[m{} ...",
-//                     &src[0.max(range.begin - 10)..range.begin],
-//                     &src[range.begin..range.end],
-//                     &src[range.end..src.len().min(range.end + 10)],
-//                 );
-//             }
-//         }
-//
-//         panic!("");
-//     }
-// }
-//
-//
-// fn string_of(kinds: &[TokenKind]) -> String {
-//     if kinds.is_empty() {
-//         "".to_string()
-//     } else if kinds.len() == 1 {
-//         kinds.first().unwrap().to_string()
-//     } else if kinds.len() == 2 {
-//         format!("{} or {}", kinds.first().unwrap(), kinds.last().unwrap())
-//     } else {
-//         format!(
-//             "{}{} or {}",
-//             &kinds[..kinds.len() - 2]
-//                 .iter()
-//                 .map(|kind| format!("{kind}, "))
-//                 .collect::<String>(),
-//             &kinds[kinds.len() - 2..].first().unwrap(),
-//             &kinds[kinds.len() - 2..].last().unwrap()
-//         )
-//     }
-// }
+fn format_token_kinds(kinds: &[TkKindName]) -> String {
+    if kinds.is_empty() {
+        "".to_string()
+    } else if kinds.len() == 1 {
+        kinds[0].to_string()
+    } else if kinds.len() == 2 {
+        format!("{} or {}", kinds.first().unwrap(), kinds.last().unwrap())
+    } else {
+        format!(
+            "{} or {}",
+            kinds[..kinds.len() - 1]
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            kinds[kinds.len() - 1..][0]
+        )
+    }
+}

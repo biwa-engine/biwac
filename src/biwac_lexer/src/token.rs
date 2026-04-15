@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use biwac_base::Span;
 
 #[derive(Clone, Debug)]
@@ -62,8 +64,6 @@ pub enum TkKind<'src> {
     MarkColon,                // :
     MarkSemiColon,            // ;
     MarkDoubleColon,          // ::
-    MarkDoubleLBrace,         // {{
-    MarkDoubleRBrace,         // }}
     DslLiteral(&'src str),    // DSL
 }
 
@@ -118,8 +118,6 @@ impl TkKind<'_> {
             Self::MarkColon => ":".to_string(),
             Self::MarkSemiColon => ";".to_string(),
             Self::MarkDoubleColon => "::".to_string(),
-            Self::MarkDoubleLBrace => "{{".to_string(),
-            Self::MarkDoubleRBrace => "}}".to_string(),
             Self::DslLiteral(_) => "...".to_string(),
         }
     }
@@ -127,57 +125,55 @@ impl TkKind<'_> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TkKindName {
-    Ident,            // identifier
-    LiteralInteger,   // integer literal
-    LiteralString,    // string literal
-    KwBoolTrue,       // bool literal `TRUE`
-    KwBoolFalse,      // bool literal `FALSE`
-    KwImport,         // import
-    KwPackage,        // package
-    KwFn,             // fn
-    KwType,           // type
-    KwLet,            // let
-    KwIf,             // if
-    KwElse,           // else
-    KwWhile,          // while
-    KwReturn,         // return
-    KwUint,           // Uint (reserved word of type)
-    KwInt,            // Int (reserved word of type)
-    KwFloat,          // Float (reserved word of type)
-    KwBool,           // Bool (reserved word of type)
-    KwStruct,         // struct (reserved word of type)
-    KwImpl,           // impl (reserved word of implementation for type)
-    KwSelfTyp,        // Self (reserved word of type)
-    KwSelfVar,        // self (reserved word of method value)
-    KwScene,          // scene (reserved word of novel scene)
-    MarkLPare,        // (
-    MarkRPare,        // )
-    MarkLBrace,       // {
-    MarkRBrace,       // }
-    MarkLBracket,     // [
-    MarkRBracket,     // ]
-    MarkPlus,         // +
-    MarkMinus,        // -
-    MarkAsterisk,     // *
-    MarkSlash,        // /
-    MarkPercent,      // %
-    MarkAmpersand,    // &
-    MarkLesser,       // <
-    MarkGreater,      // >
-    MarkLesEq,        // <=
-    MarkGrtEq,        // >=
-    MarkEqual,        // ==
-    MarkNotEq,        // !=
-    MarkAssign,       // =
-    MarkComma,        // ,
-    MarkDot,          // .
-    MarkArrow,        // ->
-    MarkColon,        // :
-    MarkSemiColon,    // ;
-    MarkDoubleColon,  // ::
-    MarkDoubleLBrace, // {{
-    MarkDoubleRBrace, // }}
-    DslLiteral,       // DSL
+    Ident,           // identifier
+    LiteralInteger,  // integer literal
+    LiteralString,   // string literal
+    KwBoolTrue,      // bool literal `TRUE`
+    KwBoolFalse,     // bool literal `FALSE`
+    KwImport,        // import
+    KwPackage,       // package
+    KwFn,            // fn
+    KwType,          // type
+    KwLet,           // let
+    KwIf,            // if
+    KwElse,          // else
+    KwWhile,         // while
+    KwReturn,        // return
+    KwUint,          // Uint (reserved word of type)
+    KwInt,           // Int (reserved word of type)
+    KwFloat,         // Float (reserved word of type)
+    KwBool,          // Bool (reserved word of type)
+    KwStruct,        // struct (reserved word of type)
+    KwImpl,          // impl (reserved word of implementation for type)
+    KwSelfTyp,       // Self (reserved word of type)
+    KwSelfVar,       // self (reserved word of method value)
+    KwScene,         // scene (reserved word of novel scene)
+    MarkLPare,       // (
+    MarkRPare,       // )
+    MarkLBrace,      // {
+    MarkRBrace,      // }
+    MarkLBracket,    // [
+    MarkRBracket,    // ]
+    MarkPlus,        // +
+    MarkMinus,       // -
+    MarkAsterisk,    // *
+    MarkSlash,       // /
+    MarkPercent,     // %
+    MarkAmpersand,   // &
+    MarkLesser,      // <
+    MarkGreater,     // >
+    MarkLesEq,       // <=
+    MarkGrtEq,       // >=
+    MarkEqual,       // ==
+    MarkNotEq,       // !=
+    MarkAssign,      // =
+    MarkComma,       // ,
+    MarkDot,         // .
+    MarkArrow,       // ->
+    MarkColon,       // :
+    MarkSemiColon,   // ;
+    MarkDoubleColon, // ::
+    DslLiteral,      // DSL
 }
 
 impl TkKind<'_> {
@@ -231,8 +227,6 @@ impl TkKind<'_> {
             Self::MarkColon => TkKindName::MarkColon, // :
             Self::MarkSemiColon => TkKindName::MarkSemiColon, // ;
             Self::MarkDoubleColon => TkKindName::MarkDoubleColon, // ::
-            Self::MarkDoubleLBrace => TkKindName::MarkDoubleLBrace, // {{
-            Self::MarkDoubleRBrace => TkKindName::MarkDoubleRBrace, // }}
             Self::DslLiteral(_) => TkKindName::DslLiteral, // DSL
         }
     }
@@ -289,9 +283,30 @@ impl TkKindName {
             Self::MarkColon => ":".to_string(),
             Self::MarkSemiColon => ";".to_string(),
             Self::MarkDoubleColon => "::".to_string(),
-            Self::MarkDoubleLBrace => "{{".to_string(),
-            Self::MarkDoubleRBrace => "}}".to_string(),
             Self::DslLiteral => "...".to_string(),
+        }
+    }
+}
+
+impl Display for TkKind<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ident(s) => {
+                write!(f, "<identifier> `{s}`")
+            }
+            Self::LiteralInteger(i) => write!(f, "<integer-literal> `{i}`"),
+            Self::LiteralString(s) => write!(f, "<string-literal> `\"{s}\"`"),
+            Self::DslLiteral(_) => write!(f, "<dsl-literal> `{{{{ ... }}}}`"),
+            _ => write!(f, "`{}`", self.pattern()),
+        }
+    }
+}
+
+impl Display for TkKindName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DslLiteral => write!(f, "<dsl-literal> `{{{{ ... }}}}`"),
+            _ => write!(f, "`{}`", self.pattern()),
         }
     }
 }

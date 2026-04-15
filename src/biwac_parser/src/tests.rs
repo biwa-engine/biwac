@@ -21,7 +21,9 @@ fn foo() {
 
     let tokens = biwac_lexer::lex(mod_id, src).unwrap();
 
-    let module = crate::Parser::new(modpath, tokens).try_parse().unwrap();
+    let module = crate::Parser::new(mod_id, modpath, tokens)
+        .try_parse()
+        .unwrap();
 
     let g0 = module.globals.first().unwrap();
 

@@ -72,7 +72,9 @@ impl Pkg {
         for (mod_id, mod_src) in &srcs.mods {
             match biwac_lexer::lex(*mod_id, &mod_src.src) {
                 Ok(tokens) => {
-                    match biwac_parser::Parser::new(mod_src.modu.clone(), tokens).try_parse() {
+                    match biwac_parser::Parser::new(*mod_id, mod_src.modu.clone(), tokens)
+                        .try_parse()
+                    {
                         Ok(module) => {
                             modules.insert(*mod_id, module);
                         }

@@ -8,9 +8,11 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         &mut self,
         self_typ: &Option<TypRepr>,
     ) -> Result<TypRepr, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let t = self
             .peek()
             .ok_or(ParseError::InvalidEOF {
+                mod_id,
                 expecteds: vec![TkKindName::MarkColon],
             })?
             .to_owned();
@@ -31,9 +33,11 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         &mut self,
         self_typ: &Option<TypRepr>,
     ) -> Result<Option<TypRepr>, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let t = self
             .peek()
             .ok_or(ParseError::InvalidEOF {
+                mod_id,
                 expecteds: vec![TkKindName::MarkColon],
             })?
             .to_owned();
@@ -116,6 +120,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             }
         } else {
             Err(ParseError::InvalidEOF {
+                mod_id: self.mod_id,
                 expecteds: vec![
                     TkKindName::KwUint,
                     TkKindName::KwInt,
@@ -181,6 +186,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else {
                     return Err(ParseError::InvalidEOF {
+                        mod_id: self.mod_id,
                         expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
                     });
                 }
@@ -230,6 +236,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else {
                     return Err(ParseError::InvalidEOF {
+                        mod_id: self.mod_id,
                         expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
                     });
                 }

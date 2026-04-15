@@ -14,8 +14,11 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         &mut self,
         ctx: &FnParseCtx,
     ) -> Result<Exprs, ParseError<'src>> {
+        let mod_id = self.mod_id;
+
         // Primary = Literal | "(" Expr ")"
         let t = *self.peek().ok_or(ParseError::InvalidEOF {
+            mod_id,
             expecteds: vec![TkKindName::Ident, TkKindName::LiteralInteger],
         })?;
 
@@ -92,6 +95,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
                     Err(ParseError::InvalidEOF {
+                        mod_id,
                         expecteds: vec![TkKindName::MarkLPare, TkKindName::MarkLBrace],
                     })
                 } else {
@@ -151,6 +155,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         }
                     } else {
                         Err(ParseError::InvalidEOF {
+                            mod_id,
                             expecteds: vec![TkKindName::MarkDoubleColon, TkKindName::MarkLBrace],
                         })
                     }
@@ -202,6 +207,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 Ok(expr)
             }
             _ => Err(ParseError::InvalidEOF {
+                mod_id,
                 expecteds: vec![
                     TkKindName::Ident,
                     TkKindName::LiteralInteger,
@@ -251,6 +257,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else {
                     return Err(ParseError::InvalidEOF {
+                        mod_id: self.mod_id,
                         expecteds: vec![TkKindName::MarkRPare, TkKindName::MarkComma],
                     });
                 }
@@ -299,6 +306,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else {
                     return Err(ParseError::InvalidEOF {
+                        mod_id: self.mod_id,
                         expecteds: vec![TkKindName::MarkRBrace, TkKindName::MarkComma],
                     });
                 }

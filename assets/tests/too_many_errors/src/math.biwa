@@ -6,14 +6,12 @@ fn fact(n: Int) -> Int {
   }
 }
 
-hoge
-
 [[native(arch="typescript")]]
 fn native_sqrt(x: Int) -> Float {{
   return Math.sqrt(x);
 }}
 
-impl Int {
+hoge impl Int {
   fn sqrt(self) -> Float {
     native_sqrt(self)
   }

@@ -108,6 +108,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 }
             } else {
                 Err(ParseError::InvalidEOF {
+                    mod_id: self.mod_id,
                     expecteds: vec![TkKindName::DslLiteral],
                 })
             }
@@ -158,6 +159,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
     }
 
     pub(super) fn opt_consume_global_symbols(&mut self) -> Result<Vec<Globals>, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let flags = self.consume_compiler_flags()?;
 
         if let Some(t) = self.peek() {
@@ -197,6 +199,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                     loop {
                         let t = self.peek().ok_or(ParseError::InvalidEOF {
+                            mod_id,
                             expecteds: vec![TkKindName::Ident, TkKindName::MarkRBrace],
                         })?;
 
@@ -212,6 +215,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                             let t = self
                                 .next()
                                 .ok_or(ParseError::InvalidEOF {
+                                    mod_id,
                                     expecteds: vec![TkKindName::Ident],
                                 })?
                                 .to_owned();
@@ -268,6 +272,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
 
                         let t = self.next().ok_or(ParseError::InvalidEOF {
+                            mod_id,
                             expecteds: vec![TkKindName::DslLiteral],
                         })?;
                         if let TkKind::DslLiteral(str) = t.kind {
@@ -286,6 +291,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                             ))])
                         } else {
                             Err(ParseError::InvalidEOF {
+                                mod_id,
                                 expecteds: vec![TkKindName::DslLiteral],
                             })
                         }
@@ -376,6 +382,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     };
 
                     let t = self.next().ok_or(ParseError::InvalidEOF {
+                        mod_id,
                         expecteds: vec![TkKindName::DslLiteral],
                     })?;
                     if let TkKind::DslLiteral(str) = t.kind {
@@ -394,6 +401,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         })])
                     } else {
                         Err(ParseError::InvalidEOF {
+                            mod_id,
                             expecteds: vec![TkKindName::DslLiteral],
                         })
                     }
@@ -419,6 +427,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         &mut self,
         self_typ: &Option<TypRepr>,
     ) -> Result<ArgDeclList, ParseError<'src>> {
+        let mod_id = self.mod_id;
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLPare])?
             .span
@@ -430,6 +439,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             let t = self
                 .next()
                 .ok_or(ParseError::InvalidEOF {
+                    mod_id,
                     expecteds: vec![TkKindName::MarkRPare, TkKindName::Ident],
                 })?
                 .clone();
@@ -464,6 +474,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else {
                     return Err(ParseError::InvalidEOF {
+                        mod_id,
                         expecteds: vec![TkKindName::MarkComma, TkKindName::MarkRPare],
                     });
                 }
@@ -475,6 +486,8 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         &mut self,
         self_typ: &Option<TypRepr>,
     ) -> Result<(ArgDeclList, Option<Ident>), ParseError<'src>> {
+        let mod_id = self.mod_id;
+
         // (args, self_ident)
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLPare])?
@@ -485,6 +498,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
         // first arg `self` or not
         let t = self.peek().ok_or(ParseError::InvalidEOF {
+            mod_id,
             expecteds: vec![
                 TkKindName::MarkRPare,
                 TkKindName::Ident,
@@ -521,6 +535,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             let t = self
                 .next()
                 .ok_or(ParseError::InvalidEOF {
+                    mod_id,
                     expecteds: vec![TkKindName::MarkRPare, TkKindName::Ident],
                 })?
                 .clone();
@@ -558,6 +573,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 } else {
                     return Err(ParseError::InvalidEOF {
+                        mod_id,
                         expecteds: vec![TkKindName::MarkComma, TkKindName::MarkRPare],
                     });
                 }

@@ -9,3 +9,4 @@ biwac_ast = { path = "../biwac_ast"}
 biwac_parser = { path = "../biwac_parser"}
 biwac_lexer = { path = "../biwac_lexer"}
 biwac_metadata_loader = { path = "../biwac_metadata_loader"}
+colored.workspace = true
