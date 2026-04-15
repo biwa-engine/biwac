@@ -58,11 +58,12 @@ pub fn lex<'src>(file_id: ModId, src: &'src str) -> Result<Vec<Token<'src>>, Tok
             }
             PreTkKind::Mark(kind) => Token { kind, span: p.span },
             PreTkKind::StringLiteral => Token {
+                // `"` をトリムする
                 kind: TkKind::LiteralString(&src[p.span.begin() + 1..p.span.end() - 1]),
                 span: p.span.clone(),
             },
             PreTkKind::Dsl => Token {
-                kind: TkKind::DslLiteral(&src[p.span.begin() + 1..p.span.end() - 1]),
+                kind: TkKind::DslLiteral(&src[p.span.begin()..p.span.end()]),
                 span: p.span.clone(),
             },
         })
