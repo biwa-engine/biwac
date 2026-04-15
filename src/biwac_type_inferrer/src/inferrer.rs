@@ -786,7 +786,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     Ok(rty)
                 }
                 Callee::Assoc(assoc_callee) => {
-                    let callee_ty = self.tctx.hir.get_assoc_of_type(assoc_callee)?;
+                    let callee_ty = self.tctx.hir.get_assoc_of_type(assoc_callee, &c.span)?;
 
                     let args = c
                         .args

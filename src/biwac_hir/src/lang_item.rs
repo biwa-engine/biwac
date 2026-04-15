@@ -7,7 +7,10 @@ use crate::{DefinedTy, FnDefContentSignature, Ty, TyId, TyKind, ValId};
 #[derive(Debug, Clone)]
 pub struct LangItem {
     pub kind: LangItemKind,
+
+    #[allow(dead_code)]
     pub id: String,
+
     pub span: SSpan,
 }
 

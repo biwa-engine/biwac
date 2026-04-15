@@ -7,6 +7,9 @@ pub(crate) mod module_level;
 #[derive(Debug)]
 pub(crate) enum ResolvedValue {
     Global(ValId),
+
+    #[allow(dead_code)]
     Local(LocVarId),
+
     Assoc(AssocCallee),
 }

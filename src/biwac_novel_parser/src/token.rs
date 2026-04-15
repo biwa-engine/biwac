@@ -11,47 +11,48 @@ pub struct NCodeToken {
 
 #[derive(Debug, Clone)]
 pub enum NCodeTkKind {
-    Ident(String),         // <identifier>
-    LiteralInteger(u64),   // integer literal
+    Ident(String),       // <identifier>
+    LiteralInteger(u64), // integer literal
+    #[allow(dead_code)]
     LiteralString(String), // string literal
-    KwTrue,                // bool literal `TRUE`
-    KwFalse,               // bool literal `FALSE`
-    KwPackage,             // package
-    KwLet,                 // let
-    KwIf,                  // if
-    KwElse,                // else
-    KwWhile,               // while
-    KwEndScene,            // endscene
-    KwUint,                // Uint (reserved word of type)
-    KwInt,                 // Int (reserved word of type)
-    KwFloat,               // Float (reserved word of type)
-    KwBool,                // Bool (reserved word of type)
-    MarkLPare,             // (
-    MarkRPare,             // )
-    MarkLBrace,            // {
-    MarkRBrace,            // }
-    MarkLBracket,          // [
-    MarkRBracket,          // ]
-    MarkPlus,              // +
-    MarkMinus,             // -
-    MarkAsterisk,          // *
-    MarkSlash,             // /
-    MarkPercent,           // %
-    MarkAmpersand,         // &
-    MarkLesser,            // <
-    MarkGreater,           // >
-    MarkLesEq,             // <=
-    MarkGrtEq,             // >=
-    MarkEqual,             // ==
-    MarkNotEq,             // !=
-    MarkAssign,            // =
-    MarkNot,               // !
-    MarkComma,             // ,
-    MarkDot,               // .
-    MarkArrow,             // ->
-    MarkColon,             // :
-    MarkSemiColon,         // ;
-    MarkDoubleColon,       // ::
+    KwTrue,              // bool literal `TRUE`
+    KwFalse,             // bool literal `FALSE`
+    KwPackage,           // package
+    KwLet,               // let
+    KwIf,                // if
+    KwElse,              // else
+    KwWhile,             // while
+    KwEndScene,          // endscene
+    KwUint,              // Uint (reserved word of type)
+    KwInt,               // Int (reserved word of type)
+    KwFloat,             // Float (reserved word of type)
+    KwBool,              // Bool (reserved word of type)
+    MarkLPare,           // (
+    MarkRPare,           // )
+    MarkLBrace,          // {
+    MarkRBrace,          // }
+    MarkLBracket,        // [
+    MarkRBracket,        // ]
+    MarkPlus,            // +
+    MarkMinus,           // -
+    MarkAsterisk,        // *
+    MarkSlash,           // /
+    MarkPercent,         // %
+    MarkAmpersand,       // &
+    MarkLesser,          // <
+    MarkGreater,         // >
+    MarkLesEq,           // <=
+    MarkGrtEq,           // >=
+    MarkEqual,           // ==
+    MarkNotEq,           // !=
+    MarkAssign,          // =
+    MarkNot,             // !
+    MarkComma,           // ,
+    MarkDot,             // .
+    MarkArrow,           // ->
+    MarkColon,           // :
+    MarkSemiColon,       // ;
+    MarkDoubleColon,     // ::
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

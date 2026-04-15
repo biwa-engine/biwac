@@ -52,15 +52,6 @@ pub struct NovelSourceStream<'src> {
     next_line_begin_idx: usize, // 同じく
 }
 
-#[derive(Debug)]
-pub(crate) struct SourceStreamCursor {
-    // {{ ... }} 内の行インデックス
-    // つまり実際のファイル先頭からの位置は
-    // NovelSourceStream<'_>.span.begin をoffsetに計算する必要がある
-    lidx: usize,
-    idx: usize, // UTF-8 &str としての char index
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NovelLineKind {
     RawNovel,       // 生ノベルテキスト

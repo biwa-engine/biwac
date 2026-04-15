@@ -62,8 +62,8 @@ pub enum HirError {
         val_content: Box<ImplValDefContentKind>, // 取得された実装
     },
     ImplementedValueIsNotAssoc {
-        ty: Box<TyKind>,
-        assoc: Box<Ident>,                       // caller のspanを含む
+        assoc_callee: Box<AssocCallee>,
+        caller_span: Box<SSpan>,
         val_content: Box<ImplValDefContentKind>, // 取得された実装
     },
 }

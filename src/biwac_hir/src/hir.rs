@@ -54,15 +54,18 @@ pub enum Progressive<Y, C> {
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub pkg_name: PackageName,
+
     // 値名前空間 value namespace 内の一意なシンボルの集合
     // - 関数
     // - グローバル変数(const)
     // が含まれる
+    // 外部パッケージの値は予め登録される
     pub vals: HashMap<ValId, ValDefContentKind>,
 
     // 型の定義とその実装
     // e.g.) struct, enum
     // ほとんど、型名前空間 type namespace 内の一意なシンボルの集合と言える
+    // 外部パッケージの値は予め登録される
     pub tys: HashMap<TyId, DefinedTyImpl>,
 
     // プリミティブ型やジェネリック型など
@@ -83,12 +86,6 @@ pub struct Hir {
     pub modules: HashSet<ModPath>,
 
     pub module_global_natives: HashMap<ModPath, Vec<NativeCode>>,
-
-    // lang item (package std などに定義された値)
-    lang_item_vals: HashMap<ValId, FnDefContentSignature>,
-
-    // lang item (package std などに定義された型)
-    lang_item_tys: HashMap<TyId, DefinedTyImpl>,
 
     // 外部パッケージのシンボルで、
     // 使用されていることを確認したシンボル
@@ -158,60 +155,66 @@ impl Hir {
         external_tys: HashMap<TyId, TyDefContentKind>,
         external_vals: HashMap<ValId, FnDefContentSignature>,
     ) -> Self {
-        let mut lang_item_vals = HashMap::new();
-        let mut lang_item_tys = HashMap::new();
+        let mut vals = HashMap::new();
+        let mut tys = HashMap::new();
 
-        for item in crate::lang_item::default_lang_items() {
-            match item.kind {
-                crate::lang_item::LangItemKind::Ty { tid, genarg_len } => {
-                    lang_item_tys.insert(
-                        tid,
-                        DefinedTyImpl {
-                            // TODO: とりあえず struct ということにしている
-                            // lang item 側により情報をもたせ、struct 以外も作れるようにする
-                            ty_content: Progressive::Completed(TyDefContentKind::Struct(Box::new(
-                                StructDefContent {
-                                    members: HashMap::new(),
-                                    genargs: (0..genarg_len).map(GenTyId::new).collect(),
-                                    struct_name_span: item.span.clone(),
-                                },
-                            ))),
-                            vals: HashMap::new(),
-                        },
-                    );
-                }
-                crate::lang_item::LangItemKind::Val { vid, val } => match val {
-                    crate::lang_item::LangItemVal::Fn { signature } => {
-                        lang_item_vals.insert(vid, *signature);
+        // NOTE:
+        // std のコンパイル時にはlang itemは登録しない
+        // FIXME:
+        // もっとマシな方法で std であることを検出
+        if pkg_name.value() != "std" {
+            for item in crate::lang_item::default_lang_items() {
+                match item.kind {
+                    crate::lang_item::LangItemKind::Ty { tid, genarg_len } => {
+                        tys.insert(
+                            tid,
+                            DefinedTyImpl {
+                                // TODO: とりあえず struct ということにしている
+                                // lang item 側により情報をもたせ、struct 以外も作れるようにする
+                                ty_content: Progressive::Completed(TyDefContentKind::Struct(
+                                    Box::new(StructDefContent {
+                                        members: HashMap::new(),
+                                        genargs: (0..genarg_len).map(GenTyId::new).collect(),
+                                        struct_name_span: item.span.clone(),
+                                    }),
+                                )),
+                                vals: HashMap::new(),
+                            },
+                        );
                     }
-                },
+                    crate::lang_item::LangItemKind::Val { vid, val } => match val {
+                        crate::lang_item::LangItemVal::Fn { signature } => {
+                            vals.insert(vid, ValDefContentKind::ExternalFn(signature));
+                        }
+                    },
+                }
             }
         }
+
+        vals.extend(
+            external_vals
+                .into_iter()
+                .map(|(vid, fsign)| (vid, ValDefContentKind::ExternalFn(Box::new(fsign)))),
+        );
+
+        tys.extend(external_tys.into_iter().map(|(tid, ty)| {
+            (
+                tid,
+                DefinedTyImpl {
+                    ty_content: Progressive::Completed(ty),
+                    vals: HashMap::new(),
+                },
+            )
+        }));
 
         Self {
             deps_recorder: RefCell::new(DepsRecorder::new(pkg_name.clone())),
             pkg_name,
-            vals: external_vals
-                .into_iter()
-                .map(|(vid, fsign)| (vid, ValDefContentKind::ExternalFn(Box::new(fsign))))
-                .collect(),
-            tys: external_tys
-                .into_iter()
-                .map(|(tid, ty)| {
-                    (
-                        tid,
-                        DefinedTyImpl {
-                            ty_content: Progressive::Completed(ty),
-                            vals: HashMap::new(),
-                        },
-                    )
-                })
-                .collect(),
+            vals,
+            tys,
             special_ty_impls: HashMap::new(),
             modules: HashSet::new(),
             module_global_natives: HashMap::new(),
-            lang_item_tys,
-            lang_item_vals,
         }
     }
 
@@ -879,7 +882,7 @@ impl Hir {
     }
 
     // ある型に対する関連関数のシグニチャ(FnTy)を取得する
-    pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee) -> HirResult<Ty> {
+    pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee, span: &Span) -> HirResult<Ty> {
         match &assoc_callee.ty.kind {
             TyKind::Defined(defined_ty) => {
                 let defined_ty_impl = self
@@ -897,7 +900,7 @@ impl Hir {
                         impl_vid: assoc_callee.impl_vid,
                     };
 
-                    self.get_assoc_of_type(&assoc_callee)
+                    self.get_assoc_of_type(&assoc_callee, span)
                 } else {
                     let impl_list = defined_ty_impl
                         .vals
@@ -941,12 +944,46 @@ impl Hir {
                             // })
                         }
                         ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
-                        ImplValDefContentKind::Method(_) => Err(todo!()),
-                        ImplValDefContentKind::NativeMethod(_) => Err(todo!()),
+                        ImplValDefContentKind::Method(_)
+                        | ImplValDefContentKind::NativeMethod(_) => {
+                            Err(HirError::ImplementedValueIsNotAssoc {
+                                assoc_callee: Box::new(assoc_callee.clone()),
+                                caller_span: Box::new(span.clone().into()),
+                                val_content: Box::new(impl_.val_content.clone()),
+                            })
+                        }
                     }
                 }
             }
-            _ => Ok(todo!()), // TODO:
+            TyKind::Int | TyKind::Float | TyKind::Bool => {
+                let val_content = self
+                    .special_ty_impls
+                    .get(&assoc_callee.ty.kind)
+                    .expect("compiler bug: ty impl not found")
+                    .vals
+                    .get(&assoc_callee.assoc)
+                    .expect("compiler bug: ty imple value not found");
+
+                match &val_content {
+                    ImplValDefContentKind::Fn(f) => Ok(f.signature.as_ty()),
+                    ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
+                    ImplValDefContentKind::Method(_) | ImplValDefContentKind::NativeMethod(_) => {
+                        Err(HirError::ImplementedValueIsNotAssoc {
+                            assoc_callee: Box::new(assoc_callee.clone()),
+                            caller_span: Box::new(span.clone().into()),
+                            val_content: Box::new(val_content.clone()),
+                        })
+                    }
+                }
+            }
+            TyKind::Void
+            | TyKind::Gen(_)
+            | TyKind::LocGen(_)
+            | TyKind::Infer(_)
+            | TyKind::Fn(_) => {
+                // error
+                todo!()
+            }
         }
     }
 
@@ -975,18 +1012,12 @@ impl Hir {
         // 依存関係を記録
         self.deps_recorder.borrow_mut().depends_on_val(vid);
 
-        match self.vals.get(vid) {
-            Some(val) => match &val {
-                ValDefContentKind::Fn(f) => Some(&f.signature),
-                ValDefContentKind::Native(f) => Some(&f.signature),
-                ValDefContentKind::NovelScene(n) => Some(&n.signature),
-                ValDefContentKind::ExternalFn(f) => Some(f),
-            },
-
-            // コンパイル対象の vals の中になければ
-            // lang item にフォールバック
-            None => self.lang_item_vals.get(vid),
-        }
+        self.vals.get(vid).map(|val| match &val {
+            ValDefContentKind::Fn(f) => &f.signature,
+            ValDefContentKind::Native(f) => &f.signature,
+            ValDefContentKind::NovelScene(n) => &n.signature,
+            ValDefContentKind::ExternalFn(f) => f,
+        })
     }
 }
 
