@@ -14,14 +14,12 @@ pub struct ErrorHolder<'a, E: BiwacError> {
 }
 
 impl<'a, E: BiwacError> ErrorHolder<'a, E> {
-    pub fn panic_with_error_messages(&self) -> ! {
+    pub fn print_error_messages(&self) {
         for e in &self.errs {
             e.print_error_message(self.metadata, self.srcs);
         }
 
         print_error_finish_message(self.errs.len());
-
-        panic!()
     }
 }
 

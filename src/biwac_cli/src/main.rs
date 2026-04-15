@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, process::exit};
 
 use clap::Parser;
 
@@ -25,5 +25,10 @@ fn main() {
         );
     }
 
-    biwac_driver::compile(pkg_root_path.to_path_buf());
+    let res = biwac_driver::compile(pkg_root_path.to_path_buf());
+
+    match res {
+        Ok(_) => exit(0),
+        Err(_) => exit(1),
+    }
 }

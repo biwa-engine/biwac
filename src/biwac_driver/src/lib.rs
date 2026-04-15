@@ -6,7 +6,7 @@ use std::{
 
 use biwac_base::{BiwacError, MetadataHolder, PackageName, SourceHolder};
 
-pub fn compile(pkg_root_path: PathBuf) {
+pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     println!("{}", "Compiling...".green().bold(),);
 
     // 空のソースファイルリストを作成
@@ -14,16 +14,11 @@ pub fn compile(pkg_root_path: PathBuf) {
     // 空のメタデータを作成
     let mut metadata = MetadataHolder::default();
 
-    match biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.clone()) {
-        Ok(metadata) => metadata,
-        Err(e) => {
+    biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.clone())
+        .map_err(|e| {
             e.print_error_message(&metadata, &srcs);
-
             biwac_base::print_error_finish_message(1);
-
-            panic!()
-        }
-    };
+        })?;
 
     let meta = metadata.metadata.as_ref().unwrap();
     println!(
@@ -51,16 +46,9 @@ pub fn compile(pkg_root_path: PathBuf) {
         );
     }
 
-    let pkg = match biwac_package_loader::Pkg::try_load(
-        &metadata,
-        &mut srcs,
-        pkg_root_path.to_path_buf(),
-    ) {
-        Ok(pkg) => pkg,
-        Err(e) => {
-            e.panic_with_error_messages();
-        }
-    };
+    let pkg =
+        biwac_package_loader::Pkg::try_load(&metadata, &mut srcs, pkg_root_path.to_path_buf())
+            .map_err(|e| e.print_error_messages())?;
     // println!("pkg: {pkg:#?}");
 
     let deps =
@@ -80,6 +68,8 @@ pub fn compile(pkg_root_path: PathBuf) {
     write_bin(build_dir_path.to_path_buf(), &meta.name, &bin).unwrap();
 
     println!("{}", "Finished!".green().bold(),);
+
+    Ok(())
 }
 
 // build_dir_path はdirであることが保証されている必要がある
