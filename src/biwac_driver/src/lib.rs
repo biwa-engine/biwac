@@ -79,10 +79,7 @@ fn write_bin(
     bin: &str,
 ) -> Result<(), std::io::Error> {
     if cfg!(feature = "typescript") {
-        let dstpath = build_dir_path
-            .join(Path::new("typescript"))
-            .join(Path::new("src"))
-            .join(Path::new("generated"));
+        let dstpath = build_dir_path.join(Path::new("typescript"));
         if !dstpath.exists() {
             std::fs::DirBuilder::new()
                 .recursive(true)
