@@ -181,11 +181,6 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 TkKind::KwFn => Ok(vec![
                     self.consume_function_or_method_definition(flags, None)?,
                 ]),
-                TkKind::KwLet => Ok(vec![Globals::VarDecl(
-                    // グローバル変数のパースには当然関数内の文脈を与えない
-                    // constキーワードのみのほうが良いかも
-                    self.consume_variable_declaration_statment(None)?,
-                )]),
                 TkKind::KwStruct => {
                     self.next();
 
@@ -409,8 +404,8 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 _ => Err(ParseError::InvalidToken {
                     expecteds: vec![
                         TkKindName::KwFn,
-                        TkKindName::KwLet,
                         TkKindName::KwStruct,
+                        TkKindName::KwType,
                         TkKindName::KwImport,
                         TkKindName::KwImpl,
                         TkKindName::KwScene,
