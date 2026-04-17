@@ -7,3 +7,9 @@
 **biwa language** is extensible and enables us to create novel game easily.
 
 This repository develops the compiler of biwa language.
+
+## ライセンス / LICENSE
+
+MIT ライセンスです。 [LICENSE](./LICENSE)を参照してください。
+
+MIT Licensed. See [LICENSE](./LICENSE).
