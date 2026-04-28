@@ -1,4 +1,4 @@
-use biwac_ast::{DefTyp, Ident, PrimTyp, TypRepr, TypReprVal};
+use biwac_ast::{Ident, PrimTyp, TypRepr, TypReprVal};
 use biwac_lexer::{TkKind, TkKindName};
 
 use crate::{ParseError, TokenStream};
@@ -86,21 +86,15 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 })
             } else if let TkKind::Ident(_) = t.kind {
                 // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
-                let qualid = self.consume_qualified_identifier()?;
+                let path = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args(self_typ)?;
 
-                Ok(TypRepr {
-                    span: qualid.span.clone(),
-                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
-                })
+                Ok(TypRepr::new_def_typ(path, genargs))
             } else if let TkKind::KwPackage = t.kind {
-                let qualid = self.consume_qualified_identifier()?;
+                let path = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args(self_typ)?;
 
-                Ok(TypRepr {
-                    span: qualid.span.clone(),
-                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
-                })
+                Ok(TypRepr::new_def_typ(path, genargs))
             } else if let TkKind::KwSelfTyp = t.kind
                 && let Some(self_typ) = self_typ
             {

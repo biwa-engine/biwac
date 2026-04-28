@@ -2,8 +2,8 @@ use biwac_base::Span;
 use biwac_lexer::{TkKind, TkKindName};
 
 use biwac_ast::{
-    BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Primary, QualifiedId,
-    StringLiteral, StructLiteral,
+    AbsolutePathHeader, BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Path, Primary,
+    StringLiteral, StructLiteral, Variable,
 };
 
 use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
@@ -61,6 +61,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             }
             TkKind::Ident(_) => {
                 let begin = t.span.clone();
+                let path = self.consume_qualified_identifier()?;
                 let qualed_id = self.consume_qualified_identifier()?;
 
                 if let Some(t2) = self.peek() {
@@ -68,7 +69,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         let (args, span) = self.consume_arguments(ctx)?;
 
                         Ok(Exprs::Primary(Primary::FnCall(FnCall {
-                            qualed_id,
+                            path,
                             args,
                             span: Span::merge(&begin, &span),
                         })))
@@ -77,32 +78,16 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                         Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
                             StructLiteral {
-                                qualid: qualed_id,
+                                path,
                                 members,
                                 span: Span::merge(&begin, &span),
                             },
                         ))))
-                    } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                        Err(ParseError::InvalidToken {
-                            expecteds: vec![TkKindName::MarkLPare, TkKindName::MarkLBrace],
-                            found: t2.to_owned().clone(),
-                        })
                     } else {
-                        Ok(Exprs::Primary(Primary::Variable(Ident {
-                            id: qualed_id.id,
-                            span: t.span.clone(),
-                        })))
+                        Ok(Exprs::Primary(Primary::Variable(Variable::Path(path))))
                     }
-                } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                    Err(ParseError::InvalidEOF {
-                        mod_id,
-                        expecteds: vec![TkKindName::MarkLPare, TkKindName::MarkLBrace],
-                    })
                 } else {
-                    Ok(Exprs::Primary(Primary::Variable(Ident {
-                        id: qualed_id.id,
-                        span: t.span.clone(),
-                    })))
+                    Ok(Exprs::Primary(Primary::Variable(Variable::Path(path))))
                 }
             }
             TkKind::KwSelfTyp => {
@@ -125,10 +110,9 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                                 let (args, span) = self.consume_arguments(ctx)?;
 
                                 Ok(Exprs::Primary(Primary::FnCall(FnCall {
-                                    qualed_id: QualifiedId::new_type_impl(
-                                        self_typ,
-                                        ident.id,
-                                        Span::merge(&begin, &ident.span),
+                                    path: Path::new(
+                                        Some(AbsolutePathHeader::SelfTyp(begin.clone())),
+                                        vec![ident.into()],
                                     ),
                                     args,
                                     span: Span::merge(&begin, &span),
@@ -141,7 +125,10 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                                     StructLiteral {
                                         members,
                                         span: Span::merge(&begin, &span),
-                                        qualid: QualifiedId::from_type(self_typ, begin),
+                                        path: Path::new(
+                                            Some(AbsolutePathHeader::SelfTyp(begin.clone())),
+                                            Vec::new(),
+                                        ),
                                     },
                                 ))))
                             }
@@ -174,16 +161,14 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 }
             }
             TkKind::KwSelfVar => {
-                let begin = t.span.clone();
+                let self_span = t.span.clone();
 
                 if ctx.is_method {
                     // "self"
                     self.next();
-                    Ok(Exprs::Primary(Primary::Variable(Ident {
-                        // WARN: really?
-                        id: "self".to_string(),
-                        span: begin,
-                    })))
+                    Ok(Exprs::Primary(Primary::Variable(Variable::SelfVar(
+                        self_span,
+                    ))))
                 } else {
                     Err(ParseError::InvalidToken {
                         expecteds: vec![
