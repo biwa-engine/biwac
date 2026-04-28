@@ -4,14 +4,14 @@ pub mod types;
 
 pub use macros::{CompilerFlag, CompilerFlagArg, CompilerFlagLiteral};
 pub use symbols::{
-    Ident, ModAst, QualifiedId,
+    AbsolutePathHeader, Ident, ModAst, Path, PathSegment,
     expressions::{
         BinOperator, BinaryExpr, BlockExpr, BoolLiteral, Exprs, FnCall, IfExpr, IntegerLiteral,
         Literal, MemberAccess, MethodCall, Primary, StringLiteral, StructLiteral, UnOperator,
-        UnaryExpr,
+        UnaryExpr, Variable,
     },
     globals::{
-        ArgDecl, ArgDeclList, FnDef, Globals, ImplCtx, ImportDecl, MethodDef, NativeCode,
+        ArgDecl, ArgDeclList, FnDef, Globals, ImplBlock, ImportDecl, MethodDef, NativeCode,
         NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, StructDef, TypeAlias, TypeDef,
     },
     novel::{NovelBlockStmt, NovelEndSceneStmt, NovelIfStmt, NovelMessage, NovelStmt, NovelWait},

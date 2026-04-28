@@ -1,14 +1,18 @@
 use biwac_base::Span;
 
-use crate::{
-    CompilerFlag, Exprs, Ident, NovelStmt, QualifiedId, RetTypRepr, Stmt, TypRepr, VarDecl,
-};
+use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
+
+#[derive(Debug, Clone)]
+pub struct GenArgsDecl {
+    pub genargs: Vec<Ident>,
+    pub span: Span,
+}
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub id: Ident,
     pub members: Vec<(Ident, TypRepr)>,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
 }
 
 //  type alias
@@ -21,7 +25,7 @@ pub struct StructDef {
 #[derive(Debug, Clone)]
 pub struct TypeAlias {
     pub ident: Ident,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
     pub right: TypRepr,
 }
 
@@ -34,7 +38,7 @@ pub struct TypeAlias {
 #[derive(Debug, Clone)]
 pub struct NativeTypeAlias {
     pub ident: Ident,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
     pub native: String,
     pub native_span: Span,
 }
@@ -45,6 +49,7 @@ pub enum Globals {
     FnDef(FnDef),
     VarDecl(VarDecl),
     TypeDef(TypeDef),
+    ImplBlock(ImplBlock),
     NativeFnDef(NativeFnDef),
     MethodDef(MethodDef),
     NativeMethodDef(NativeMethodDef),
@@ -54,7 +59,7 @@ pub enum Globals {
 
 #[derive(Debug, Clone)]
 pub struct ImportDecl {
-    pub qualid: QualifiedId,
+    pub path: Path,
     pub span: Span,
 }
 
@@ -62,7 +67,6 @@ pub struct ImportDecl {
 // Selfは具体のTypReprによりパース時に解決される
 #[derive(Debug, Clone)]
 pub struct FnDef {
-    pub impl_ctx: Option<ImplCtx>,
     pub id: Ident,
     pub args: ArgDeclList,
     pub stmts: Vec<Stmt>,
@@ -70,12 +74,11 @@ pub struct FnDef {
     pub rtype: RetTypRepr,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NativeFnDef {
-    pub impl_ctx: Option<ImplCtx>,
     pub id: Ident,
     pub args: ArgDeclList,
     pub rtype: RetTypRepr,
@@ -83,7 +86,7 @@ pub struct NativeFnDef {
     pub native_span: Span,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +114,7 @@ pub struct MethodDef {
     pub rtype: RetTypRepr,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,14 +129,15 @@ pub struct NativeMethodDef {
     pub native_span: Span,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Vec<Ident>,
+    pub genargs: Option<GenArgsDecl>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
     pub typ_fns: Vec<FnDef>,
     pub methods: Vec<MethodDef>,
-    pub genargs: Vec<Ident>,
+    pub genargs_decl: Vec<Ident>,
+    pub self_typ: TypRepr,
 }
 
 #[derive(Debug, Clone)]
@@ -166,12 +170,6 @@ pub struct NativeCode {
     pub native: String,
     pub native_span: Span,
     pub flags: Vec<CompilerFlag>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ImplCtx {
-    pub genargs: Vec<Ident>,
-    pub self_typ: TypRepr,
 }
 
 // biwa言語がノベルゲーム記述用言語であるための

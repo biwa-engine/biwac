@@ -1,11 +1,11 @@
 use biwac_base::Span;
 
-use crate::{Ident, QualifiedId, Stmt};
+use crate::{Ident, Path, Stmt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primary {
     Literal(Literal),
-    Variable(Ident),
+    Variable(Variable),
     FnCall(FnCall),
     MemberAccess(MemberAccess),
     IfExpr(IfExpr),
@@ -17,7 +17,7 @@ impl Primary {
     pub fn span(&self) -> Span {
         match self {
             Self::Literal(l) => l.span(),
-            Self::Variable(v) => v.span.clone(),
+            Self::Variable(v) => v.span().clone(),
             Self::FnCall(f) => f.span.clone(),
             Self::MemberAccess(m) => m.span(),
             Self::IfExpr(i) => i.span.clone(),
@@ -28,8 +28,23 @@ impl Primary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Variable {
+    Path(Path),
+    SelfVar(Span),
+}
+
+impl Variable {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Path(path) => path.span(),
+            Self::SelfVar(span) => span.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnCall {
-    pub qualed_id: QualifiedId,
+    pub path: Path,
     pub args: Vec<Exprs>,
     pub span: Span,
 }
@@ -95,7 +110,7 @@ pub struct StringLiteral {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLiteral {
-    pub qualid: QualifiedId,
+    pub path: Path,
     pub members: Vec<(Ident, Box<Exprs>)>,
     pub span: Span,
 }

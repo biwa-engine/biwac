@@ -1,6 +1,6 @@
 use biwac_base::Span;
 
-use crate::symbols::QualifiedId;
+use crate::Path;
 
 // NOTE:
 // 以下のTypDeclなどはいずれも、
@@ -34,6 +34,21 @@ pub struct TypRepr {
     pub span: Span,
 }
 
+impl TypRepr {
+    pub fn new_def_typ(path: Path, genargs: Option<Vec<TypRepr>>) -> Self {
+        TypRepr {
+            span: if let Some(genargs) = &genargs
+                && !genargs.is_empty()
+            {
+                Span::merge(&path.span(), &genargs.last().unwrap().span)
+            } else {
+                path.span()
+            },
+            val: TypReprVal::Defined(DefTyp { path, genargs }),
+        }
+    }
+}
+
 /// RetTypRepr は関数の戻り値の表明子
 /// 無い場合、つまり Void の場合、
 /// その位置を示すspanのみ持つ
@@ -55,7 +70,7 @@ pub enum TypReprVal {
     Defined(DefTyp),
     // NOTE:
     // `T`のようなジェネリクス型も、
-    // QualifiedIdがidのみのDefTypとしてパースされる
+    // Path が1つの <identifier> のみのDefTypとしてパースされる
     // (パース時にはその意味論は決定できない)
 }
 
@@ -72,7 +87,7 @@ pub enum PrimTyp {
 /// User-defined types such as `struct Foo`, `enum Bar`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefTyp {
-    pub qualid: QualifiedId,
+    pub path: Path,
     pub genargs: Option<Vec<TypRepr>>,
 }
 
