@@ -1,0 +1,8 @@
+[package]
+name = "biwac_span"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_hash = { path = "../biwac_hash"}

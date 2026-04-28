@@ -1,6 +1,4 @@
-use crate::{ModId, PackageName};
-
-const BIWA_SRC_EXT: &str = "biwa";
+use crate::{BIWA_EXTENSION, ModId, PackageName};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ModPath {
@@ -62,9 +60,9 @@ impl Span {
 impl ModPath {
     pub fn file_name(&self) -> String {
         match self {
-            Self::Main => format!("main.{BIWA_SRC_EXT}"),
-            Self::Lib => format!("lib.{BIWA_SRC_EXT}"),
-            Self::Mod(path) => format!("{}.{BIWA_SRC_EXT}", path.join("/")),
+            Self::Main => format!("main.{BIWA_EXTENSION}"),
+            Self::Lib => format!("lib.{BIWA_EXTENSION}"),
+            Self::Mod(path) => format!("{}.{BIWA_EXTENSION}", path.join("/")),
         }
     }
 

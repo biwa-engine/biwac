@@ -7,6 +7,15 @@ pub struct SourceHolder {
     pub mods: HashMap<ModId, ModSource>,
 }
 
+/// [`ModId`] is global scope (inter-package) module id.
+/// Incremental compilation cache keeps map of
+/// ModId to enum {
+///     SelfPkg,
+///     External {
+///         pkg: PackageName,
+///         module: ModPath,
+///     }
+/// }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModId(usize);
 

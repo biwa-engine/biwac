@@ -1,6 +1,8 @@
 [workspace]
 members = [
   "src/biwac_base",
+  "src/biwac_hash",
+  "src/biwac_span",
   "src/biwac_lexer",
   "src/biwac_ast",
   "src/biwac_parser",
