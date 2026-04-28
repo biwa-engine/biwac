@@ -59,20 +59,20 @@ impl<'src> NovelSourceStream<'src> {
                 })
             } else if let NCodeTkKind::Ident(_) = t.kind {
                 // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
-                let qualid = self.consume_qualified_identifier()?;
+                let path = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args()?;
 
                 Ok(TypRepr {
-                    span: qualid.span.clone(),
-                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
+                    span: path.span(),
+                    val: TypReprVal::Defined(DefTyp { path, genargs }),
                 })
             } else if let NCodeTkKind::KwPackage = t.kind {
-                let qualid = self.consume_qualified_identifier()?;
+                let path = self.consume_qualified_identifier()?;
                 let genargs = self.opt_consume_generic_args()?;
 
                 Ok(TypRepr {
-                    span: qualid.span.clone(),
-                    val: TypReprVal::Defined(DefTyp { qualid, genargs }),
+                    span: path.span(),
+                    val: TypReprVal::Defined(DefTyp { path, genargs }),
                 })
             } else {
                 Err(NovelParseError::InvalidToken {

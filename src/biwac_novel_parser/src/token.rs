@@ -1,4 +1,4 @@
-use biwac_ast::{Ident, QualifiedId};
+use biwac_ast::{AbsolutePathHeader, Ident, Path};
 use biwac_base::Span;
 
 use crate::{NovelParseError, NovelSourceStream};
@@ -447,22 +447,22 @@ impl<'src> NovelSourceStream<'src> {
         }
     }
 
-    pub(crate) fn consume_qualified_identifier(&mut self) -> Result<QualifiedId, NovelParseError> {
-        let mut ids = vec![];
-        let (is_from_root, begin, mut end) = if let Some(t) = self.peek_token()?.cloned()
+    pub(crate) fn consume_qualified_identifier(&mut self) -> Result<Path, NovelParseError> {
+        let mut segments = vec![];
+        let abs_header = if let Some(t) = self.peek_token()?.cloned()
             && matches!(t.kind.as_kind_name(), NCodeTkKindName::KwPackage)
         {
             self.next_token()?;
             self.must_consume_next(vec![NCodeTkKindName::MarkDoubleColon])?;
 
-            ids.push(self.consume_identifier()?.id);
+            segments.push(self.consume_identifier()?.into());
 
-            (true, t.span.clone(), t.span)
+            Some(AbsolutePathHeader::Package(t.span.clone()))
         } else {
             let ident = self.consume_identifier()?;
-            ids.push(ident.id);
+            segments.push(ident.into());
 
-            (false, ident.span.clone(), ident.span)
+            None
         };
 
         loop {
@@ -470,23 +470,12 @@ impl<'src> NovelSourceStream<'src> {
                 if let NCodeTkKind::MarkDoubleColon = t.kind {
                     self.next_token()?;
                     let ident = self.consume_identifier()?;
-                    ids.push(ident.id);
-                    end = ident.span;
+                    segments.push(ident.into());
                 } else {
-                    return Ok(QualifiedId {
-                        is_from_root,
-                        quals: ids[..ids.len() - 1].to_vec(),
-                        id: ids.last().expect("no identifier parsed").clone(),
-                        span: Span::merge(&begin, &end),
-                    });
+                    return Ok(Path::new(abs_header, segments));
                 }
             } else {
-                return Ok(QualifiedId {
-                    is_from_root,
-                    quals: ids[..ids.len() - 1].to_vec(),
-                    id: ids.last().expect("no identifier parsed").clone(),
-                    span: Span::merge(&begin, &end),
-                });
+                return Ok(Path::new(abs_header, segments));
             }
         }
     }

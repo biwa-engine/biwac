@@ -2,7 +2,7 @@ use biwac_base::Span;
 
 use biwac_ast::{
     BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Primary, StringLiteral,
-    StructLiteral,
+    StructLiteral, Variable,
 };
 
 use crate::{
@@ -61,14 +61,14 @@ impl<'src> NovelSourceStream<'src> {
             }
             NCodeTkKind::Ident(_) => {
                 let begin = t.span.clone();
-                let qualed_id = self.consume_qualified_identifier()?;
+                let path = self.consume_qualified_identifier()?;
 
                 if let Some(t2) = self.peek_token()? {
                     if let NCodeTkKind::MarkLPare = t2.kind {
                         let (args, span) = self.consume_arguments()?;
 
                         Ok(Exprs::Primary(Primary::FnCall(FnCall {
-                            qualed_id,
+                            path,
                             args,
                             span: Span::merge(&begin, &span),
                         })))
@@ -77,35 +77,16 @@ impl<'src> NovelSourceStream<'src> {
 
                         Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
                             StructLiteral {
-                                qualid: qualed_id,
+                                path,
                                 members,
                                 span: Span::merge(&begin, &span),
                             },
                         ))))
-                    } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                        Err(NovelParseError::InvalidToken {
-                            expecteds: vec![
-                                NCodeTkKindName::MarkLPare,
-                                NCodeTkKindName::MarkLBrace,
-                            ],
-                            found: Box::new(t2.to_owned().clone()),
-                        })
                     } else {
-                        Ok(Exprs::Primary(Primary::Variable(Ident {
-                            id: qualed_id.id,
-                            span: t.span,
-                        })))
+                        Ok(Exprs::Primary(Primary::Variable(Variable::Path(path))))
                     }
-                } else if !qualed_id.quals.is_empty() && !qualed_id.is_from_root {
-                    Err(NovelParseError::InvalidLineEnd {
-                        expecteds: vec![NCodeTkKindName::MarkLPare, NCodeTkKindName::MarkLBrace],
-                        span: t.span,
-                    })
                 } else {
-                    Ok(Exprs::Primary(Primary::Variable(Ident {
-                        id: qualed_id.id,
-                        span: t.span,
-                    })))
+                    Ok(Exprs::Primary(Primary::Variable(Variable::Path(path))))
                 }
             }
             NCodeTkKind::MarkLPare => {
