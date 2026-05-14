@@ -1,6 +1,7 @@
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-use biwac_base::{BiwacError, Span};
+use biwac_base::BiwacError;
+use biwac_span::Span;
 
 #[derive(Debug, Clone)]
 pub enum TokenizeError {

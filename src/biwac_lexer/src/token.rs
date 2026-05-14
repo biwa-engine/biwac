@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use biwac_base::Span;
+use biwac_span::Span;
 
 #[derive(Clone, Debug)]
 pub struct Token<'src> {

@@ -1,4 +1,5 @@
-use biwac_base::{ModId, Span};
+use biwac_base::ModId;
+use biwac_span::Span;
 
 use crate::TkKind;
 
