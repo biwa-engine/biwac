@@ -3,9 +3,10 @@ pub mod globals;
 pub mod novel;
 pub mod statements;
 
-use biwac_base::{ModPath, Span};
+use biwac_base::ModPath;
+use biwac_span::{InternedIdent, Span};
 
-use crate::{Globals, PrimTyp, TypRepr, TypReprVal};
+use crate::Globals;
 
 #[derive(Debug)]
 pub struct ModAst {
@@ -171,6 +172,6 @@ mod private {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
-    pub id: String,
+    pub id: InternedIdent,
     pub span: Span,
 }

@@ -1,4 +1,4 @@
-use biwac_base::Span;
+use biwac_span::Span;
 
 use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
