@@ -1,9 +1,10 @@
 use colored::Colorize;
 
-use crate::{MetadataHolder, SourceHolder};
+use crate::{IdentInterner, MetadataHolder, SourceHolder};
 
 pub trait BiwacError {
-    fn print_error_message(&self, metadata: &MetadataHolder, srcs: &SourceHolder);
+    type ErrorContext;
+    fn print_error_message(&self, ctx: &Self::ErrorContext);
 }
 
 #[derive(Debug)]
@@ -11,12 +12,13 @@ pub struct ErrorHolder<'a, E: BiwacError> {
     pub errs: Vec<E>,
     pub srcs: &'a SourceHolder,
     pub metadata: &'a MetadataHolder,
+    pub interner: &'a IdentInterner,
 }
 
-impl<'a, E: BiwacError> ErrorHolder<'a, E> {
-    pub fn print_error_messages(&self) {
+impl<'a, C, E: BiwacError<ErrorContext = C>> ErrorHolder<'a, E> {
+    pub fn print_error_messages(&self, ctx: &C) {
         for e in &self.errs {
-            e.print_error_message(self.metadata, self.srcs);
+            e.print_error_message(ctx);
         }
 
         print_error_finish_message(self.errs.len());

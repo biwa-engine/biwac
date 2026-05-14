@@ -83,7 +83,8 @@ impl PackageName {
 }
 
 impl BiwacError for PackageNameError {
-    fn print_error_message(&self, _metadata: &MetadataHolder, _srcs: &crate::SourceHolder) {
+    type ErrorContext = ();
+    fn print_error_message(&self, _ctx: &()) {
         match self {
             Self::InvalidPackageName(name) => {
                 println!(
@@ -152,7 +153,8 @@ impl PackageVersion {
 }
 
 impl BiwacError for PackageVersionError {
-    fn print_error_message(&self, _metadata: &MetadataHolder, _srcs: &crate::SourceHolder) {
+    type ErrorContext = ();
+    fn print_error_message(&self, _ctx: &()) {
         match self {
             Self::InvalidPackageVersion(version) => {
                 println!(

@@ -1,4 +1,6 @@
-use biwac_span::Span;
+use std::cell::OnceCell;
+
+use biwac_span::{Span, TyDefId, ValDefId};
 
 use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
@@ -11,6 +13,7 @@ pub struct GenArgsDecl {
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub id: Ident,
+    pub def_id: OnceCell<TyDefId>,
     pub members: Vec<(Ident, TypRepr)>,
     pub genargs: Option<GenArgsDecl>,
 }
@@ -25,6 +28,7 @@ pub struct StructDef {
 #[derive(Debug, Clone)]
 pub struct TypeAlias {
     pub ident: Ident,
+    pub def_id: OnceCell<TyDefId>,
     pub genargs: Option<GenArgsDecl>,
     pub right: TypRepr,
 }
@@ -38,6 +42,7 @@ pub struct TypeAlias {
 #[derive(Debug, Clone)]
 pub struct NativeTypeAlias {
     pub ident: Ident,
+    pub def_id: OnceCell<TyDefId>,
     pub genargs: Option<GenArgsDecl>,
     pub native: String,
     pub native_span: Span,
@@ -68,6 +73,7 @@ pub struct ImportDecl {
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub id: Ident,
+    pub def_id: OnceCell<ValDefId>,
     pub args: ArgDeclList,
     pub stmts: Vec<Stmt>,
     pub expr: Option<Exprs>,
@@ -80,6 +86,7 @@ pub struct FnDef {
 #[derive(Debug, Clone)]
 pub struct NativeFnDef {
     pub id: Ident,
+    pub def_id: OnceCell<ValDefId>,
     pub args: ArgDeclList,
     pub rtype: RetTypRepr,
     pub native: String,
@@ -104,6 +111,7 @@ pub struct ArgDeclList {
 
 #[derive(Debug, Clone)]
 pub struct MethodDef {
+    pub def_id: OnceCell<ValDefId>,
     pub impl_genargs: Vec<Ident>,
     pub self_typ: TypRepr,
     pub self_ident: Ident,
@@ -119,6 +127,7 @@ pub struct MethodDef {
 
 #[derive(Debug, Clone)]
 pub struct NativeMethodDef {
+    pub def_id: OnceCell<ValDefId>,
     pub impl_genargs: Vec<Ident>,
     pub self_typ: TypRepr,
     pub self_ident: Ident,
@@ -193,6 +202,7 @@ pub struct NativeCode {
 #[derive(Debug, Clone)]
 pub struct NovelScene {
     pub id: Ident,
+    pub def_id: OnceCell<ValDefId>,
     pub args: ArgDeclList,
     pub rtype: RetTypRepr,
     pub stmts: Vec<NovelStmt>,

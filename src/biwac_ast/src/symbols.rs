@@ -3,8 +3,8 @@ pub mod globals;
 pub mod novel;
 pub mod statements;
 
-use biwac_base::ModPath;
-use biwac_span::{InternedIdent, Span};
+use biwac_base::{InternedIdent, ModPath};
+use biwac_span::Span;
 
 use crate::Globals;
 

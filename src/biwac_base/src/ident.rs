@@ -34,4 +34,12 @@ impl IdentInterner {
             }
         }
     }
+
+    #[inline]
+    pub fn get_str(&self, interned: &InternedIdent) -> Option<&str> {
+        self.idents
+            .iter()
+            .find(|(_, i)| &interned == i)
+            .map(|(ident, _)| ident.as_str())
+    }
 }

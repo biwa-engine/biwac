@@ -1,9 +1,11 @@
 mod error;
+mod ident;
 mod module;
 mod package;
 mod src;
 
 pub use error::{BiwacError, ErrorHolder, print_error_finish_message};
+pub use ident::{IdentInterner, InternedIdent};
 pub use module::ModPath;
 pub use package::{
     DependedPackage, MetadataHolder, PackageId, PackageMetadata, PackageName, PackageNameError,

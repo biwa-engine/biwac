@@ -19,11 +19,8 @@ pub enum ParseError<'src> {
 }
 
 impl BiwacError for ParseError<'_> {
-    fn print_error_message(
-        &self,
-        _metadata: &biwac_base::MetadataHolder,
-        srcs: &biwac_base::SourceHolder,
-    ) {
+    type ErrorContext = (&biwac_base::SourceHolder, &biwac_base::IdentInterner);
+    fn print_error_message(&self, (srcs, interner): &Self::ErrorContext) {
         match self {
             Self::InvalidToken { expecteds, found } => {
                 let modsrc = srcs.mods.get(&found.span.module()).unwrap();

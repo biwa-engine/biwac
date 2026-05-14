@@ -1,11 +1,11 @@
+mod def_id;
 mod def_path;
-mod ident;
 mod package_hash;
 
 use biwac_base::ModId;
 
+pub use def_id::{DefId, DefIdKind, PackageLocalDefId, TyDefId, ValDefId};
 pub use def_path::{DefPath, DefPathHash, DefPathSegment};
-pub use ident::{IdentInterner, InternedIdent};
 pub use package_hash::PackageHashId;
 
 /// `struct Span` represents span of any form of symbols,

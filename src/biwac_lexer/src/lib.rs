@@ -6,12 +6,16 @@ pub mod token;
 mod tests;
 
 use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
-use biwac_base::ModId;
+use biwac_base::{IdentInterner, ModId};
 
 pub use error::TokenizeError;
 pub use token::{TkKind, TkKindName, Token};
 
-pub fn lex<'src>(file_id: ModId, src: &'src str) -> Result<Vec<Token<'src>>, TokenizeError> {
+pub fn lex<'src>(
+    interner: &mut IdentInterner,
+    file_id: ModId,
+    src: &'src str,
+) -> Result<Vec<Token<'src>>, TokenizeError> {
     let regions = divide_regions(file_id, src)?;
 
     let pretokens = pre_lex(file_id, src, regions);
@@ -49,7 +53,8 @@ pub fn lex<'src>(file_id: ModId, src: &'src str) -> Result<Vec<Token<'src>>, Tok
                         } else if let Some(i) = try_get_prefixed_int(w) {
                             TkKind::LiteralInteger(i)
                         } else {
-                            TkKind::Ident(w)
+                            let interned = interner.get_or_insert(w);
+                            TkKind::Ident(interned)
                         }
                     }
                 };

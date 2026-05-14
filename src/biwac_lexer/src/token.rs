@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use biwac_base::{IdentInterner, InternedIdent};
 use biwac_span::Span;
 
 #[derive(Clone, Debug)]
@@ -16,7 +17,7 @@ pub enum TkVal {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TkKind<'src> {
-    Ident(&'src str),         // identifier
+    Ident(InternedIdent),     // identifier
     LiteralInteger(u64),      // integer literal
     LiteralString(&'src str), // string literal
     KwBoolTrue,               // bool literal `TRUE`
@@ -70,7 +71,7 @@ pub enum TkKind<'src> {
 impl TkKind<'_> {
     pub fn pattern(&self) -> String {
         match self {
-            Self::Ident(i) => i.to_string(),
+            Self::Ident(_) => "<identifier>".to_string(),
             Self::LiteralInteger(i) => i.to_string(),
             Self::LiteralString(s) => s.to_string(),
             Self::KwBoolTrue => "TRUE".to_string(),
@@ -288,16 +289,17 @@ impl TkKindName {
     }
 }
 
-impl Display for TkKind<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl TkKind<'_> {
+    pub fn pattern_with(&self, interner: &IdentInterner) -> String {
         match self {
-            Self::Ident(s) => {
-                write!(f, "<identifier> `{s}`")
+            Self::Ident(interned) => {
+                let ident = interner.get_str(interned).unwrap();
+                format!("<identifier> `{ident}`")
             }
-            Self::LiteralInteger(i) => write!(f, "<integer-literal> `{i}`"),
-            Self::LiteralString(s) => write!(f, "<string-literal> `\"{s}\"`"),
-            Self::DslLiteral(_) => write!(f, "<dsl-literal> `{{{{ ... }}}}`"),
-            _ => write!(f, "`{}`", self.pattern()),
+            Self::LiteralInteger(i) => format!("<integer-literal> `{i}`"),
+            Self::LiteralString(s) => format!("<string-literal> `\"{s}\"`"),
+            Self::DslLiteral(_) => "<dsl-literal> `{{{{ ... }}}}`".into(),
+            _ => format!("`{}`", self.pattern()),
         }
     }
 }
