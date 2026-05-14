@@ -44,6 +44,25 @@ pub enum PackageVersionError {
     InvalidPackageVersion(String),
 }
 
+/// 32 bit package id (simple increment).
+/// This is unique in global scope (inter-package) and inter-session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PackageId(u32);
+
+impl PackageId {
+    pub const SELF_PACKAGE: PackageId = PackageId(0);
+
+    #[inline]
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    #[inline]
+    pub fn is_self(&self) -> bool {
+        self == &Self::SELF_PACKAGE
+    }
+}
+
 impl FromStr for PackageName {
     type Err = PackageNameError;
 

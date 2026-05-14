@@ -3,10 +3,12 @@ use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
 };
 
+pub(crate) mod def_id;
 pub(crate) mod symbols;
 pub(crate) mod types;
 
-use biwac_base::{ModPath, PackageName, SSpan, Span};
+use biwac_base::{ModPath, PackageName};
+use biwac_span::Span;
 
 use crate::{
     AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, GenTyId, HirError,
@@ -140,7 +142,7 @@ pub struct TyValImplGenargsContentPair {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TyExistence {
-    pub ty_name_span: SSpan,
+    pub ty_name_span: Span,
     pub genarg_len: usize,
 }
 
@@ -247,12 +249,8 @@ impl Hir {
                     Progressive::NotYet(ty_existence) => ty_existence.ty_name_span.clone(),
                     Progressive::Completed(ty_content) => match ty_content {
                         TyDefContentKind::Struct(struct_) => struct_.struct_name_span.clone(),
-                        TyDefContentKind::TypeAlias(alias) => SSpan::Span {
-                            span: alias.alias_name_span.clone(),
-                        },
-                        TyDefContentKind::NativeTypeAlias(native) => SSpan::Span {
-                            span: native.alias_name_span.clone(),
-                        },
+                        TyDefContentKind::TypeAlias(alias) => alias.alias_name_span.clone(),
+                        TyDefContentKind::NativeTypeAlias(native) => native.alias_name_span.clone(),
                     },
                 }),
                 defined_position2: Box::new(ty_existence.ty_name_span),
@@ -1051,9 +1049,7 @@ fn resolve_ty_alias(
             Err(HirError::GenericArgLengthMismatched {
                 defined_ty: Box::new(defined_ty.clone()),
                 ty_existence: Box::new(TyExistence {
-                    ty_name_span: SSpan::Span {
-                        span: alias.alias_name_span.clone(),
-                    },
+                    ty_name_span: alias.alias_name_span.clone(),
                     genarg_len: alias.genargs.len(),
                 }),
             })
@@ -1073,15 +1069,11 @@ impl Progressive<TyExistence, TyDefContentKind> {
                     genarg_len: struct_.genargs.len(),
                 }),
                 TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
-                    ty_name_span: SSpan::Span {
-                        span: alias.alias_name_span.clone(),
-                    },
+                    ty_name_span: alias.alias_name_span.clone(),
                     genarg_len: alias.genargs.len(),
                 }),
                 TyDefContentKind::NativeTypeAlias(native) => Some(TyExistence {
-                    ty_name_span: SSpan::Span {
-                        span: native.alias_name_span.clone(),
-                    },
+                    ty_name_span: native.alias_name_span.clone(),
                     genarg_len: native.genargs.len(),
                 }),
             },

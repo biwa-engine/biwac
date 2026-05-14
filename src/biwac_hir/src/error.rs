@@ -1,4 +1,4 @@
-use biwac_base::SSpan;
+use biwac_span::Span;
 
 pub use crate::hir::{
     TyExistence,
@@ -14,13 +14,13 @@ pub use crate::hir::{
 pub enum HirError {
     DuplicatedValueName {
         vid: Box<ValId>,
-        defined_position1: Box<SSpan>,
-        defined_position2: Box<SSpan>,
+        defined_position1: Box<Span>,
+        defined_position2: Box<Span>,
     },
     DuplicatedTypeName {
         tid: Box<TyId>,
-        defined_position1: Box<SSpan>,
-        defined_position2: Box<SSpan>,
+        defined_position1: Box<Span>,
+        defined_position2: Box<Span>,
     },
     GenericArgLengthMismatched {
         defined_ty: Box<DefinedTy>,
@@ -44,7 +44,7 @@ pub enum HirError {
     },
     ImplementedValueIsNotAssoc {
         assoc_callee: Box<AssocCallee>,
-        caller_span: Box<SSpan>,
+        caller_span: Box<Span>,
         val_content: Box<ImplValDefContentKind>, // 取得された実装
     },
 }

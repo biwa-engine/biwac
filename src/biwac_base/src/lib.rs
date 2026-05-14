@@ -1,14 +1,14 @@
 mod error;
+mod module;
 mod package;
-mod span;
 mod src;
 
 pub use error::{BiwacError, ErrorHolder, print_error_finish_message};
+pub use module::ModPath;
 pub use package::{
-    DependedPackage, MetadataHolder, PackageMetadata, PackageName, PackageNameError,
+    DependedPackage, MetadataHolder, PackageId, PackageMetadata, PackageName, PackageNameError,
     PackageVersion, PackageVersionError,
 };
-pub use span::{ModPath, SSpan, Span};
 pub use src::{ModId, ModSource, SourceHolder};
 
 pub const BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME: &str = "main";

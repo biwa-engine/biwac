@@ -2,10 +2,9 @@ mod error;
 pub mod hir;
 mod lang_item;
 
-use biwac_base::SSpan;
-
 pub use crate::hir::{
     Hir, ImplValId, PkgId, Progressive, TyExistence,
+    def_id::{DefId, PackageLocalDefId},
     symbols::{
         Ident,
         expressions::{

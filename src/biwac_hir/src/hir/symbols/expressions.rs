@@ -1,5 +1,5 @@
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
-use biwac_base::Span;
+use biwac_span::Span;
 
 use crate::{Ident, ImplValId, LocVarId, Stmt, Ty, TyId, ValId};
 

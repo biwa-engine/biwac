@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use biwac_base::SSpan;
+use biwac_span::Span;
 
 use crate::{FnDefContentSignature, GenTyId, LocGenTyId, TyId};
 
@@ -29,7 +29,7 @@ use crate::{FnDefContentSignature, GenTyId, LocGenTyId, TyId};
 #[derive(Debug, Clone)]
 pub struct Ty {
     pub kind: TyKind,
-    pub span: SSpan,
+    pub span: Span,
 }
 
 impl PartialEq for Ty {
@@ -320,7 +320,7 @@ impl TyKind {
 }
 
 impl Ty {
-    pub fn new(kind: TyKind, span: SSpan) -> Self {
+    pub fn new(kind: TyKind, span: Span) -> Self {
         Self { kind, span }
     }
 

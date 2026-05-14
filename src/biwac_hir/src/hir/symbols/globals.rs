@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use biwac_ast::{FnDef, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef};
-use biwac_base::{ModPath, SSpan, Span};
+use biwac_base::ModPath;
+use biwac_span::Span;
 
 use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, PkgId, Progressive, Stmt, Ty};
 
@@ -105,7 +106,7 @@ pub struct FnDefContentSignature {
     pub rty: Ty,
 
     pub genargs: Vec<(Ident, LocGenTyId)>,
-    pub span: SSpan,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -202,7 +203,7 @@ pub struct StructDefContent {
     pub members: HashMap<String, Ty>,
     pub genargs: Vec<GenTyId>,
     // TODO: その他各種情報
-    pub struct_name_span: SSpan,
+    pub struct_name_span: Span,
 }
 
 #[derive(Debug, Clone)]

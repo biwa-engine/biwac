@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use biwac_base::{ModPath, PackageName, SSpan};
+use biwac_base::{ModPath, PackageName};
+use biwac_span::Span;
 
 use crate::{DefinedTy, FnDefContentSignature, Ty, TyId, TyKind, ValId};
 
@@ -11,7 +12,7 @@ pub struct LangItem {
     #[allow(dead_code)]
     pub id: String,
 
-    pub span: SSpan,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +38,7 @@ impl LangItem {
     }
 }
 
-fn dummy_span(kind: &LangItemKind) -> SSpan {
+fn dummy_span(kind: &LangItemKind) -> Span {
     // TODO: Span に package を追加
     match kind {
         LangItemKind::Ty { tid, .. } => SSpan::External {
