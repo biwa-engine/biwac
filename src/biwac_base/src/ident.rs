@@ -6,7 +6,7 @@ use std::collections::HashMap;
 /// stored in [`IdentInterner`] which ensure uniqueness of InternedIdent.
 /// InternedIdent is unique in global scope (inter-package) and inter-session,
 /// so used in incremental compilation cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InternedIdent(u32);
 
 /// IdentInterner is interning pool of identifier (<identifier>).
