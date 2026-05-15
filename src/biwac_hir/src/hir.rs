@@ -3,7 +3,6 @@ use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
 };
 
-pub(crate) mod def_id;
 pub(crate) mod symbols;
 pub(crate) mod types;
 

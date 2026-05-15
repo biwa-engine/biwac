@@ -1,4 +1,5 @@
-use biwac_span::{InternedIdent, Span};
+use biwac_base::InternedIdent;
+use biwac_span::Span;
 
 pub(crate) mod expressions;
 pub(crate) mod globals;

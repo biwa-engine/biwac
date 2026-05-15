@@ -14,11 +14,7 @@ pub enum PkgMetadataLoadError {
 }
 
 impl BiwacError for PkgMetadataLoadError {
-    fn print_error_message(
-        &self,
-        metadata: &biwac_base::MetadataHolder,
-        srcs: &biwac_base::SourceHolder,
-    ) {
+    fn print_error_message(&self, ctx: &biwac_base::ErrorContext) {
         match self {
             Self::MetadataFileNotFound => {
                 println!(
@@ -43,10 +39,10 @@ impl BiwacError for PkgMetadataLoadError {
                 )
             }
             Self::PackageNameError(e) => {
-                e.print_error_message(metadata, srcs);
+                e.print_error_message(ctx);
             }
             Self::PackageVersionError(e) => {
-                e.print_error_message(metadata, srcs);
+                e.print_error_message(ctx);
             }
         }
     }

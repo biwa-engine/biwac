@@ -4,19 +4,27 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use biwac_base::{BiwacError, MetadataHolder, PackageName, SourceHolder};
+use biwac_base::{
+    BiwacError, ErrorContext, IdentInterner, MetadataHolder, PackageName, SourceHolder,
+};
 
 pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     println!("{}", "Compiling...".green().bold(),);
 
-    // 空のソースファイルリストを作成
-    let mut srcs = SourceHolder::default();
     // 空のメタデータを作成
     let mut metadata = MetadataHolder::default();
+    // 空のソースファイルリストを作成
+    let mut srcs = SourceHolder::default();
+    // 空のインターンプールを生成
+    let mut interner = IdentInterner::new();
 
     biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.clone())
         .map_err(|e| {
-            e.print_error_message(&metadata, &srcs);
+            e.print_error_message(&ErrorContext {
+                metadata: &metadata,
+                srcs: &srcs,
+                interner: &interner,
+            });
             biwac_base::print_error_finish_message(1);
         })?;
 
@@ -46,9 +54,13 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
         );
     }
 
-    let pkg =
-        biwac_package_loader::Pkg::try_load(&metadata, &mut srcs, pkg_root_path.to_path_buf())
-            .map_err(|e| e.print_error_messages())?;
+    let pkg = biwac_package_loader::Pkg::try_load(
+        &metadata,
+        &mut interner,
+        &mut srcs,
+        pkg_root_path.to_path_buf(),
+    )
+    .map_err(|e| e.print_error_messages())?;
     // println!("pkg: {pkg:#?}");
 
     let deps =

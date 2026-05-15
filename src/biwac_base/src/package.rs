@@ -1,7 +1,7 @@
 use colored::Colorize;
 use std::{fmt::Display, str::FromStr};
 
-use crate::BiwacError;
+use crate::{BiwacError, ErrorContext};
 
 #[derive(Debug, Default)]
 pub struct MetadataHolder {
@@ -83,8 +83,7 @@ impl PackageName {
 }
 
 impl BiwacError for PackageNameError {
-    type ErrorContext = ();
-    fn print_error_message(&self, _ctx: &()) {
+    fn print_error_message(&self, _ctx: &ErrorContext) {
         match self {
             Self::InvalidPackageName(name) => {
                 println!(
@@ -153,8 +152,7 @@ impl PackageVersion {
 }
 
 impl BiwacError for PackageVersionError {
-    type ErrorContext = ();
-    fn print_error_message(&self, _ctx: &()) {
+    fn print_error_message(&self, _ctx: &ErrorContext) {
         match self {
             Self::InvalidPackageVersion(version) => {
                 println!(

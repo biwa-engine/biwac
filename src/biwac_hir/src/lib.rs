@@ -4,7 +4,6 @@ mod lang_item;
 
 pub use crate::hir::{
     Hir, ImplValId, PkgId, Progressive, TyExistence,
-    def_id::{DefId, PackageLocalDefId},
     symbols::{
         Ident,
         expressions::{

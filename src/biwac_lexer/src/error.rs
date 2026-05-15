@@ -9,11 +9,10 @@ pub enum TokenizeError {
 }
 
 impl BiwacError for TokenizeError {
-    type ErrorContext = biwac_base::SourceHolder;
-    fn print_error_message(&self, srcs: &biwac_base::SourceHolder) {
+    fn print_error_message(&self, ctx: &biwac_base::ErrorContext) {
         match self {
             Self::DoubleQuoteCloseNotFound { span } => {
-                let modsrc = srcs.mods.get(&span.module()).unwrap();
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
 
                 let file_name = modsrc.modu.file_name();
 
