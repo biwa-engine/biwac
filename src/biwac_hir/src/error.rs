@@ -1,24 +1,20 @@
-use biwac_span::Span;
+use biwac_span::{Span, TyDefId, ValDefId};
 
 pub use crate::hir::{
     TyExistence,
-    symbols::{
-        Ident,
-        expressions::AssocCallee,
-        globals::{ImplValDefContentKind, TyId, ValId},
-    },
+    symbols::{Ident, expressions::AssocCallee, globals::ImplValDefContentKind},
     types::{DefinedTy, TyKind},
 };
 
 #[derive(Debug, Clone)]
 pub enum HirError {
     DuplicatedValueName {
-        vid: Box<ValId>,
+        vid: Box<ValDefId>,
         defined_position1: Box<Span>,
         defined_position2: Box<Span>,
     },
     DuplicatedTypeName {
-        tid: Box<TyId>,
+        tid: Box<TyDefId>,
         defined_position1: Box<Span>,
         defined_position2: Box<Span>,
     },

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use biwac_span::Span;
+use biwac_span::{Span, TyDefId};
 
-use crate::{FnDefContentSignature, GenTyId, LocGenTyId, TyId};
+use crate::{FnDefContentSignature, GenTyId, LocGenTyId};
 
 // Ty は 型 を表す
 // ただし、型の種類そのものは TyKind が表し、
@@ -144,7 +144,7 @@ pub enum InferTy {
 // 使用する型情報を保持する
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinedTy {
-    pub tid: TyId,
+    pub tid: TyDefId,
     pub genargs: Vec<Ty>, // NOTE: Option ?
 }
 

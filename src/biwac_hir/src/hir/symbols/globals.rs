@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 
 use biwac_ast::{FnDef, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef};
-use biwac_base::ModPath;
 use biwac_span::Span;
 
-use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, PkgId, Progressive, Stmt, Ty};
+use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, Progressive, Stmt, Ty};
 
-// 型名前空間のシンボルを
-// 識別するid
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TyId {
-    pub(crate) pkg: PkgId,
-    pub(crate) quals: Vec<String>,
-    pub(crate) id: String,
-}
+// // 型名前空間のシンボルを
+// // 識別するid
+// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+// pub struct TyId {
+//     pub(crate) pkg: PkgId,
+//     pub(crate) quals: Vec<String>,
+//     pub(crate) id: String,
+// }
 
 // 型定義側で
 // 宣言されるジェネリクス型に割り当てられるid
@@ -44,16 +43,16 @@ pub struct GenTyId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocGenTyId(usize);
 
-// 値名前空間のシンボル
-// - 関数
-// - グローバル変数(const)
-// を識別するid
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ValId {
-    pub(crate) pkg: PkgId,
-    pub(crate) quals: Vec<String>,
-    pub(crate) id: String,
-}
+// // 値名前空間のシンボル
+// // - 関数
+// // - グローバル変数(const)
+// // を識別するid
+// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+// pub struct ValId {
+//     pub(crate) pkg: PkgId,
+//     pub(crate) quals: Vec<String>,
+//     pub(crate) id: String,
+// }
 
 // 値名前空間のシンボル
 #[derive(Debug, Clone)]
@@ -247,65 +246,65 @@ pub struct NovelSceneDefContent {
     pub var_tys: HashMap<LocVarId, Ty>,
 }
 
-impl TyId {
-    pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
-        Self { pkg, quals, id }
-    }
-
-    pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
-        Self {
-            pkg,
-            quals: match modpath {
-                ModPath::Main => vec![],
-                ModPath::Lib => vec![],
-                ModPath::Mod(m) => m.clone(),
-            },
-            id,
-        }
-    }
-
-    pub fn pkg(&self) -> &PkgId {
-        &self.pkg
-    }
-
-    pub fn quals(&self) -> &[String] {
-        &self.quals
-    }
-
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-impl ValId {
-    pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
-        Self { pkg, quals, id }
-    }
-
-    pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
-        Self {
-            pkg,
-            quals: match modpath {
-                ModPath::Main => vec![],
-                ModPath::Lib => vec![],
-                ModPath::Mod(m) => m.clone(),
-            },
-            id,
-        }
-    }
-
-    pub fn pkg(&self) -> &PkgId {
-        &self.pkg
-    }
-
-    pub fn quals(&self) -> &[String] {
-        &self.quals
-    }
-
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-}
+// impl TyId {
+//     pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
+//         Self { pkg, quals, id }
+//     }
+//
+//     pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
+//         Self {
+//             pkg,
+//             quals: match modpath {
+//                 ModPath::Main => vec![],
+//                 ModPath::Lib => vec![],
+//                 ModPath::Mod(m) => m.clone(),
+//             },
+//             id,
+//         }
+//     }
+//
+//     pub fn pkg(&self) -> &PkgId {
+//         &self.pkg
+//     }
+//
+//     pub fn quals(&self) -> &[String] {
+//         &self.quals
+//     }
+//
+//     pub fn id(&self) -> &str {
+//         &self.id
+//     }
+// }
+//
+// impl ValId {
+//     pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
+//         Self { pkg, quals, id }
+//     }
+//
+//     pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
+//         Self {
+//             pkg,
+//             quals: match modpath {
+//                 ModPath::Main => vec![],
+//                 ModPath::Lib => vec![],
+//                 ModPath::Mod(m) => m.clone(),
+//             },
+//             id,
+//         }
+//     }
+//
+//     pub fn pkg(&self) -> &PkgId {
+//         &self.pkg
+//     }
+//
+//     pub fn quals(&self) -> &[String] {
+//         &self.quals
+//     }
+//
+//     pub fn id(&self) -> &str {
+//         &self.id
+//     }
+// }
 
 impl GenTyId {
     pub fn new(id: usize) -> Self {

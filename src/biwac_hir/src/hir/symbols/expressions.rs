@@ -1,7 +1,7 @@
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
-use biwac_span::Span;
+use biwac_span::{Span, TyDefId, ValDefId};
 
-use crate::{Ident, ImplValId, LocVarId, Stmt, Ty, TyId, ValId};
+use crate::{Ident, ImplValId, LocVarId, Stmt, Ty};
 
 // ExprId
 // function local expression id
@@ -73,7 +73,7 @@ pub struct Variable {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VarIdKind {
     Local(LocVarId),
-    Global(ValId),
+    Global(ValDefId),
 }
 
 impl Primary {
@@ -112,7 +112,7 @@ impl Literal {
 
 #[derive(Debug, Clone)]
 pub struct StructLiteral {
-    pub tid: TyId,
+    pub tid: TyDefId,
     pub members: Vec<(Ident, Expr)>,
     pub span: Span,
 }
@@ -124,10 +124,10 @@ pub struct FnCall {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Callee {
     Var(LocVarId),
-    Fn(ValId),
+    Fn(ValDefId),
     Assoc(AssocCallee),
 }
 
@@ -151,10 +151,10 @@ pub enum Callee {
 //  ^^^  ^^^
 //  ty   assoc
 // ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct AssocCallee {
     pub ty: Ty,
-    pub assoc: String, // TODO: Ident
+    pub assoc: Ident,
     pub impl_vid: ImplValId,
 }
 
