@@ -54,10 +54,10 @@ impl PackageLocalDefId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TyDefId(DefId);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValDefId(DefId);
 
 #[derive(Debug)]
@@ -68,13 +68,25 @@ pub enum DefIdKind {
 }
 
 impl TyDefId {
+    #[inline]
     pub fn new(def_id: DefId) -> Self {
         Self(def_id)
+    }
+
+    #[inline]
+    pub fn pkg(&self) -> PackageId {
+        self.0.pkg
     }
 }
 
 impl ValDefId {
+    #[inline]
     pub fn new(def_id: DefId) -> Self {
         Self(def_id)
+    }
+
+    #[inline]
+    pub fn pkg(&self) -> PackageId {
+        self.0.pkg
     }
 }

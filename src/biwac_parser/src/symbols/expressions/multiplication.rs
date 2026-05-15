@@ -2,21 +2,18 @@ use biwac_lexer::TkKind;
 
 use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
-use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ParseError, TokenStream};
 
 impl<'t, 'src> TokenStream<'t, 'src> {
-    pub(super) fn consume_multiplication_expression(
-        &mut self,
-        ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError<'src>> {
-        let left = self.consume_unary_expression(ctx)?;
+    pub(super) fn consume_multiplication_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
+        let left = self.consume_unary_expression()?;
 
         if let Some(t) = self.peek() {
             match t.kind {
                 TkKind::MarkAsterisk => {
                     self.next();
 
-                    let right = self.consume_multiplication_expression(ctx)?;
+                    let right = self.consume_multiplication_expression()?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Mul,
@@ -27,7 +24,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 TkKind::MarkSlash => {
                     self.next();
 
-                    let right = self.consume_multiplication_expression(ctx)?;
+                    let right = self.consume_multiplication_expression()?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Div,
@@ -38,7 +35,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 TkKind::MarkPercent => {
                     self.next();
 
-                    let right = self.consume_multiplication_expression(ctx)?;
+                    let right = self.consume_multiplication_expression()?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Mod,

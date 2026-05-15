@@ -9,13 +9,10 @@ pub mod unary;
 
 use biwac_ast::Exprs;
 
-use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ParseError, TokenStream};
 
 impl<'t, 'src> TokenStream<'t, 'src> {
-    pub(crate) fn consume_expression(
-        &mut self,
-        ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError<'src>> {
-        self.consume_equality_expression(ctx)
+    pub(crate) fn consume_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
+        self.consume_equality_expression()
     }
 }

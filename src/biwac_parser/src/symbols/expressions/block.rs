@@ -1,15 +1,12 @@
-use biwac_base::Span;
 use biwac_lexer::TkKindName;
+use biwac_span::Span;
 
 use biwac_ast::{BlockExpr, Stmt};
 
-use crate::{ExprOrStmt, ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ExprOrStmt, ParseError, TokenStream};
 
 impl<'t, 'src> TokenStream<'t, 'src> {
-    pub(crate) fn consume_block_expression(
-        &mut self,
-        ctx: &FnParseCtx,
-    ) -> Result<BlockExpr, ParseError<'src>> {
+    pub(crate) fn consume_block_expression(&mut self) -> Result<BlockExpr, ParseError<'src>> {
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLBrace])?
             .span
@@ -18,7 +15,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         let mut stmts: Vec<Stmt> = vec![];
 
         loop {
-            match self.consume_expression_or_statement(ctx)? {
+            match self.consume_expression_or_statement()? {
                 ExprOrStmt::Expr(expr) => {
                     let end = self
                         .must_consume_next(vec![TkKindName::MarkRBrace])?

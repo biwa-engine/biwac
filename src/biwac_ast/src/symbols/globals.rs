@@ -109,14 +109,18 @@ pub struct ArgDeclList {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodArgDeclList {
+    pub self_span: Span,
+    pub args: Vec<ArgDecl>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub struct MethodDef {
     pub def_id: OnceCell<ValDefId>,
-    pub impl_genargs: Vec<Ident>,
-    pub self_typ: TypRepr,
-    pub self_ident: Ident,
     pub id: Ident,
-    pub args: ArgDeclList, // 第一引数がselfであるのは自明なので含まない
+    pub args: MethodArgDeclList, // 第一引数がselfであるのは自明なので含まない
     pub stmts: Vec<Stmt>,
     pub expr: Option<Exprs>,
     pub rtype: RetTypRepr,
@@ -128,11 +132,8 @@ pub struct MethodDef {
 #[derive(Debug, Clone)]
 pub struct NativeMethodDef {
     pub def_id: OnceCell<ValDefId>,
-    pub impl_genargs: Vec<Ident>,
-    pub self_typ: TypRepr,
-    pub self_ident: Ident,
     pub id: Ident,
-    pub args: ArgDeclList, // 第一引数がselfであるのは自明なので含まない
+    pub args: MethodArgDeclList, // 第一引数がselfであるのは自明なので含まない
     pub rtype: RetTypRepr,
     pub native: String,
     pub native_span: Span,
@@ -143,9 +144,11 @@ pub struct NativeMethodDef {
 
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
-    pub typ_fns: Vec<FnDef>,
+    pub assoc_fns: Vec<FnDef>,
     pub methods: Vec<MethodDef>,
-    pub genargs_decl: Vec<Ident>,
+    pub native_assoc_fns: Vec<NativeFnDef>,
+    pub native_methods: Vec<NativeMethodDef>,
+    pub genargs_decl: Option<GenArgsDecl>,
     pub self_typ: TypRepr,
 }
 

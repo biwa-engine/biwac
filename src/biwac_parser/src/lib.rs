@@ -7,26 +7,33 @@ pub mod types;
 mod tests;
 
 use biwac_ast::{AbsolutePathHeader, Ident, Path};
-use biwac_base::{ModId, ModPath};
+use biwac_base::{IdentInterner, ModId, ModPath};
 use biwac_lexer::{TkKind, TkKindName, Token};
 
 pub(crate) use symbols::statements::ExprOrStmt;
 
 pub use error::ParseError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Parser<'src> {
     mod_id: ModId,
     modpath: ModPath,
     tokens: Vec<Token<'src>>,
+    interner: &'src mut IdentInterner,
 }
 
 impl<'src> Parser<'src> {
-    pub fn new(mod_id: ModId, modpath: ModPath, tokens: Vec<Token<'src>>) -> Self {
+    pub fn new(
+        mod_id: ModId,
+        modpath: ModPath,
+        tokens: Vec<Token<'src>>,
+        interner: &'src mut IdentInterner,
+    ) -> Self {
         Self {
             mod_id,
             modpath,
             tokens,
+            interner,
         }
     }
 }
@@ -35,14 +42,20 @@ impl<'src> Parser<'src> {
 pub(crate) struct TokenStream<'t, 'src> {
     mod_id: ModId,
     tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
+    interner: &'src mut IdentInterner,
 }
 
 impl<'t, 'src> TokenStream<'t, 'src> {
     pub(crate) fn new(
         mod_id: ModId,
         tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
+        interner: &'src mut IdentInterner,
     ) -> Self {
-        Self { mod_id, tokens }
+        Self {
+            mod_id,
+            tokens,
+            interner,
+        }
     }
 
     pub(crate) fn next(&mut self) -> Option<&Token<'src>> {
@@ -128,7 +141,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
         if let TkKind::Ident(id) = &t.kind {
             Ok(Ident {
-                id: id.to_string(),
+                id: *id,
                 span: t.span.clone(),
             })
         } else {

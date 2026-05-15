@@ -67,11 +67,15 @@ pub enum RetTypRepr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypReprVal {
     Primitive(PrimTyp),
-    Defined(DefTyp),
+
     // NOTE:
     // `T`のようなジェネリクス型も、
     // Path が1つの <identifier> のみのDefTypとしてパースされる
     // (パース時にはその意味論は決定できない)
+    Defined(DefTyp),
+
+    // `Self` type in impl-block.
+    SelfTyp,
 }
 
 /// Primitive(built-in) types like `Int`, `Uint`, `Float`, `Bool` ...

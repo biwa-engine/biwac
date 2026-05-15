@@ -1,19 +1,16 @@
-use biwac_base::Span;
 use biwac_lexer::{TkKind, TkKindName};
+use biwac_span::Span;
 
 use biwac_ast::{
     AbsolutePathHeader, BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Path, Primary,
     StringLiteral, StructLiteral, Variable,
 };
 
-use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ParseError, TokenStream};
 
 // Primary = Literal | Identifier ( "(" ")" )? | "(" Exprs ")"
 impl<'t, 'src> TokenStream<'t, 'src> {
-    pub(super) fn consume_primary_expression(
-        &mut self,
-        ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError<'src>> {
+    pub(super) fn consume_primary_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
         let mod_id = self.mod_id;
 
         // Primary = Literal | "(" Expr ")"
@@ -62,11 +59,10 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             TkKind::Ident(_) => {
                 let begin = t.span.clone();
                 let path = self.consume_qualified_identifier()?;
-                let qualed_id = self.consume_qualified_identifier()?;
 
                 if let Some(t2) = self.peek() {
                     if let TkKind::MarkLPare = t2.kind {
-                        let (args, span) = self.consume_arguments(ctx)?;
+                        let (args, span) = self.consume_arguments()?;
 
                         Ok(Exprs::Primary(Primary::FnCall(FnCall {
                             path,
@@ -74,7 +70,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                             span: Span::merge(&begin, &span),
                         })))
                     } else if let TkKind::MarkLBrace = t2.kind {
-                        let (members, span) = self.consume_struct_members(ctx)?;
+                        let (members, span) = self.consume_struct_members()?;
 
                         Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
                             StructLiteral {
@@ -93,99 +89,68 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             TkKind::KwSelfTyp => {
                 let begin = t.span.clone();
 
-                if let Some(self_typ) = &ctx.self_typ {
-                    // "Self" (
-                    //   ( "::" <identifier> "(" ... ")" ) |
-                    //   ( "{" ... "}" )?
-                    // )
-                    self.next();
+                // "Self" (
+                //   ( "::" <identifier> "(" ... ")" ) |
+                //   ( "{" ... "}" )?
+                // )
+                self.next();
 
-                    if let Some(t) = self.peek().copied() {
-                        match t.kind {
-                            TkKind::MarkDoubleColon => {
-                                self.next();
+                if let Some(t) = self.peek().copied() {
+                    match t.kind {
+                        TkKind::MarkDoubleColon => {
+                            self.next();
 
-                                let ident = self.consume_identifier()?;
+                            let ident = self.consume_identifier()?;
 
-                                let (args, span) = self.consume_arguments(ctx)?;
+                            let (args, span) = self.consume_arguments()?;
 
-                                Ok(Exprs::Primary(Primary::FnCall(FnCall {
+                            Ok(Exprs::Primary(Primary::FnCall(FnCall {
+                                path: Path::new(
+                                    Some(AbsolutePathHeader::SelfTyp(begin.clone())),
+                                    vec![ident.into()],
+                                ),
+                                args,
+                                span: Span::merge(&begin, &span),
+                            })))
+                        }
+                        TkKind::MarkLBrace => {
+                            let (members, span) = self.consume_struct_members()?;
+
+                            Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
+                                StructLiteral {
+                                    members,
+                                    span: Span::merge(&begin, &span),
                                     path: Path::new(
                                         Some(AbsolutePathHeader::SelfTyp(begin.clone())),
-                                        vec![ident.into()],
+                                        Vec::new(),
                                     ),
-                                    args,
-                                    span: Span::merge(&begin, &span),
-                                })))
-                            }
-                            TkKind::MarkLBrace => {
-                                let (members, span) = self.consume_struct_members(ctx)?;
-
-                                Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
-                                    StructLiteral {
-                                        members,
-                                        span: Span::merge(&begin, &span),
-                                        path: Path::new(
-                                            Some(AbsolutePathHeader::SelfTyp(begin.clone())),
-                                            Vec::new(),
-                                        ),
-                                    },
-                                ))))
-                            }
-                            _ => Err(ParseError::InvalidToken {
-                                expecteds: vec![
-                                    TkKindName::MarkDoubleColon,
-                                    TkKindName::MarkLBrace,
-                                ],
-                                found: t.clone(),
-                            }),
+                                },
+                            ))))
                         }
-                    } else {
-                        Err(ParseError::InvalidEOF {
-                            mod_id,
+                        _ => Err(ParseError::InvalidToken {
                             expecteds: vec![TkKindName::MarkDoubleColon, TkKindName::MarkLBrace],
-                        })
+                            found: t.clone(),
+                        }),
                     }
                 } else {
-                    Err(ParseError::InvalidToken {
-                        expecteds: vec![
-                            TkKindName::Ident,
-                            TkKindName::LiteralInteger,
-                            TkKindName::LiteralString,
-                            TkKindName::KwBoolTrue,
-                            TkKindName::KwBoolFalse,
-                            TkKindName::MarkLPare,
-                        ],
-                        found: t.clone(),
+                    Err(ParseError::InvalidEOF {
+                        mod_id,
+                        expecteds: vec![TkKindName::MarkDoubleColon, TkKindName::MarkLBrace],
                     })
                 }
             }
             TkKind::KwSelfVar => {
                 let self_span = t.span.clone();
 
-                if ctx.is_method {
-                    // "self"
-                    self.next();
-                    Ok(Exprs::Primary(Primary::Variable(Variable::SelfVar(
-                        self_span,
-                    ))))
-                } else {
-                    Err(ParseError::InvalidToken {
-                        expecteds: vec![
-                            TkKindName::Ident,
-                            TkKindName::LiteralInteger,
-                            TkKindName::LiteralString,
-                            TkKindName::KwBoolTrue,
-                            TkKindName::KwBoolFalse,
-                            TkKindName::MarkLPare,
-                        ],
-                        found: t.clone(),
-                    })
-                }
+                // "self"
+                self.next();
+                Ok(Exprs::Primary(Primary::Variable(Variable::SelfVar(
+                    self_span,
+                ))))
             }
             TkKind::MarkLPare => {
                 self.next();
-                let expr = self.consume_expression(ctx)?;
+                let expr = self.consume_expression()?;
 
                 let _ = self.must_consume_next(vec![TkKindName::MarkRPare])?;
 
@@ -205,10 +170,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         }
     }
 
-    pub(super) fn consume_arguments(
-        &mut self,
-        ctx: &FnParseCtx,
-    ) -> Result<(Vec<Exprs>, Span), ParseError<'src>> {
+    pub(super) fn consume_arguments(&mut self) -> Result<(Vec<Exprs>, Span), ParseError<'src>> {
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLPare])?
             .span
@@ -225,7 +187,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 self.next();
                 break;
             } else {
-                let expr = self.consume_expression(ctx)?;
+                let expr = self.consume_expression()?;
                 args.push(expr);
 
                 if let Some(t) = self.peek() {
@@ -254,7 +216,6 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
     fn consume_struct_members(
         &mut self,
-        ctx: &FnParseCtx,
     ) -> Result<(Vec<(Ident, Box<Exprs>)>, Span), ParseError<'src>> {
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLBrace])?
@@ -273,7 +234,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             } else {
                 let member = self.consume_identifier()?;
                 let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
-                let expr = self.consume_expression(ctx)?;
+                let expr = self.consume_expression()?;
 
                 members.push((member, Box::new(expr)));
 

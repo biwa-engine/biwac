@@ -2,14 +2,11 @@ use biwac_lexer::TkKind;
 
 use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
-use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ParseError, TokenStream};
 
 impl<'t, 'src> TokenStream<'t, 'src> {
-    pub(super) fn consume_equality_expression(
-        &mut self,
-        ctx: &FnParseCtx,
-    ) -> Result<Exprs, ParseError<'src>> {
-        let left = self.consume_relational_expression(ctx)?;
+    pub(super) fn consume_equality_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
+        let left = self.consume_relational_expression()?;
 
         if let Some(t) = self.peek() {
             match t.kind {
@@ -21,7 +18,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     // (Bool, Bool) -> Bool
                     // つまり、戻り値と引数の型が一致しているため、
                     // 再帰的に適用され得る
-                    let right = self.consume_equality_expression(ctx)?;
+                    let right = self.consume_equality_expression()?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Eq,
@@ -32,7 +29,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 TkKind::MarkNotEq => {
                     self.next();
 
-                    let right = self.consume_equality_expression(ctx)?;
+                    let right = self.consume_equality_expression()?;
 
                     Ok(Exprs::Binary(BinaryExpr {
                         op: BinOperator::Ne,

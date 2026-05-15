@@ -1,4 +1,5 @@
-use biwac_base::{ModId, ModPath, Span};
+use biwac_base::{IdentInterner, ModId, ModPath};
+use biwac_span::Span;
 
 use biwac_ast::{
     Exprs, Globals, Ident, IntegerLiteral, Literal, Primary, Stmt, StringLiteral, TypDecl, VarDecl,
@@ -8,6 +9,7 @@ use biwac_ast::{
 fn test1() {
     let modpath = ModPath::Main;
     let mod_id = ModId::new(0);
+    let mut interner = IdentInterner::new();
 
     // NOTE: Rustの生文字列の扱いでは以下の場合
     // 空文字列の0行目が含まれ、fnは1行目となるため注意
@@ -19,9 +21,9 @@ fn foo() {
 }
 "#;
 
-    let tokens = biwac_lexer::lex(mod_id, src).unwrap();
+    let tokens = biwac_lexer::lex(&mut interner, mod_id, src).unwrap();
 
-    let module = crate::Parser::new(mod_id, modpath, tokens)
+    let module = crate::Parser::new(mod_id, modpath, tokens, &mut interner)
         .try_parse()
         .unwrap();
 
@@ -38,7 +40,7 @@ fn foo() {
         &Stmt::VarDecl(VarDecl {
             typ: TypDecl::Any,
             id: Ident {
-                id: "x".to_string(),
+                id: interner.get_or_insert("x"),
                 span: Span::new(mod_id, 20, 21)
             },
             init: Exprs::Primary(Primary::Literal(Literal::Integer(IntegerLiteral {
@@ -53,7 +55,7 @@ fn foo() {
         &Stmt::VarDecl(VarDecl {
             typ: TypDecl::Any,
             id: Ident {
-                id: "str".to_string(),
+                id: interner.get_or_insert("str"),
                 span: Span::new(mod_id, 52, 55)
             },
             init: Exprs::Primary(Primary::Literal(Literal::String(StringLiteral {

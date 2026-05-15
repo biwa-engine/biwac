@@ -22,17 +22,7 @@ fn foo() {
 
     assert_eq!(TkKind::KwFn, tokens[0].kind);
 
-    match &tokens[1].kind {
-        TkKind::Ident(interned) => match interner.get_str(interned) {
-            Some("foo") => {}
-            x => {
-                panic!("{x:?}");
-            }
-        },
-        x => {
-            panic!("{x:?}");
-        }
-    }
+    assert_eq!(TkKind::Ident(interner.get_or_insert("foo")), tokens[1].kind);
 
     assert_eq!(Span::new(modu, 4, 7,), tokens[1].span);
 
@@ -44,17 +34,7 @@ fn foo() {
 
     assert_eq!(TkKind::KwLet, tokens[5].kind);
 
-    match &tokens[6].kind {
-        TkKind::Ident(interned) => match interner.get_str(interned) {
-            Some("x") => {}
-            x => {
-                panic!("{x:?}");
-            }
-        },
-        x => {
-            panic!("{x:?}");
-        }
-    }
+    assert_eq!(TkKind::Ident(interner.get_or_insert("x")), tokens[6].kind);
 
     assert_eq!(Span::new(modu, 20, 21,), tokens[6].span);
 
@@ -67,17 +47,10 @@ fn foo() {
 
     assert_eq!(TkKind::KwLet, tokens[10].kind);
 
-    match &tokens[11].kind {
-        TkKind::Ident(interned) => match interner.get_str(interned) {
-            Some("str") => {}
-            x => {
-                panic!("{x:?}");
-            }
-        },
-        x => {
-            panic!("{x:?}");
-        }
-    }
+    assert_eq!(
+        TkKind::Ident(interner.get_or_insert("str")),
+        tokens[11].kind
+    );
     assert_eq!(Span::new(modu, 52, 55), tokens[11].span);
 
     assert_eq!(TkKind::MarkAssign, tokens[12].kind);

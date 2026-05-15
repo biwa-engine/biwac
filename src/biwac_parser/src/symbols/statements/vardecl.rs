@@ -1,17 +1,15 @@
-use biwac_base::Span;
 use biwac_lexer::TkKindName;
+use biwac_span::Span;
 
 use biwac_ast::{TypDecl, VarDecl};
 
-use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ParseError, TokenStream};
 
 impl<'t, 'src> TokenStream<'t, 'src> {
     // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"
-    // グローバル変数の初期化はctx None
     // グローバル変数に束縛できる値は限られる。リテラルだけでconstのみ許容でも良い
     pub(crate) fn consume_variable_declaration_statment(
         &mut self,
-        ctx: Option<&FnParseCtx>,
     ) -> Result<VarDecl, ParseError<'src>> {
         // "let"
         let begin = self
@@ -22,7 +20,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         let id = self.consume_identifier()?;
 
         // (":" <type-representation>)?
-        let typ = if let Some(t) = self.opt_consume_type_annotation(&None)? {
+        let typ = if let Some(t) = self.opt_consume_type_annotation()? {
             TypDecl::Typ(t)
         } else {
             TypDecl::Any
@@ -34,8 +32,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
         let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
 
         // <expression>
-        let init =
-            self.consume_expression(ctx.expect("global variable parse not supported yet"))?;
+        let init = self.consume_expression()?;
 
         // ";"
         let end = self.must_consume_semicolon()?.span.clone();

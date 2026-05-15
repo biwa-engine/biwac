@@ -8,16 +8,20 @@ use crate::{ParseError, Parser, TokenStream};
 
 impl<'src> Parser<'src> {
     pub fn try_parse(self) -> Result<ModAst, ParseError<'src>> {
-        let mut stream = TokenStream::new(self.mod_id, self.tokens.iter().peekable());
+        let mut stream =
+            TokenStream::new(self.mod_id, self.tokens.iter().peekable(), self.interner);
 
         let mut globals = vec![];
 
         loop {
-            let gs = stream.opt_consume_global_symbols()?;
-            if gs.is_empty() {
-                break;
-            } else {
-                globals.extend(gs);
+            let g = stream.opt_consume_global_symbols()?;
+            match g {
+                Some(g) => {
+                    globals.push(g);
+                }
+                None => {
+                    break;
+                }
             }
         }
 

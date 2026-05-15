@@ -11,8 +11,9 @@ pub use symbols::{
         UnaryExpr, Variable,
     },
     globals::{
-        ArgDecl, ArgDeclList, FnDef, Globals, ImplBlock, ImportDecl, MethodDef, NativeCode,
-        NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, StructDef, TypeAlias, TypeDef,
+        ArgDecl, ArgDeclList, FnDef, Globals, ImplBlock, ImportDecl, MethodArgDeclList, MethodDef,
+        NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, StructDef,
+        TypeAlias, TypeDef,
     },
     novel::{NovelBlockStmt, NovelEndSceneStmt, NovelIfStmt, NovelMessage, NovelStmt, NovelWait},
     statements::{AssignStmt, BlockStmt, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl, WhileStmt},

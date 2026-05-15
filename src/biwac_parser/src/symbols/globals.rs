@@ -1,105 +1,73 @@
-use biwac_base::Span;
+use std::cell::OnceCell;
+
 use biwac_lexer::{TkKindName, token::TkKind};
+use biwac_span::Span;
 
 use biwac_ast::{
-    ArgDecl, ArgDeclList, CompilerFlag, FnDef, Globals, Ident, ImplCtx, ImportDecl, MethodDef,
-    NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, RetTypRepr, StructDef,
-    TypRepr, TypeAlias, TypeDef,
+    ArgDecl, ArgDeclList, CompilerFlag, FnDef, Globals, Ident, ImplBlock, ImportDecl,
+    MethodArgDeclList, MethodDef, NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias,
+    NovelScene, RetTypRepr, StructDef, TypeAlias, TypeDef,
 };
 
 use crate::{ExprOrStmt, ParseError, TokenStream};
 
-// FnParseCtx
-// 関数内のパースをするときのコンテキスト
-#[derive(Debug, Clone)]
-pub(crate) struct FnParseCtx {
-    // implブロック内の関連関数やメソッドのとき、Self型が何の型か
-    // パース時点で型を決定してしまう
-    // Noneのとき、Selfキーワードは出現するべきでないため、エラー
-    pub(crate) self_typ: Option<TypRepr>,
-    // is_method trueならselfキーワードを使える
-    pub(crate) is_method: bool,
+enum FnOrMethod<F, M> {
+    Fn(F),
+    Method(M),
+}
+
+enum CodeOrNative<C, N> {
+    Code(C),
+    Native(N),
 }
 
 impl<'t, 'src> TokenStream<'t, 'src> {
-    fn consume_function_or_method_definition(
+    fn consume_return_type(
+        &mut self,
+        arg_decl_span: &Span,
+    ) -> Result<RetTypRepr, ParseError<'src>> {
+        if self
+            .consume_next_if_match(vec![TkKindName::MarkArrow])
+            .is_some()
+        {
+            Ok(RetTypRepr::Typ(self.consume_type_representaion()?))
+        } else {
+            Ok(RetTypRepr::Void(Span::new(
+                arg_decl_span.module(),
+                arg_decl_span.end(),
+                arg_decl_span.end(),
+            )))
+        }
+    }
+
+    fn consume_function(
         &mut self,
         flags: Vec<CompilerFlag>,
-        impl_ctx: Option<ImplCtx>,
-    ) -> Result<Globals, ParseError<'src>> {
+    ) -> Result<CodeOrNative<FnDef, NativeFnDef>, ParseError<'src>> {
         let begin = self.must_consume_next(vec![TkKindName::KwFn])?.span.clone();
 
         let id = self.consume_identifier()?;
 
         let genargs = self.opt_consume_generic_argument_declaration()?;
 
-        // 実装対象の型typがSomeならメソッドである可能性がある
-        let (args, self_ident) = if let Some(impl_ctx) = &impl_ctx {
-            self.consume_method_argsdec(&Some(impl_ctx.self_typ.clone()))?
-        } else {
-            (self.consume_argsdec(&None)?, None)
-        };
+        let interned_str_native = self.interner.get_or_insert("native");
 
-        let rtype =
-            if self
-                .consume_next_if_match(vec![TkKindName::MarkArrow])
-                .is_some()
-            {
-                RetTypRepr::Typ(self.consume_type_representaion(
-                    &impl_ctx.as_ref().map(|ctx| ctx.self_typ.clone()),
-                )?)
-            } else {
-                RetTypRepr::Void(Span::new(
-                    args.span.module(),
-                    args.span.end(),
-                    args.span.end(),
-                ))
-            };
-
-        if flags.iter().any(|f| &f.flag.id == "native") {
+        let args = self.consume_argsdec()?;
+        let rtype = self.consume_return_type(&args.span)?;
+        if flags.iter().any(|f| f.flag.id == interned_str_native) {
             if let Some(t) = self.next() {
                 if let TkKind::DslLiteral(str) = t.kind {
-                    if let Some(impl_ctx) = impl_ctx {
-                        if let Some(self_ident) = self_ident {
-                            Ok(Globals::NativeMethodDef(NativeMethodDef {
-                                impl_genargs: impl_ctx.genargs,
-                                self_typ: impl_ctx.self_typ,
-                                self_ident,
-                                id,
-                                args,
-                                rtype,
-                                native: str.to_string(),
-                                native_span: t.span.clone(),
-                                span: Span::merge(&begin, &t.span),
-                                flags,
-                                genargs,
-                            }))
-                        } else {
-                            Ok(Globals::NativeFnDef(NativeFnDef {
-                                impl_ctx: Some(impl_ctx),
-                                id,
-                                args,
-                                native: str.to_string(),
-                                rtype,
-                                span: Span::merge(&begin, &t.span),
-                                native_span: t.span.clone(),
-                                flags,
-                                genargs,
-                            }))
-                        }
-                    } else {
-                        Ok(Globals::NativeFnDef(NativeFnDef {
-                            impl_ctx: None,
-                            id,
-                            args,
-                            native: str.to_string(),
-                            rtype,
-                            span: Span::merge(&begin, &t.span),
-                            native_span: t.span.clone(),
-                            flags,
-                            genargs,
-                        }))
-                    }
+                    Ok(CodeOrNative::Native(NativeFnDef {
+                        id,
+                        def_id: OnceCell::new(),
+                        args,
+                        native: str.to_string(),
+                        rtype,
+                        span: Span::merge(&begin, &t.span),
+                        native_span: t.span.clone(),
+                        flags,
+                        genargs,
+                    }))
                 } else {
                     Err(ParseError::InvalidToken {
                         expecteds: vec![TkKindName::DslLiteral],
@@ -113,52 +81,146 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 })
             }
         } else {
-            // Self型を表すtypをコンテキストとして渡してパースする
-            let ctx = FnParseCtx {
-                self_typ: impl_ctx.as_ref().map(|ctx| ctx.self_typ.clone()),
-                is_method: self_ident.is_some(),
-            };
-            let (stmts, expr, end) = match self.consume_block_expression_or_statement(&ctx)? {
+            let (stmts, expr, end) = match self.consume_block_expression_or_statement()? {
                 ExprOrStmt::Expr(block_expr) => {
                     (block_expr.stmts, Some(*block_expr.expr), block_expr.span)
                 }
                 ExprOrStmt::Stmt(block_stmt) => (block_stmt.stmts, None, block_stmt.span),
             };
 
-            if let Some(self_ident) = self_ident {
-                // SAFETY: self_ident Someになるのはimpl_ctx Someのときだけ
-                let impl_ctx = impl_ctx.expect("compiler bug: not a method");
+            Ok(CodeOrNative::Code(FnDef {
+                id,
+                def_id: OnceCell::new(),
+                args,
+                stmts,
+                expr,
+                rtype,
+                span: Span::merge(&begin, &end),
+                flags,
+                genargs,
+            }))
+        }
+    }
 
-                Ok(Globals::MethodDef(MethodDef {
-                    impl_genargs: impl_ctx.genargs,
-                    self_typ: impl_ctx.self_typ,
-                    self_ident,
-                    id,
-                    args,
-                    stmts,
-                    expr,
-                    rtype,
-                    span: Span::merge(&begin, &end),
-                    flags,
-                    genargs,
-                }))
-            } else {
-                Ok(Globals::FnDef(FnDef {
-                    impl_ctx,
-                    id,
-                    args,
-                    stmts,
-                    expr,
-                    rtype,
-                    span: Span::merge(&begin, &end),
-                    flags,
-                    genargs,
-                }))
+    fn consume_function_or_method_definition(
+        &mut self,
+        flags: Vec<CompilerFlag>,
+    ) -> Result<
+        FnOrMethod<CodeOrNative<FnDef, NativeFnDef>, CodeOrNative<MethodDef, NativeMethodDef>>,
+        ParseError<'src>,
+    > {
+        let begin = self.must_consume_next(vec![TkKindName::KwFn])?.span.clone();
+
+        let id = self.consume_identifier()?;
+
+        let genargs = self.opt_consume_generic_argument_declaration()?;
+
+        let interned_str_native = self.interner.get_or_insert("native");
+
+        match self.consume_method_argsdec()? {
+            FnOrMethod::Fn(args) => {
+                let rtype = self.consume_return_type(&args.span)?;
+                if flags.iter().any(|f| f.flag.id == interned_str_native) {
+                    if let Some(t) = self.next() {
+                        if let TkKind::DslLiteral(str) = t.kind {
+                            Ok(FnOrMethod::Fn(CodeOrNative::Native(NativeFnDef {
+                                id,
+                                def_id: OnceCell::new(),
+                                args,
+                                native: str.to_string(),
+                                rtype,
+                                span: Span::merge(&begin, &t.span),
+                                native_span: t.span.clone(),
+                                flags,
+                                genargs,
+                            })))
+                        } else {
+                            Err(ParseError::InvalidToken {
+                                expecteds: vec![TkKindName::DslLiteral],
+                                found: t.clone(),
+                            })
+                        }
+                    } else {
+                        Err(ParseError::InvalidEOF {
+                            mod_id: self.mod_id,
+                            expecteds: vec![TkKindName::DslLiteral],
+                        })
+                    }
+                } else {
+                    let (stmts, expr, end) = match self.consume_block_expression_or_statement()? {
+                        ExprOrStmt::Expr(block_expr) => {
+                            (block_expr.stmts, Some(*block_expr.expr), block_expr.span)
+                        }
+                        ExprOrStmt::Stmt(block_stmt) => (block_stmt.stmts, None, block_stmt.span),
+                    };
+
+                    Ok(FnOrMethod::Fn(CodeOrNative::Code(FnDef {
+                        id,
+                        def_id: OnceCell::new(),
+                        args,
+                        stmts,
+                        expr,
+                        rtype,
+                        span: Span::merge(&begin, &end),
+                        flags,
+                        genargs,
+                    })))
+                }
+            }
+            FnOrMethod::Method(args) => {
+                let rtype = self.consume_return_type(&args.span)?;
+                if flags.iter().any(|f| f.flag.id == interned_str_native) {
+                    if let Some(t) = self.next() {
+                        if let TkKind::DslLiteral(str) = t.kind {
+                            Ok(FnOrMethod::Method(CodeOrNative::Native(NativeMethodDef {
+                                id,
+                                def_id: OnceCell::new(),
+                                args,
+                                rtype,
+                                native: str.to_string(),
+                                native_span: t.span.clone(),
+                                span: Span::merge(&begin, &t.span),
+                                flags,
+                                genargs,
+                            })))
+                        } else {
+                            Err(ParseError::InvalidToken {
+                                expecteds: vec![TkKindName::DslLiteral],
+                                found: t.clone(),
+                            })
+                        }
+                    } else {
+                        Err(ParseError::InvalidEOF {
+                            mod_id: self.mod_id,
+                            expecteds: vec![TkKindName::DslLiteral],
+                        })
+                    }
+                } else {
+                    let (stmts, expr, end) = match self.consume_block_expression_or_statement()? {
+                        ExprOrStmt::Expr(block_expr) => {
+                            (block_expr.stmts, Some(*block_expr.expr), block_expr.span)
+                        }
+                        ExprOrStmt::Stmt(block_stmt) => (block_stmt.stmts, None, block_stmt.span),
+                    };
+                    Ok(FnOrMethod::Method(CodeOrNative::Code(MethodDef {
+                        id,
+                        def_id: OnceCell::new(),
+                        args,
+                        stmts,
+                        expr,
+                        rtype,
+                        span: Span::merge(&begin, &end),
+                        flags,
+                        genargs,
+                    })))
+                }
             }
         }
     }
 
-    pub(super) fn opt_consume_global_symbols(&mut self) -> Result<Vec<Globals>, ParseError<'src>> {
+    pub(super) fn opt_consume_global_symbols(
+        &mut self,
+    ) -> Result<Option<Globals>, ParseError<'src>> {
         let mod_id = self.mod_id;
         let flags = self.consume_compiler_flags()?;
 
@@ -168,19 +230,20 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     // "import" <qualified-identifier> ";"
                     let begin = t.span.clone();
                     self.next();
-                    let qualid = self.consume_qualified_identifier()?;
+                    let path = self.consume_qualified_identifier()?;
 
                     // ";"
                     let end = self.must_consume_semicolon()?.span.clone();
 
-                    Ok(vec![Globals::Import(ImportDecl {
-                        qualid,
+                    Ok(Some(Globals::Import(ImportDecl {
+                        path,
                         span: Span::merge(&begin, &end),
-                    })])
+                    })))
                 }
-                TkKind::KwFn => Ok(vec![
-                    self.consume_function_or_method_definition(flags, None)?,
-                ]),
+                TkKind::KwFn => Ok(match self.consume_function(flags)? {
+                    CodeOrNative::Code(f) => Some(Globals::FnDef(f)),
+                    CodeOrNative::Native(f) => Some(Globals::NativeFnDef(f)),
+                }),
                 TkKind::KwStruct => {
                     self.next();
 
@@ -201,11 +264,12 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         if let TkKind::MarkRBrace = t.kind {
                             self.next();
 
-                            return Ok(vec![Globals::TypeDef(TypeDef::Struct(StructDef {
+                            return Ok(Some(Globals::TypeDef(TypeDef::Struct(StructDef {
                                 id,
+                                def_id: OnceCell::new(),
                                 members,
                                 genargs,
-                            }))]);
+                            }))));
                         } else {
                             let t = self
                                 .next()
@@ -214,14 +278,14 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                                     expecteds: vec![TkKindName::Ident],
                                 })?
                                 .to_owned();
-                            if let TkKind::Ident(memberid) = &t.kind {
+                            if let TkKind::Ident(member_id) = &t.kind {
                                 let t = t.clone();
                                 // WARN: really?
-                                let typ = self.must_consume_type_annotation(&None)?;
+                                let typ = self.must_consume_type_annotation()?;
 
                                 members.push((
                                     Ident {
-                                        id: memberid.to_string(),
+                                        id: *member_id,
                                         span: t.span,
                                     },
                                     typ,
@@ -234,13 +298,14 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                                 if let TkKind::MarkComma = t.kind {
                                     continue;
                                 } else if let TkKind::MarkRBrace = t.kind {
-                                    return Ok(vec![Globals::TypeDef(TypeDef::Struct(
+                                    return Ok(Some(Globals::TypeDef(TypeDef::Struct(
                                         StructDef {
                                             id,
+                                            def_id: OnceCell::new(),
                                             members,
                                             genargs,
                                         },
-                                    ))]);
+                                    ))));
                                 }
                             } else {
                                 return Err(ParseError::InvalidToken {
@@ -252,7 +317,8 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     }
                 }
                 TkKind::KwType => {
-                    if flags.iter().any(|f| &f.flag.id == "native") {
+                    let interned_str_native = self.interner.get_or_insert("native");
+                    if flags.iter().any(|f| f.flag.id == interned_str_native) {
                         // "type" <identifier> ( <generic-argument-declaration> )?
                         //     "=" {{
                         //         native type implementation
@@ -276,14 +342,15 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                             let _ = self.must_consume_next(vec![TkKindName::MarkSemiColon])?;
 
-                            Ok(vec![Globals::TypeDef(TypeDef::NativeTypeAlias(
+                            Ok(Some(Globals::TypeDef(TypeDef::NativeTypeAlias(
                                 NativeTypeAlias {
                                     ident,
+                                    def_id: OnceCell::new(),
                                     genargs,
                                     native,
                                     native_span,
                                 },
-                            ))])
+                            ))))
                         } else {
                             Err(ParseError::InvalidEOF {
                                 mod_id,
@@ -300,28 +367,32 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                         let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
 
-                        let right = self.consume_type_representaion(&None)?;
+                        let right = self.consume_type_representaion()?;
 
                         let _ = self.must_consume_next(vec![TkKindName::MarkSemiColon])?;
 
-                        Ok(vec![Globals::TypeDef(TypeDef::TypeAlias(TypeAlias {
+                        Ok(Some(Globals::TypeDef(TypeDef::TypeAlias(TypeAlias {
                             ident,
+                            def_id: OnceCell::new(),
                             genargs,
                             right,
-                        }))])
+                        }))))
                     }
                 }
                 TkKind::KwImpl => {
                     // "impl" ( <generic-argument-declaration> )? <type-representation> "{" ... "}"
                     self.next();
 
-                    let genargs = self.opt_consume_generic_argument_declaration()?;
+                    let genargs_decl = self.opt_consume_generic_argument_declaration()?;
 
-                    let self_typ = self.consume_type_representaion(&None)?;
+                    let self_typ = self.consume_type_representaion()?;
 
                     self.must_consume_next(vec![TkKindName::MarkLBrace])?;
 
-                    let mut type_impls = vec![];
+                    let mut assoc_fns = vec![];
+                    let mut methods = vec![];
+                    let mut native_assoc_fns = vec![];
+                    let mut native_methods = vec![];
 
                     loop {
                         if let Some(t) = self.peek().copied()
@@ -329,18 +400,32 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         {
                             self.next();
 
-                            return Ok(type_impls);
+                            return Ok(Some(Globals::ImplBlock(ImplBlock {
+                                assoc_fns,
+                                methods,
+                                native_assoc_fns,
+                                native_methods,
+                                genargs_decl,
+                                self_typ,
+                            })));
                         } else {
                             let flags = self.consume_compiler_flags()?;
-                            let f = self.consume_function_or_method_definition(
-                                flags,
-                                Some(ImplCtx {
-                                    genargs: genargs.clone(),
-                                    self_typ: self_typ.clone(),
-                                }),
-                            )?;
+                            let f = self.consume_function_or_method_definition(flags)?;
 
-                            type_impls.push(f);
+                            match f {
+                                FnOrMethod::Fn(CodeOrNative::Code(f)) => {
+                                    assoc_fns.push(f);
+                                }
+                                FnOrMethod::Fn(CodeOrNative::Native(f)) => {
+                                    native_assoc_fns.push(f);
+                                }
+                                FnOrMethod::Method(CodeOrNative::Code(f)) => {
+                                    methods.push(f);
+                                }
+                                FnOrMethod::Method(CodeOrNative::Native(f)) => {
+                                    native_methods.push(f);
+                                }
+                            }
                         }
                     }
                 }
@@ -349,11 +434,11 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     let native_span = t.span.clone();
                     self.next();
 
-                    Ok(vec![Globals::NativeCode(NativeCode {
+                    Ok(Some(Globals::NativeCode(NativeCode {
                         native,
                         native_span,
                         flags,
-                    })])
+                    })))
                 }
                 TkKind::KwScene => {
                     let begin = t.span.clone();
@@ -361,13 +446,13 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                     let id = self.consume_identifier()?;
 
-                    let args = self.consume_argsdec(&None)?;
+                    let args = self.consume_argsdec()?;
 
                     let rtype = if self
                         .consume_next_if_match(vec![TkKindName::MarkArrow])
                         .is_some()
                     {
-                        RetTypRepr::Typ(self.consume_type_representaion(&None)?)
+                        RetTypRepr::Typ(self.consume_type_representaion()?)
                     } else {
                         RetTypRepr::Void(Span::new(
                             args.span.module(),
@@ -380,20 +465,25 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         mod_id,
                         expecteds: vec![TkKindName::DslLiteral],
                     })?;
+                    let end = t.span.clone();
                     if let TkKind::DslLiteral(str) = t.kind {
-                        let novel_stmts =
-                            biwac_novel_parser::NovelSourceStream::new(str, t.span.clone())
-                                .parse()
-                                .map_err(ParseError::NovelParseError)?;
+                        let novel_stmts = biwac_novel_parser::NovelSourceStream::new(
+                            str,
+                            t.span.clone(),
+                            self.interner,
+                        )
+                        .parse()
+                        .map_err(ParseError::NovelParseError)?;
 
-                        Ok(vec![Globals::NovelScene(NovelScene {
+                        Ok(Some(Globals::NovelScene(NovelScene {
                             id,
+                            def_id: OnceCell::new(),
                             args,
                             rtype,
                             stmts: novel_stmts,
-                            span: Span::merge(&begin, &t.span),
+                            span: Span::merge(&begin, &end),
                             flags,
-                        })])
+                        })))
                     } else {
                         Err(ParseError::InvalidEOF {
                             mod_id,
@@ -414,14 +504,11 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 }),
             }
         } else {
-            Ok(vec![])
+            Ok(None)
         }
     }
 
-    pub(crate) fn consume_argsdec(
-        &mut self,
-        self_typ: &Option<TypRepr>,
-    ) -> Result<ArgDeclList, ParseError<'src>> {
+    pub(crate) fn consume_argsdec(&mut self) -> Result<ArgDeclList, ParseError<'src>> {
         let mod_id = self.mod_id;
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLPare])?
@@ -445,13 +532,13 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     span: Span::merge(&begin, &t.span),
                 });
             } else if let TkKind::Ident(arg) = &t.kind {
-                let typ = self.must_consume_type_annotation(self_typ)?;
+                let typ = self.must_consume_type_annotation()?;
 
                 args.push(ArgDecl {
                     span: Span::merge(&t.span, &typ.span),
                     typ,
                     id: Ident {
-                        id: arg.to_string(),
+                        id: *arg,
                         span: t.span.clone(),
                     },
                 });
@@ -479,8 +566,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
     pub(crate) fn consume_method_argsdec(
         &mut self,
-        self_typ: &Option<TypRepr>,
-    ) -> Result<(ArgDeclList, Option<Ident>), ParseError<'src>> {
+    ) -> Result<FnOrMethod<ArgDeclList, MethodArgDeclList>, ParseError<'src>> {
         let mod_id = self.mod_id;
 
         // (args, self_ident)
@@ -501,27 +587,21 @@ impl<'t, 'src> TokenStream<'t, 'src> {
             ],
         })?;
 
-        let self_ident = match t.kind {
+        let opt_self_span = match t.kind {
             TkKind::MarkRPare => {
                 let end = t.span.clone();
                 self.next();
 
-                return Ok((
-                    ArgDeclList {
-                        args,
-                        span: Span::merge(&begin, &end),
-                    },
-                    None,
-                ));
+                return Ok(FnOrMethod::Fn(ArgDeclList {
+                    args,
+                    span: Span::merge(&begin, &end),
+                }));
             }
             TkKind::KwSelfVar => {
                 let span = t.span.clone();
                 self.next();
 
-                Some(Ident {
-                    id: "self".to_string(),
-                    span,
-                })
+                Some(span)
             }
             _ => None,
         };
@@ -536,21 +616,29 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                 .clone();
 
             if let TkKind::MarkRPare = t.kind {
-                return Ok((
-                    ArgDeclList {
-                        args,
-                        span: Span::merge(&begin, &t.span),
-                    },
-                    self_ident,
-                ));
+                match opt_self_span {
+                    Some(self_span) => {
+                        return Ok(FnOrMethod::Method(MethodArgDeclList {
+                            self_span,
+                            args,
+                            span: Span::merge(&begin, &t.span),
+                        }));
+                    }
+                    None => {
+                        return Ok(FnOrMethod::Fn(ArgDeclList {
+                            args,
+                            span: Span::merge(&begin, &t.span),
+                        }));
+                    }
+                }
             } else if let TkKind::Ident(arg) = &t.kind {
-                let typ = self.must_consume_type_annotation(self_typ)?;
+                let typ = self.must_consume_type_annotation()?;
 
                 args.push(ArgDecl {
                     span: Span::merge(&t.span, &typ.span),
                     typ,
                     id: Ident {
-                        id: arg.to_string(),
+                        id: *arg,
                         span: t.span.clone(),
                     },
                 });

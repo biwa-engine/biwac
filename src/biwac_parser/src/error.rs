@@ -19,11 +19,10 @@ pub enum ParseError<'src> {
 }
 
 impl BiwacError for ParseError<'_> {
-    type ErrorContext = (&biwac_base::SourceHolder, &biwac_base::IdentInterner);
-    fn print_error_message(&self, (srcs, interner): &Self::ErrorContext) {
+    fn print_error_message(&self, ctx: &biwac_base::ErrorContext) {
         match self {
             Self::InvalidToken { expecteds, found } => {
-                let modsrc = srcs.mods.get(&found.span.module()).unwrap();
+                let modsrc = ctx.srcs.mods.get(&found.span.module()).unwrap();
 
                 let file_name = modsrc.modu.file_name();
                 let begin = found.span.begin();
@@ -34,18 +33,21 @@ impl BiwacError for ParseError<'_> {
                     .with_label(
                         Label::new((file_name.as_str(), begin..end))
                             .with_message(if expecteds.is_empty() {
-                                format!("Another token expected, but found {}.", found.kind)
+                                format!(
+                                    "Another token expected, but found {}.",
+                                    found.kind.pattern_with(ctx.interner)
+                                )
                             } else if expecteds.len() == 1 {
                                 format!(
                                     "Expected {}, but found {}.",
                                     format_token_kinds(expecteds),
-                                    found.kind
+                                    found.kind.pattern_with(ctx.interner)
                                 )
                             } else {
                                 format!(
                                     "Expected one of {}, but found {}.",
                                     format_token_kinds(expecteds),
-                                    found.kind
+                                    found.kind.pattern_with(ctx.interner)
                                 )
                             })
                             .with_color(Color::Red),
@@ -55,7 +57,7 @@ impl BiwacError for ParseError<'_> {
                     .unwrap();
             }
             Self::InvalidEOF { expecteds, mod_id } => {
-                let modsrc = srcs.mods.get(mod_id).unwrap();
+                let modsrc = ctx.srcs.mods.get(mod_id).unwrap();
 
                 let file_name = modsrc.modu.file_name();
                 let begin = modsrc.src.len();

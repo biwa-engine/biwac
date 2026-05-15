@@ -3,12 +3,12 @@ pub mod if_stmt;
 pub mod vardecl;
 pub mod while_stmt;
 
-use biwac_base::Span;
 use biwac_lexer::{TkKindName, token::TkKind};
+use biwac_span::Span;
 
 use biwac_ast::{AssignStmt, BlockExpr, BlockStmt, ExprStmt, Exprs, Primary, ReturnStmt, Stmt};
 
-use crate::{ParseError, TokenStream, symbols::globals::FnParseCtx};
+use crate::{ParseError, TokenStream};
 
 // パースすると判明する
 // statement か expression を保持する
@@ -23,25 +23,24 @@ impl<'t, 'src> TokenStream<'t, 'src> {
     // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
     pub(crate) fn consume_expression_or_statement(
         &mut self,
-        ctx: &FnParseCtx,
     ) -> Result<ExprOrStmt<Exprs, Stmt>, ParseError<'src>> {
         if let Some(t) = self.peek().copied() {
             match t.kind {
-                TkKind::KwIf => match self.consume_if_expression_or_statement(ctx)? {
+                TkKind::KwIf => match self.consume_if_expression_or_statement()? {
                     ExprOrStmt::Expr(if_expr) => {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::IfExpr(if_expr))))
                     }
                     ExprOrStmt::Stmt(if_stmt) => Ok(ExprOrStmt::Stmt(Stmt::If(if_stmt))),
                 },
                 TkKind::KwWhile => Ok(ExprOrStmt::Stmt(Stmt::While(
-                    self.consume_while_statement(ctx)?,
+                    self.consume_while_statement()?,
                 ))),
                 TkKind::KwReturn => {
                     // "return" <expression> ";"
                     self.next();
 
                     // <expression>
-                    let expr = self.consume_expression(ctx)?;
+                    let expr = self.consume_expression()?;
 
                     // ";"
                     let end = self.must_consume_semicolon()?.span.clone();
@@ -51,17 +50,17 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                         span: Span::merge(&t.span, &end),
                     })))
                 }
-                TkKind::MarkLBrace => match self.consume_block_expression_or_statement(ctx)? {
+                TkKind::MarkLBrace => match self.consume_block_expression_or_statement()? {
                     ExprOrStmt::Expr(block_expr) => {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::Block(block_expr))))
                     }
                     ExprOrStmt::Stmt(block_stmt) => Ok(ExprOrStmt::Stmt(Stmt::Block(block_stmt))),
                 },
                 TkKind::KwLet => Ok(ExprOrStmt::Stmt(Stmt::VarDecl(
-                    self.consume_variable_declaration_statment(Some(ctx))?,
+                    self.consume_variable_declaration_statment()?,
                 ))),
                 _ => {
-                    let expr = self.consume_expression(ctx)?;
+                    let expr = self.consume_expression()?;
 
                     if let Some(t) = self.peek().copied()
                         && let TkKind::MarkAssign = t.kind
@@ -71,7 +70,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
                         if let Exprs::Primary(dst) = expr {
                             // <expression>
-                            let src = self.consume_expression(ctx)?;
+                            let src = self.consume_expression()?;
 
                             // ";"
                             let end = self.must_consume_semicolon()?.span.clone();
@@ -121,7 +120,6 @@ impl<'t, 'src> TokenStream<'t, 'src> {
 
     pub(crate) fn consume_block_expression_or_statement(
         &mut self,
-        ctx: &FnParseCtx,
     ) -> Result<ExprOrStmt<BlockExpr, BlockStmt>, ParseError<'src>> {
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLBrace])?
@@ -141,7 +139,7 @@ impl<'t, 'src> TokenStream<'t, 'src> {
                     span: Span::merge(&begin, &t.span),
                 }));
             } else {
-                match self.consume_expression_or_statement(ctx)? {
+                match self.consume_expression_or_statement()? {
                     ExprOrStmt::Expr(expr) => {
                         let end = self
                             .must_consume_next(vec![TkKindName::MarkRBrace])?
