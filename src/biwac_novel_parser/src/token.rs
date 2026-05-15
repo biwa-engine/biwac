@@ -1,5 +1,5 @@
 use biwac_ast::{AbsolutePathHeader, Ident, Path};
-use biwac_base::Span;
+use biwac_span::Span;
 
 use crate::{NovelParseError, NovelSourceStream};
 
@@ -435,8 +435,9 @@ impl<'src> NovelSourceStream<'src> {
         })?;
 
         if let NCodeTkKind::Ident(ident) = &t.kind {
+            let interned = self.interner.get_or_insert(ident);
             Ok(Ident {
-                id: ident.to_string(),
+                id: interned,
                 span: t.span.clone(),
             })
         } else {

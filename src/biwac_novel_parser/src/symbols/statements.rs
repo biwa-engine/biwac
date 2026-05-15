@@ -3,7 +3,7 @@ mod if_stmt;
 mod vardecl;
 
 use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelMessage, NovelStmt};
-use biwac_base::Span;
+use biwac_span::Span;
 
 use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 

@@ -1,5 +1,5 @@
 use biwac_ast::NovelEndSceneStmt;
-use biwac_base::Span;
+use biwac_span::Span;
 
 use crate::{NovelParseError, NovelSourceStream, token::NCodeTkKindName};
 

@@ -226,6 +226,7 @@ dependencies = [
  "biwac_ast",
  "biwac_base",
  "biwac_hir",
+ "biwac_span",
 ]
 
 [[package]]
@@ -249,6 +250,7 @@ dependencies = [
  "biwac_base",
  "biwac_lexer",
  "biwac_novel_parser",
+ "biwac_span",
 ]
 
 [[package]]

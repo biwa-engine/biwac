@@ -1,4 +1,4 @@
-use biwac_base::Span;
+use biwac_span::Span;
 
 use biwac_ast::{
     BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Primary, StringLiteral,

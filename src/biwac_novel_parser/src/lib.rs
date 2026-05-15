@@ -1,4 +1,5 @@
-use biwac_base::Span;
+use biwac_base::IdentInterner;
+use biwac_span::Span;
 
 use crate::token::{CharKind, NCodeTkKindName, NCodeToken};
 
@@ -47,6 +48,8 @@ pub struct NovelSourceStream<'src> {
 
     src: &'src str,
 
+    interner: &'src mut IdentInterner,
+
     idx: usize,                 // DSL部分の文字列スライス src のインデックス
     line_begin_idx: usize,      // 同じく
     next_line_begin_idx: usize, // 同じく
@@ -61,13 +64,15 @@ enum NovelLineKind {
 }
 
 impl<'src> NovelSourceStream<'src> {
-    pub fn new(src: &'src str, span: Span) -> Self {
+    pub fn new(src: &'src str, span: Span, interner: &'src mut IdentInterner) -> Self {
         Self {
             span,
             indent_depth: 4,
             peeked: None,
 
             src,
+
+            interner,
 
             idx: 0,
             line_begin_idx: 0,

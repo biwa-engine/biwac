@@ -1,4 +1,4 @@
-use biwac_base::Span;
+use biwac_span::Span;
 
 use biwac_ast::{TypDecl, VarDecl};
 
