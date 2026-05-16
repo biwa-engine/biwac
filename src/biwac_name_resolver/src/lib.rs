@@ -1,13 +1,21 @@
 pub(crate) mod context;
+mod def_collector;
+mod name_tree;
 mod symbols;
 mod types;
+
+pub use def_collector::DefCollector;
+pub use name_tree::{
+    AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, ModuleResolveCtx, NameTree,
+    PackageNameTree, TyNameTree,
+};
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use biwac_ast::{DefTyp, ImportDecl, QualifiedId, TypeDef};
+use biwac_ast::{DefTyp, ImportDecl, Path, TypeDef};
 use biwac_base::{ModId, ModPath, PackageName, PackageNameError, SSpan, Span};
 use biwac_dependency_loader::DepsSymbolKind;
 use biwac_hir::{
@@ -45,30 +53,30 @@ use crate::context::{
 pub enum ResolveError {
     HirError(HirError),
     TypeNotFound {
-        qualid: Box<QualifiedId>,
+        qualid: Box<Path>,
         tid: Box<TyId>,
     },
     TypeNotFoundModuleFound {
-        qualid: Box<QualifiedId>,
+        qualid: Box<Path>,
         import_decl: Box<ImportDecl>,
         modpath: Box<ModPath>,
     },
     TypeNotFoundValueFound {
-        qualid: Box<QualifiedId>,
+        qualid: Box<Path>,
         import_decl: Box<ImportDecl>,
         vid: Box<ValId>,
     },
     ValueNotFound {
-        qualid: Box<QualifiedId>,
+        qualid: Box<Path>,
         vid: Box<ValId>,
     },
     ValueNotFoundModuleFound {
-        qualid: Box<QualifiedId>,
+        qualid: Box<Path>,
         import_decl: Box<ImportDecl>,
         modpath: Box<ModPath>,
     },
     ValueNotFoundTypeFound {
-        qualid: Box<QualifiedId>,
+        qualid: Box<Path>,
         import_decl: Box<ImportDecl>,
         tid: Box<TyId>,
     },
@@ -77,7 +85,7 @@ pub enum ResolveError {
         val: String,
     },
     IdentifierNotFound {
-        qualid: QualifiedId,
+        qualid: Path,
     },
     DuplicatedImportedName {
         name: String,
