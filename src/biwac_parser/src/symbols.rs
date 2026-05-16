@@ -6,7 +6,7 @@ use biwac_ast::ModAst;
 
 use crate::{ParseError, Parser, TokenStream};
 
-impl<'src> Parser<'src> {
+impl<'src, 'i> Parser<'src, 'i> {
     pub fn try_parse(self) -> Result<ModAst, ParseError<'src>> {
         let mut stream =
             TokenStream::new(self.mod_id, self.tokens.iter().peekable(), self.interner);

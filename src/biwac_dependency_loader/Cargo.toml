@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
+biwac_span = { path = "../biwac_span"}
 biwac_hir = { path = "../biwac_hir"}
 regex.workspace = true
 serde.workspace = true

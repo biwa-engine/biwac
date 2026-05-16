@@ -9,7 +9,7 @@ use biwac_ast::{
 use crate::{ParseError, TokenStream};
 
 // Primary = Literal | Identifier ( "(" ")" )? | "(" Exprs ")"
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(super) fn consume_primary_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
         let mod_id = self.mod_id;
 

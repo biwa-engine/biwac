@@ -4,7 +4,7 @@ mod error;
 mod tests;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
@@ -15,25 +15,26 @@ pub use error::PkgLoadError;
 use biwac_ast::ModAst;
 use biwac_base::{
     BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME, BIWA_EXTENSION, BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME,
-    ErrorContext, ErrorHolder, IdentInterner, MetadataHolder, ModId, ModPath, ModSource,
-    SourceHolder,
+    ErrorContext, ErrorHolder, IdentInterner, InternedIdent, MetadataHolder, ModId, ModPath,
+    ModSource, SourceHolder,
 };
 
 #[derive(Debug)]
 pub struct LoadedModule {
+    pub mod_id: ModId,
     pub ast: ModAst,
-    pub children: HashMap<ModId, LoadedModule>,
+    pub children: HashMap<InternedIdent, LoadedModule>,
 }
 
-#[derive(Debug)]
-pub enum PackageRootModule {
-    Lib(ModId),
-    Main(ModId),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageKind {
+    Lib,
+    Bin,
 }
 
 #[derive(Debug)]
 pub struct Pkg {
-    pub root_mod_id: PackageRootModule,
+    pub pkg_kind: PackageKind,
     pub root_module: LoadedModule,
 }
 
@@ -71,9 +72,9 @@ impl Pkg {
             }
         };
 
-        let (root_mod_id, root_path) = match (lib_path, main_path) {
-            (Some(path), None) => (PackageRootModule::Lib(ctx.alloc_mod_id()), path),
-            (None, Some(path)) => (PackageRootModule::Main(ctx.alloc_mod_id()), path),
+        let (pkg_kind, root_mod_id, root_path) = match (lib_path, main_path) {
+            (Some(path), None) => (PackageKind::Lib, ctx.alloc_mod_id(), path),
+            (None, Some(path)) => (PackageKind::Bin, ctx.alloc_mod_id(), path),
             (Some(_), Some(_)) => {
                 return Err(ErrorHolder {
                     errs: vec![PkgLoadError::RootModuleDuplicated],
@@ -97,110 +98,137 @@ impl Pkg {
         };
 
         let module_tree = ModuleTree {
+            mod_id: root_mod_id,
             path: Box::new(root_path),
-            mod_path: match root_mod_id {
-                PackageRootModule::Lib(_) => ModPath::Lib,
-                PackageRootModule::Main(_) => ModPath::Main,
+            mod_path: match pkg_kind {
+                PackageKind::Lib => ModPath::Lib,
+                PackageKind::Bin => ModPath::Main,
             },
 
             // root module を起点にモジュールツリーを構築する
             // それにはMainを指定する
-            children: map_module_tree_children_from_dir(&mut ctx, &srcpath, ModPath::Main)
-                .map_err(|e| ErrorHolder {
-                    errs: vec![e],
-                    ctx: ErrorContext {
-                        interner,
-                        srcs,
-                        metadata,
-                    },
-                })?,
+            children: match map_module_tree_children_from_dir(
+                &mut ctx,
+                &srcpath,
+                ModPath::Main,
+                interner,
+            ) {
+                Ok(children) => children,
+                Err(e) => {
+                    return Err(ErrorHolder {
+                        errs: vec![e],
+                        ctx: ErrorContext {
+                            interner,
+                            srcs,
+                            metadata,
+                        },
+                    });
+                }
+            },
         };
 
-        load_module(
-            interner,
-            srcs,
-            match root_mod_id {
-                PackageRootModule::Lib(mod_id) => mod_id,
-                PackageRootModule::Main(mod_id) => mod_id,
-            },
-            module_tree,
-        )
-        .map(|root_module| Self {
-            root_module,
-            root_mod_id,
-        })
-        .map_err(|errs| ErrorHolder {
-            errs,
-            ctx: ErrorContext {
-                interner,
-                srcs,
-                metadata,
-            },
-        })
+        read_module_files(srcs, &module_tree);
+
+        let root_module = load_module(interner, srcs, module_tree);
+
+        match root_module {
+            Ok(root_module) => Ok(Self {
+                pkg_kind,
+                root_module,
+            }),
+            Err(errs) => Err(ErrorHolder {
+                errs,
+                ctx: ErrorContext {
+                    interner,
+                    srcs,
+                    metadata,
+                },
+            }),
+        }
     }
 }
 
-fn load_module(
+fn read_module_files(srcs: &mut SourceHolder, module_tree: &ModuleTree) {
+    // read children module files
+    for module_tree in module_tree.children.values() {
+        read_module_files(srcs, module_tree);
+    }
+
+    // read self module file
+    let mut f = File::open(&*module_tree.path).unwrap();
+    let mut src = String::new();
+    f.read_to_string(&mut src).unwrap();
+    srcs.mods.insert(
+        module_tree.mod_id,
+        ModSource {
+            modu: module_tree.mod_path.clone(),
+            src,
+        },
+    );
+}
+
+fn load_module<'a>(
     interner: &mut IdentInterner,
-    srcs: &mut SourceHolder,
-    mod_id: ModId,
+    srcs: &'a SourceHolder,
     module_tree: ModuleTree,
-) -> Result<LoadedModule, Vec<PkgLoadError>> {
+) -> Result<LoadedModule, Vec<PkgLoadError<'a>>> {
     let mut errs = Vec::new();
 
     // load children modules
-    let children = module_tree
-        .children
-        .into_iter()
-        .flat_map(
-            |(mod_id, module_tree)| match load_module(interner, srcs, mod_id, module_tree) {
-                Ok(module) => Some(module),
-                Err(e) => {
-                    errs.extend(e);
-                    None
-                }
-            },
-        )
-        .collect();
+    let mut children = HashMap::new();
+    for (interned_mod_name, module_tree) in module_tree.children {
+        match load_module(interner, srcs, module_tree) {
+            Ok(module) => {
+                children.insert(interned_mod_name, module);
+            }
+            Err(e) => {
+                errs.extend(e);
+            }
+        }
+    }
 
-    // load self module
-    let mut f = File::open(&module_tree.path).unwrap();
-    let mut src = String::new();
-    f.read_to_string(&mut src).unwrap();
+    let tokens = match biwac_lexer::lex(
+        interner,
+        module_tree.mod_id,
+        &srcs.mods.get(&module_tree.mod_id).unwrap().src,
+    ) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            errs.push(PkgLoadError::LexError {
+                modpath: module_tree.mod_path.clone(),
+                err: Box::new(e),
+            });
+            return Err(errs);
+        }
+    };
 
-    let tokens = biwac_lexer::lex(interner, *mod_id, &src).map_err(|e| {
-        errs.push(PkgLoadError::LexError {
+    let ast = biwac_parser::Parser::new(
+        module_tree.mod_id,
+        module_tree.mod_path.clone(),
+        tokens,
+        interner,
+    )
+    .try_parse()
+    .map_err(|e| {
+        errs.push(PkgLoadError::ParseError {
             modpath: module_tree.mod_path.clone(),
             err: Box::new(e),
         });
         errs
     })?;
 
-    let ast = biwac_parser::Parser::new(*mod_id, module_tree.mod_path.clone(), tokens)
-        .try_parse()
-        .map_err(|e| {
-            errs.push(PkgLoadError::ParseError {
-                modpath: module_tree.mod_path.clone(),
-                err: Box::new(e),
-            });
-            errs
-        })?;
-
-    srcs.mods.insert(
-        mod_id,
-        ModSource {
-            modu: module_tree.mod_path,
-            src,
-        },
-    );
-
-    Ok(LoadedModule { ast, children })
+    Ok(LoadedModule {
+        mod_id: module_tree.mod_id,
+        ast,
+        children,
+    })
 }
 
 struct ModuleTree {
+    mod_id: ModId,
     mod_path: ModPath,
     path: Box<PathBuf>,
-    children: HashMap<ModId, ModuleTree>,
+    children: HashMap<InternedIdent, ModuleTree>,
 }
 
 struct ModuleTreeCtx {
@@ -226,7 +254,8 @@ fn map_module_tree_children_from_dir<'a>(
     ctx: &mut ModuleTreeCtx,
     dir: &Path,
     modpath: ModPath,
-) -> Result<HashMap<ModId, ModuleTree>, PkgLoadError<'a>> {
+    interner: &mut IdentInterner,
+) -> Result<HashMap<InternedIdent, ModuleTree>, PkgLoadError<'a>> {
     let mut work_dir_files: HashMap<String, (ModPath, Box<PathBuf>)> = HashMap::new();
     let mut work_dir_sub_dirs: HashMap<String, Box<PathBuf>> = HashMap::new();
 
@@ -257,11 +286,11 @@ fn map_module_tree_children_from_dir<'a>(
             // main.biwa, lib.biwa がパッケージルートにあるが、
             // main/ や lib/ サブモジュールがあるわけではない
             if !(matches!(modpath, ModPath::Main)
-                && (&file_name == BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME
-                    || &file_name == BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME))
+                && (file_name == BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME
+                    || file_name == BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME))
             {
-                let mod_path = modpath.clone().push(file_name);
-                work_dir_files.insert(file_name.clone(), (mod_path, Box::new(path)));
+                let mod_path = modpath.clone().push(file_name.clone());
+                work_dir_files.insert(file_name, (mod_path, Box::new(path)));
             }
         }
     }
@@ -269,24 +298,31 @@ fn map_module_tree_children_from_dir<'a>(
     // モジュールと同名のディレクトリがあればサブモジュールとして再帰的にロードする
     // 各種OSのファイルシステムがファイルパスの重複を許さないことを保証する限り、
     // ここで、modulesの重複を考える必要はなく、HashMap::insert()やextend()を使って良い
-    Ok(work_dir_files
+    work_dir_files
         .into_iter()
         .map(|(file_name, (mod_path, path))| {
+            let interned = interner.get_or_insert(&file_name);
+            let mod_id = ctx.alloc_mod_id();
             let children = if let Some(dir) = work_dir_sub_dirs.get(&file_name) {
                 map_module_tree_children_from_dir(
                     ctx,
                     dir,
                     modpath.clone().extend(vec![file_name]),
+                    interner,
                 )?
             } else {
                 HashMap::new()
             };
 
-            ModuleTree {
-                mod_path,
-                path,
-                children,
-            }
+            Ok((
+                interned,
+                ModuleTree {
+                    mod_id,
+                    mod_path,
+                    path,
+                    children,
+                },
+            ))
         })
-        .collect())
+        .collect()
 }

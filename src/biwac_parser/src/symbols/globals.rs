@@ -21,7 +21,7 @@ enum CodeOrNative<C, N> {
     Native(N),
 }
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     fn consume_return_type(
         &mut self,
         arg_decl_span: &Span,

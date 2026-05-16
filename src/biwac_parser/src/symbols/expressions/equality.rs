@@ -4,7 +4,7 @@ use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(super) fn consume_equality_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
         let left = self.consume_relational_expression()?;
 

@@ -5,7 +5,7 @@ use biwac_ast::{AssignStmt, BlockStmt, ExprStmt, Exprs, ReturnStmt, Stmt};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(crate) fn consume_block_statement(&mut self) -> Result<BlockStmt, ParseError<'src>> {
         let begin = self
             .must_consume_next(vec![TkKindName::MarkLBrace])?

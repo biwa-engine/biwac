@@ -5,7 +5,7 @@ use biwac_ast::{Exprs, UnOperator, UnaryExpr};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(super) fn consume_unary_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
         if let Some(t) = self.peek() {
             match t.kind {

@@ -5,7 +5,7 @@ use biwac_ast::{IfExpr, IfStmt};
 
 use crate::{ExprOrStmt, ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     // "if" <expression> <block-statement> ("else" <block-statement>)?
     pub(super) fn consume_if_expression_or_statement(
         &mut self,

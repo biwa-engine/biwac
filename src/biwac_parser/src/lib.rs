@@ -15,19 +15,19 @@ pub(crate) use symbols::statements::ExprOrStmt;
 pub use error::ParseError;
 
 #[derive(Debug)]
-pub struct Parser<'src> {
+pub struct Parser<'src, 'i> {
     mod_id: ModId,
     modpath: ModPath,
     tokens: Vec<Token<'src>>,
-    interner: &'src mut IdentInterner,
+    interner: &'i mut IdentInterner,
 }
 
-impl<'src> Parser<'src> {
+impl<'src, 'i> Parser<'src, 'i> {
     pub fn new(
         mod_id: ModId,
         modpath: ModPath,
         tokens: Vec<Token<'src>>,
-        interner: &'src mut IdentInterner,
+        interner: &'i mut IdentInterner,
     ) -> Self {
         Self {
             mod_id,
@@ -39,17 +39,17 @@ impl<'src> Parser<'src> {
 }
 
 #[derive(Debug)]
-pub(crate) struct TokenStream<'t, 'src> {
+pub(crate) struct TokenStream<'t, 'src, 'i> {
     mod_id: ModId,
     tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
-    interner: &'src mut IdentInterner,
+    interner: &'i mut IdentInterner,
 }
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(crate) fn new(
         mod_id: ModId,
         tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
-        interner: &'src mut IdentInterner,
+        interner: &'i mut IdentInterner,
     ) -> Self {
         Self {
             mod_id,

@@ -1,37 +1,57 @@
 use std::path::Path;
 
-use biwac_base::{MetadataHolder, ModPath, SourceHolder};
+use biwac_base::{IdentInterner, MetadataHolder, SourceHolder};
 
-use crate::Pkg;
+use crate::{PackageKind, Pkg};
 
 #[test]
 fn test1() {
     // assets/tests/test1
     // 以下にbiwaのパッケージのディレクトリがあることを前提とする
 
-    let mut srcs = SourceHolder::default();
     let mut metadata = MetadataHolder::default();
+    let mut srcs = SourceHolder::default();
+    let mut interner = IdentInterner::default();
     let pkg_root_path = Path::new("../../assets/tests/test1");
 
     biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.to_path_buf())
         .unwrap();
 
-    let pkg = Pkg::try_load(&metadata, &mut srcs, pkg_root_path.to_path_buf()).unwrap();
+    let pkg = Pkg::try_load(
+        &metadata,
+        &mut interner,
+        &mut srcs,
+        pkg_root_path.to_path_buf(),
+    )
+    .unwrap();
 
-    assert!(pkg.modules.iter().any(|(_, m)| m.modpath == ModPath::Main));
+    assert!(pkg.pkg_kind == PackageKind::Bin);
+
+    // existence check of `collections` module
     assert!(
-        pkg.modules
-            .iter()
-            .any(|(_, m)| m.modpath == ModPath::Mod(vec!["math".to_string()]))
+        pkg.root_module
+            .children
+            .contains_key(&interner.get_or_insert("collections"))
     );
+
+    // existence check of `math` module
+    let mod_math = pkg
+        .root_module
+        .children
+        .get(&interner.get_or_insert("math"))
+        .unwrap();
+
+    // existence check of `math::pos` module
     assert!(
-        pkg.modules
-            .iter()
-            .any(|(_, m)| m.modpath == ModPath::Mod(vec!["math".to_string(), "pos".to_string()]))
+        mod_math
+            .children
+            .contains_key(&interner.get_or_insert("pos"))
     );
+
+    // existence check of `math::line` module
     assert!(
-        pkg.modules
-            .iter()
-            .any(|(_, m)| m.modpath == ModPath::Mod(vec!["math".to_string(), "line".to_string()]))
+        mod_math
+            .children
+            .contains_key(&interner.get_or_insert("line"))
     );
 }

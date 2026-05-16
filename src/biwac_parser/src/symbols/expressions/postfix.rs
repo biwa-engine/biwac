@@ -5,7 +5,7 @@ use biwac_ast::{Exprs, MemberAccess, MethodCall, Primary};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(super) fn consume_postfix_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
         let expr = self.consume_primary_expression()?;
 

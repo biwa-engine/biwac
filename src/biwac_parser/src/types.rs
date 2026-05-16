@@ -4,7 +4,7 @@ use biwac_span::Span;
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(crate) fn must_consume_type_annotation(&mut self) -> Result<TypRepr, ParseError<'src>> {
         let mod_id = self.mod_id;
         let t = self

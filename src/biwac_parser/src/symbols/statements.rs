@@ -18,7 +18,7 @@ pub(crate) enum ExprOrStmt<E, S> {
     Stmt(S),
 }
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     // TODO: 将来的にはconsume_statement_or_expression
     // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
     pub(crate) fn consume_expression_or_statement(

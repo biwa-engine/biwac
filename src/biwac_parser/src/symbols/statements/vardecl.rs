@@ -5,7 +5,7 @@ use biwac_ast::{TypDecl, VarDecl};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     // "let" <identifier> (":" <type-representation>)? "=" <expression> ";"
     // グローバル変数に束縛できる値は限られる。リテラルだけでconstのみ許容でも良い
     pub(crate) fn consume_variable_declaration_statment(

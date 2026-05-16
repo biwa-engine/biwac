@@ -5,7 +5,7 @@ use biwac_lexer::{TkKind, TkKindName};
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     fn consume_compiler_flag_literal(&mut self) -> Result<CompilerFlagLiteral, ParseError<'src>> {
         if let Some(t) = self.next() {
             match t.kind {

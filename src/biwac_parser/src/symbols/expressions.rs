@@ -11,7 +11,7 @@ use biwac_ast::Exprs;
 
 use crate::{ParseError, TokenStream};
 
-impl<'t, 'src> TokenStream<'t, 'src> {
+impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(crate) fn consume_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
         self.consume_equality_expression()
     }
