@@ -716,7 +716,7 @@ impl Hir {
             TyKind::Defined(defined_ty) => {
                 let defined_ty_impl = self
                     .tys
-                    .get(&defined_ty.tid)
+                    .get(&defined_ty.def_id)
                     .expect("compiler bug: type not found");
 
                 if let Some(impl_list) = defined_ty_impl.vals.get(&method.id) {
@@ -884,7 +884,7 @@ impl Hir {
             TyKind::Defined(defined_ty) => {
                 let defined_ty_impl = self
                     .tys
-                    .get(&defined_ty.tid)
+                    .get(&defined_ty.def_id)
                     .expect("compiler bug: type not found");
 
                 // alias なら解決先の型について探索する
@@ -1097,8 +1097,8 @@ impl DepsRecorder {
     }
 
     fn depends_on_defined_ty(&mut self, defined_ty: &DefinedTy) {
-        if defined_ty.tid.pkg().is_self() {
-            self.depended_tys.insert(defined_ty.tid.clone());
+        if defined_ty.def_id.pkg().is_self() {
+            self.depended_tys.insert(defined_ty.def_id.clone());
         }
 
         for g in &defined_ty.genargs {

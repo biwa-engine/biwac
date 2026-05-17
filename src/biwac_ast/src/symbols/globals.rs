@@ -68,8 +68,6 @@ pub struct ImportDecl {
     pub span: Span,
 }
 
-// 型の関連関数の場合はtypがSome
-// Selfは具体のTypReprによりパース時に解決される
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub id: Ident,

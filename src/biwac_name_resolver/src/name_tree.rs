@@ -1,14 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use biwac_base::{InternedIdent, ModId, PackageId};
-use biwac_span::{DefIdKind, TyDefId, ValDefId};
-
-#[derive(Debug)]
-pub struct ModuleResolveCtx<'t> {
-    pub(crate) global_tree: &'t PackageNameTree,
-    pub(crate) mocule: &'t ModuleNameTree,
-    pub(crate) imports: HashMap<InternedIdent, DefIdKind>,
-}
+use biwac_span::{TyDefId, ValDefId};
 
 #[derive(Debug)]
 pub struct NameTree {
@@ -18,8 +11,7 @@ pub struct NameTree {
 #[derive(Debug)]
 pub struct PackageNameTree {
     pub(crate) pkg_id: PackageId,
-    pub(crate) root_mod_id: ModId,
-    pub(crate) children: HashMap<InternedIdent, ModuleNameTreeItem>,
+    pub(crate) root_module_tree: ModuleNameTree,
 }
 
 #[derive(Debug)]

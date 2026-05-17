@@ -3,8 +3,10 @@ pub mod globals;
 pub mod novel;
 pub mod statements;
 
+use std::cell::OnceCell;
+
 use biwac_base::{InternedIdent, ModPath};
-use biwac_span::Span;
+use biwac_span::{DefIdKind, Span};
 
 use crate::Globals;
 
@@ -31,11 +33,20 @@ pub enum AbsolutePathHeader {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathSegmentResolution {
+    Ok(DefIdKind),
+    Err,
+}
+
+#[derive(Debug, Clone)]
 pub struct PathSegment {
     pub ident: Ident,
 
     // pub genargs: Option<GenArgs>,
-    // pub resolved_id: FreezeLock<id>
+
+    //
+    pub resolved_id: OnceCell<PathSegmentResolution>,
+
     /// zst ensures that [`PathSegment`] is created in this module.
     zst: private::PrivateZeroSizeType,
 }
@@ -95,10 +106,19 @@ impl From<Ident> for PathSegment {
     fn from(value: Ident) -> Self {
         Self {
             ident: value,
+            resolved_id: OnceCell::new(),
             zst: private::PrivateZeroSizeType,
         }
     }
 }
+
+impl PartialEq for PathSegment {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident == other.ident
+    }
+}
+
+impl Eq for PathSegment {}
 
 mod private {
     #[derive(Debug, Clone, PartialEq, Eq)]

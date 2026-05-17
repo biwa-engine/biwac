@@ -60,7 +60,7 @@ pub struct TyDefId(DefId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValDefId(DefId);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefIdKind {
     Mod(ModId),
     Ty(TyDefId),

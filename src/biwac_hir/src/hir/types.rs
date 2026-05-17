@@ -144,7 +144,7 @@ pub enum InferTy {
 // 使用する型情報を保持する
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinedTy {
-    pub tid: TyDefId,
+    pub def_id: TyDefId,
     pub genargs: Vec<Ty>, // NOTE: Option ?
 }
 
@@ -221,7 +221,7 @@ impl TyKind {
                 }
             }
             (Self::Defined(defined_ty), Self::Defined(defined_ty2)) => {
-                if defined_ty.tid == defined_ty2.tid {
+                if defined_ty.def_id == defined_ty2.def_id {
                     if defined_ty.genargs.len() == defined_ty2.genargs.len() {
                         defined_ty
                             .genargs
@@ -268,7 +268,7 @@ impl TyKind {
                 genargs: fty.genargs,
             }),
             Self::Defined(defined_ty) => Self::Defined(DefinedTy {
-                tid: defined_ty.tid,
+                def_id: defined_ty.def_id,
                 genargs: defined_ty
                     .genargs
                     .into_iter()
@@ -305,7 +305,7 @@ impl TyKind {
                 genargs: fty.genargs,
             }),
             Self::Defined(defined_ty) => Self::Defined(DefinedTy {
-                tid: defined_ty.tid,
+                def_id: defined_ty.def_id,
                 genargs: defined_ty
                     .genargs
                     .into_iter()

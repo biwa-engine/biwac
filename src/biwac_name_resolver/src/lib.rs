@@ -4,10 +4,10 @@ mod name_tree;
 mod symbols;
 mod types;
 
+use biwac_span::{DefIdKind, Span, ValDefId};
 pub use def_collector::DefCollector;
 pub use name_tree::{
-    AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, ModuleResolveCtx, NameTree,
-    PackageNameTree, TyNameTree,
+    AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, TyNameTree,
 };
 
 #[cfg(test)]
@@ -16,11 +16,12 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 
 use biwac_ast::{DefTyp, ImportDecl, Path, TypeDef};
-use biwac_base::{ModId, ModPath, PackageName, PackageNameError, SSpan, Span};
+use biwac_base::{InternedIdent, ModId, ModPath, PackageName, PackageNameError};
+
 use biwac_dependency_loader::DepsSymbolKind;
 use biwac_hir::{
     Hir, HirError, Ident, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId,
-    StructDefContent, Ty, TyDefContentKind, TyExistence, TyId, ValDefContentKind, ValId,
+    StructDefContent, Ty, TyDefContentKind, TyExistence, ValDefContentKind,
 };
 use biwac_package_loader::Pkg;
 
@@ -52,19 +53,52 @@ use crate::context::{
 #[derive(Debug)]
 pub enum ResolveError {
     HirError(HirError),
+
+    // module 側から既存の symbol との重複を検知した場合
+    DuplicatedSymbolAndModuleName {
+        name: InternedIdent,
+        mod_id: ModId,
+        symbol_span: Span,
+    },
+
+    // module 内で symbol 同士の重複を検知した場合
+    DuplicatedSymbolName {
+        name: InternedIdent,
+        span1: Span,
+        span2: Span,
+    },
+
+    // module 内で symbol 同士の重複を検知した場合
+    // ただし片方は def_id までしかわからない場合
+    DuplicatedSymbolAndDefIdName {
+        name: InternedIdent,
+        span: Span,
+        def_id_kind: DefIdKind,
+    },
+
+    UnexpectedSelfType {
+        span: Span,
+    },
+
+    IdentNotFound {
+        ident: biwac_ast::Ident,
+    },
+
+    PathResolutionFailed {
+        path: Box<Path>,
+    },
+
     TypeNotFound {
         qualid: Box<Path>,
         tid: Box<TyId>,
     },
     TypeNotFoundModuleFound {
-        qualid: Box<Path>,
-        import_decl: Box<ImportDecl>,
-        modpath: Box<ModPath>,
+        path: Box<Path>,
+        mod_id: ModId,
     },
     TypeNotFoundValueFound {
-        qualid: Box<Path>,
-        import_decl: Box<ImportDecl>,
-        vid: Box<ValId>,
+        path: Box<Path>,
+        def_id: ValDefId,
     },
     ValueNotFound {
         qualid: Box<Path>,
@@ -280,573 +314,573 @@ impl ResolveCtx {
         })
     }
 
-    pub fn try_resolve(mut self, pkg: Pkg) -> RsvResult<Hir> {
-        // 型の存在を記録する
-        let mut alias_defs = HashMap::new();
-        for modu in pkg.modules.values() {
-            // モジュールの存在も記録
-            self.hir.register_module_existence(modu.modpath.clone())?;
-
-            for g in &modu.globals {
-                if let biwac_ast::Globals::TypeDef(t) = g {
-                    match t {
-                        TypeDef::Struct(struct_) => {
-                            let tid = TyId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                struct_.id.id.clone(),
-                            );
-                            self.hir.register_type_existence(
-                                tid,
-                                TyExistence {
-                                    ty_name_span: struct_.id.span.clone().into(),
-                                    genarg_len: struct_.genargs.len(),
-                                },
-                            )?;
-                        }
-                        TypeDef::TypeAlias(alias) => {
-                            let tid = TyId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                alias.ident.id.clone(),
-                            );
-                            self.hir.register_type_existence(
-                                tid.clone(),
-                                TyExistence {
-                                    ty_name_span: alias.ident.span.clone().into(),
-                                    genarg_len: alias.genargs.len(),
-                                },
-                            )?;
-
-                            alias_defs.insert(tid, alias);
-                        }
-                        TypeDef::NativeTypeAlias(native) => {
-                            let tid = TyId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                native.ident.id.clone(),
-                            );
-                            self.hir.register_type_existence(
-                                tid.clone(),
-                                TyExistence {
-                                    ty_name_span: native.ident.span.clone().into(),
-                                    genarg_len: native.genargs.len(),
-                                },
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
-        // hir から型の存在とジェネリック引数の長さを取得できるようになる
-        // hir からモジュールの存在を取得できるようになる
-
-        let mctxes = pkg
-            .modules
-            .iter()
-            .map(|(mod_id, modu)| {
-                let mctx = ModuleLevelTyResolveCtx::new(
-                    self.pkg_name.clone(),
-                    modu.modpath.clone(),
-                    modu,
-                    &self.hir,
-                )?;
-
-                Ok((*mod_id, mctx))
-            })
-            .collect::<RsvResult<HashMap<ModId, ModuleLevelTyResolveCtx>>>()?;
-
-        // 型エイリアス type alias を正規化し記録する
-        let aliases = TyAliasResolveCtx::new(&mctxes, alias_defs).try_resolve(&self.hir)?;
-        for (tid, alias) in aliases {
-            self.hir
-                .register_type_content(&tid, TyDefContentKind::TypeAlias(Box::new(alias)))?;
-        }
-
-        // 型の実体(シグニチャ)を記録する
-        for (mod_id, modu) in &pkg.modules {
-            let mctx = mctxes.get(mod_id).unwrap();
-
-            for g in &modu.globals {
-                if let biwac_ast::Globals::TypeDef(type_def) = g {
-                    match type_def {
-                        TypeDef::Struct(struct_) => {
-                            let tid = TyId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                struct_.id.id.clone(),
-                            );
-
-                            self.hir.register_type_content(
-                                &tid,
-                                TyDefContentKind::Struct(Box::new(
-                                    StructDefContent::try_resolve_in_module(
-                                        struct_, mctx, &self.hir,
-                                    )?,
-                                )),
-                            )?;
-                        }
-                        TypeDef::TypeAlias(_) => {
-                            // すでに解決済み
-                        }
-                        TypeDef::NativeTypeAlias(native) => {
-                            let tid = TyId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                native.ident.id.clone(),
-                            );
-
-                            self.hir.register_type_content(
-                                &tid,
-                                TyDefContentKind::NativeTypeAlias(Box::new(
-                                    NativeTypeAliasDefContent {
-                                        alias_name_span: native.ident.span.clone(),
-                                        genargs: native
-                                            .genargs
-                                            .clone()
-                                            .into_iter()
-                                            .map(|g| g.into())
-                                            .collect(),
-                                        native: native.native.clone(),
-                                        native_span: native.native_span.clone(),
-                                    },
-                                )),
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
-        // hir から型の実体を取得できるようになる
-
-        // 値(fn, const)の存在(シグニチャ)を記録する
-        for (mod_id, modu) in pkg.modules {
-            let mctx = mctxes.get(&mod_id).unwrap();
-
-            for g in modu.globals {
-                match g {
-                    biwac_ast::Globals::FnDef(fn_def) => {
-                        // 関連関数のとき
-                        if let Some(impl_ctx) = &fn_def.impl_ctx {
-                            let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
-                            let self_ty = ictx.try_resolve_ty(&impl_ctx.self_typ, &self.hir)?;
-
-                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
-
-                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                                (&fn_def.args, &fn_def.rtype),
-                                &fctx,
-                                &self.hir,
-                            )?;
-
-                            self.hir.register_impl_value_existence(
-                                self_ty.kind,
-                                ictx.impl_block_genargs,
-                                &fn_def.id.clone(),
-                                ImplValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
-                                    signature,
-                                    fn_def,
-                                    ictx.impl_block_genarg_vec,
-                                ))),
-                            )?;
-                        } else {
-                            // 通常の関数のとき
-                            let vid = ValId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                fn_def.id.id.clone(),
-                            );
-                            let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
-                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
-
-                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                                (&fn_def.args, &fn_def.rtype),
-                                &fctx,
-                                &self.hir,
-                            )?;
-
-                            self.hir.register_value_existence(
-                                vid,
-                                ValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
-                                    signature,
-                                    fn_def,
-                                    ictx.impl_block_genarg_vec,
-                                ))),
-                            )?;
-                        }
-                    }
-                    biwac_ast::Globals::NativeFnDef(fn_def) => {
-                        // 関連関数のとき
-                        if let Some(impl_ctx) = &fn_def.impl_ctx {
-                            let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
-                            let self_ty = ictx.try_resolve_ty(&impl_ctx.self_typ, &self.hir)?;
-
-                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
-
-                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                                (&fn_def.args, &fn_def.rtype),
-                                &fctx,
-                                &self.hir,
-                            )?;
-
-                            self.hir.register_impl_value_existence(
-                                self_ty.kind,
-                                ictx.impl_block_genargs,
-                                &fn_def.id.clone(),
-                                ImplValDefContentKind::NativeFn(Box::new(
-                                    biwac_hir::NativeFnDefContent::new(
-                                        signature,
-                                        fn_def,
-                                        ictx.impl_block_genarg_vec,
-                                    ),
-                                )),
-                            )?;
-                        } else {
-                            // 通常の関数のとき
-                            let vid = ValId::from_modpath(
-                                PkgId::new(self.pkg_name.clone()),
-                                &modu.modpath,
-                                fn_def.id.id.clone(),
-                            );
-                            let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
-                            let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
-
-                            let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                                (&fn_def.args, &fn_def.rtype),
-                                &fctx,
-                                &self.hir,
-                            )?;
-
-                            self.hir.register_value_existence(
-                                vid,
-                                ValDefContentKind::Native(Box::new(
-                                    biwac_hir::NativeFnDefContent::new(
-                                        signature,
-                                        fn_def,
-                                        ictx.impl_block_genarg_vec,
-                                    ),
-                                )),
-                            )?;
-                        }
-                    }
-                    biwac_ast::Globals::MethodDef(method_def) => {
-                        let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
-                        let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
-
-                        let fctx = FnLevelTyResolveCtx::new(&ictx, &method_def.genargs)?;
-
-                        // 第一引数 self は含まない
-                        let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                            (&method_def.args, &method_def.rtype),
-                            &fctx,
-                            &self.hir,
-                        )?;
-
-                        // メソッドとして登録
-                        self.hir.register_impl_value_existence(
-                            self_ty.kind,
-                            ictx.impl_block_genargs,
-                            &method_def.id.clone(),
-                            ImplValDefContentKind::Method(Box::new(
-                                biwac_hir::MethodDefContent::new(
-                                    signature,
-                                    method_def,
-                                    ictx.impl_block_genarg_vec,
-                                ),
-                            )),
-                        )?;
-                    }
-                    biwac_ast::Globals::NativeMethodDef(method_def) => {
-                        let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
-                        let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
-
-                        let fctx = FnLevelTyResolveCtx::new(&ictx, &method_def.genargs)?;
-
-                        // 第一引数 self は含まない
-                        let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                            (&method_def.args, &method_def.rtype),
-                            &fctx,
-                            &self.hir,
-                        )?;
-
-                        // メソッドとして登録
-                        self.hir.register_impl_value_existence(
-                            self_ty.kind.clone(),
-                            ictx.impl_block_genargs,
-                            &method_def.id.clone(),
-                            ImplValDefContentKind::NativeMethod(Box::new(
-                                biwac_hir::NativeMethodDefContent::new(
-                                    signature,
-                                    method_def,
-                                    self_ty,
-                                    ictx.impl_block_genarg_vec,
-                                ),
-                            )),
-                        )?;
-                    }
-                    biwac_ast::Globals::VarDecl(_var_decl) => {
-                        todo!()
-                    }
-                    biwac_ast::Globals::Import(_) => {
-                        // nothing to do
-                    }
-                    biwac_ast::Globals::TypeDef(_) => {
-                        // nothing to do
-                    }
-                    biwac_ast::Globals::NativeCode(native) => {
-                        self.hir
-                            .register_module_native_code(modu.modpath.clone(), &native);
-                    }
-                    biwac_ast::Globals::NovelScene(scene_def) => {
-                        let vid = ValId::from_modpath(
-                            PkgId::new(self.pkg_name.clone()),
-                            &modu.modpath,
-                            scene_def.id.id.clone(),
-                        );
-                        let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
-                        let fctx = FnLevelTyResolveCtx::new(&ictx, &Vec::new())?; // ジェネリック引数列は必ず空
-
-                        let signature = biwac_hir::FnDefContentSignature::try_resolve(
-                            (&scene_def.args, &scene_def.rtype),
-                            &fctx,
-                            &self.hir,
-                        )?;
-
-                        self.hir.register_value_existence(
-                            vid,
-                            ValDefContentKind::NovelScene(Box::new(
-                                biwac_hir::NovelSceneDefContent::new(signature, scene_def),
-                            )),
-                        )?;
-                    }
-                }
-            }
-        }
-        // hir から値の存在(シグニチャ)を取得できるようになる
-
-        // 関数内の名前解決を行う
-        let mctxes = mctxes
-            .into_iter()
-            .map(|(mod_id, mctx)| Ok((mod_id, ModuleLevelResolveCtx::new(mctx, &self.hir)?)))
-            .collect::<RsvResult<HashMap<ModId, ModuleLevelResolveCtx>>>()?;
-
-        // 通常の関数に対し
-        // 解決を行う
-        let mut fn_bodies = vec![];
-        for (vid, val) in &self.hir.vals {
-            match val {
-                ValDefContentKind::Fn(f) => {
-                    match &f.body {
-                        biwac_hir::Progressive::NotYet(fn_def) => {
-                            let mctx = mctxes
-                                .get(&fn_def.id.span.module())
-                                .expect("compiler bug: module not found");
-                            let ictx = ImplLevelResolveCtx::new_empty(mctx);
-                            let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
-
-                            let fn_body = biwac_hir::FnDefContentBody::try_resolve(
-                                (fn_def, &f.signature),
-                                &mut fctx,
-                                &self.hir,
-                            )?;
-
-                            fn_bodies.push((vid.clone(), fn_body));
-                        }
-                        biwac_hir::Progressive::Completed(_) => {
-                            // nothing to do
-                        }
-                    }
-                }
-                ValDefContentKind::NovelScene(scene) => {
-                    match &scene.body {
-                        biwac_hir::Progressive::NotYet(scene_def) => {
-                            let mctx = mctxes
-                                .get(&scene_def.id.span.module())
-                                .expect("compiler bug: module not found");
-                            let ictx = ImplLevelResolveCtx::new_empty(mctx);
-                            let mut fctx = FnLevelResolveCtx::new(&ictx, &scene.signature.genargs)?;
-
-                            let fn_body = biwac_hir::FnDefContentBody::try_resolve(
-                                (scene_def, &scene.signature),
-                                &mut fctx,
-                                &self.hir,
-                            )?;
-
-                            fn_bodies.push((vid.clone(), fn_body));
-                        }
-                        biwac_hir::Progressive::Completed(_) => {
-                            // nothing to do
-                        }
-                    }
-                }
-                ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
-                    // nothing to do
-                }
-            }
-        }
-
-        // 解決済みの関数のボディ情報を登録する
-        for (vid, fn_body) in fn_bodies {
-            self.hir.register_value_definition(&vid, fn_body)?;
-        }
-
-        // ユーザ定義型の関連関数、メソッドに対し
-        // 解決を行う
-        let mut impl_fn_bodies = vec![];
-        for (tid, defined_ty_impl) in &self.hir.tys {
-            for (val_name, impl_list) in &defined_ty_impl.vals {
-                for (impl_vid, val) in &impl_list.vals {
-                    match &val.val_content {
-                        ImplValDefContentKind::Fn(f) => {
-                            match &f.body {
-                                biwac_hir::Progressive::NotYet(fn_body) => {
-                                    let mctx = mctxes
-                                        .get(&f.fn_name_span.module())
-                                        .expect("compiler bug: module not found");
-                                    let ictx = ImplLevelResolveCtx::new(
-                                        mctx,
-                                        val.impl_block_genargs.clone(),
-                                    )?;
-                                    let mut fctx =
-                                        FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
-
-                                    let fn_body = biwac_hir::FnDefContentBody::try_resolve(
-                                        (fn_body, &f.signature),
-                                        &mut fctx,
-                                        &self.hir,
-                                    )?;
-
-                                    impl_fn_bodies.push((
-                                        tid.clone(),
-                                        val_name.clone(),
-                                        *impl_vid,
-                                        fn_body,
-                                    ));
-                                }
-                                biwac_hir::Progressive::Completed(_) => {
-                                    // nothing to do
-                                }
-                            }
-                        }
-                        ImplValDefContentKind::Method(m) => {
-                            match &m.body {
-                                biwac_hir::Progressive::NotYet(fn_body) => {
-                                    let mctx = mctxes
-                                        .get(&m.fn_name_span.module())
-                                        .expect("compiler bug: module not found");
-                                    let ictx = ImplLevelResolveCtx::new(
-                                        mctx,
-                                        val.impl_block_genargs.clone(),
-                                    )?;
-                                    let mut fctx =
-                                        FnLevelResolveCtx::new(&ictx, &m.signature.genargs)?;
-
-                                    let fn_body = biwac_hir::FnDefContentBody::try_resolve(
-                                        (fn_body, &m.signature),
-                                        &mut fctx,
-                                        &self.hir,
-                                    )?;
-
-                                    impl_fn_bodies.push((
-                                        tid.clone(),
-                                        val_name.clone(),
-                                        *impl_vid,
-                                        fn_body,
-                                    ));
-                                }
-                                biwac_hir::Progressive::Completed(_) => {
-                                    // nothing to do
-                                }
-                            }
-                        }
-                        ImplValDefContentKind::NativeFn(_)
-                        | ImplValDefContentKind::NativeMethod(_) => {
-                            // nothing to do
-                        }
-                    }
-                }
-            }
-        }
-
-        // 解決済みの関数のボディ情報を登録する
-        for (tid, val_name, impl_vid, fn_body) in impl_fn_bodies {
-            self.hir
-                .register_impl_value_definition(&tid, &val_name, &impl_vid, fn_body)?;
-        }
-
-        // プリミティブ型などの関連関数、メソッドに対し
-        // 解決を行う
-        let mut special_impl_fn_bodies = vec![];
-        for (ty, special_ty_impl) in &self.hir.special_ty_impls {
-            for (val_name, val) in &special_ty_impl.vals {
-                match &val {
-                    ImplValDefContentKind::Fn(f) => {
-                        match &f.body {
-                            biwac_hir::Progressive::NotYet(fn_body) => {
-                                let mctx = mctxes
-                                    .get(&f.fn_name_span.module())
-                                    .expect("compiler bug: module not found");
-                                // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
-                                let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
-                                let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
-
-                                let fn_body = biwac_hir::FnDefContentBody::try_resolve(
-                                    (fn_body, &f.signature),
-                                    &mut fctx,
-                                    &self.hir,
-                                )?;
-
-                                special_impl_fn_bodies.push((
-                                    ty.clone(),
-                                    val_name.clone(),
-                                    fn_body,
-                                ));
-                            }
-                            biwac_hir::Progressive::Completed(_) => {
-                                // nothing to do
-                            }
-                        }
-                    }
-                    ImplValDefContentKind::Method(m) => {
-                        match &m.body {
-                            biwac_hir::Progressive::NotYet(fn_body) => {
-                                let mctx = mctxes
-                                    .get(&m.fn_name_span.module())
-                                    .expect("compiler bug: module not found");
-                                // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
-                                let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
-                                let mut fctx = FnLevelResolveCtx::new(&ictx, &m.signature.genargs)?;
-
-                                let fn_body = biwac_hir::FnDefContentBody::try_resolve(
-                                    (fn_body, &m.signature),
-                                    &mut fctx,
-                                    &self.hir,
-                                )?;
-
-                                special_impl_fn_bodies.push((
-                                    ty.clone(),
-                                    val_name.clone(),
-                                    fn_body,
-                                ));
-                            }
-                            biwac_hir::Progressive::Completed(_) => {
-                                // nothing to do
-                            }
-                        }
-                    }
-                    ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
-                        // nothing to do
-                    }
-                }
-            }
-        }
-
-        // 解決済みの関数のボディ情報を登録する
-        for (ty, val_name, fn_body) in special_impl_fn_bodies {
-            self.hir
-                .register_special_impl_value_definition(&ty, &val_name, fn_body)?;
-        }
-
-        Ok(self.hir)
-    }
+    // pub fn try_resolve(mut self, pkg: Pkg) -> RsvResult<Hir> {
+    //     // 型の存在を記録する
+    //     let mut alias_defs = HashMap::new();
+    //     for modu in pkg.modules.values() {
+    //         // モジュールの存在も記録
+    //         self.hir.register_module_existence(modu.modpath.clone())?;
+    //
+    //         for g in &modu.globals {
+    //             if let biwac_ast::Globals::TypeDef(t) = g {
+    //                 match t {
+    //                     TypeDef::Struct(struct_) => {
+    //                         let tid = TyId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             struct_.id.id.clone(),
+    //                         );
+    //                         self.hir.register_type_existence(
+    //                             tid,
+    //                             TyExistence {
+    //                                 ty_name_span: struct_.id.span.clone().into(),
+    //                                 genarg_len: struct_.genargs.len(),
+    //                             },
+    //                         )?;
+    //                     }
+    //                     TypeDef::TypeAlias(alias) => {
+    //                         let tid = TyId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             alias.ident.id.clone(),
+    //                         );
+    //                         self.hir.register_type_existence(
+    //                             tid.clone(),
+    //                             TyExistence {
+    //                                 ty_name_span: alias.ident.span.clone().into(),
+    //                                 genarg_len: alias.genargs.len(),
+    //                             },
+    //                         )?;
+    //
+    //                         alias_defs.insert(tid, alias);
+    //                     }
+    //                     TypeDef::NativeTypeAlias(native) => {
+    //                         let tid = TyId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             native.ident.id.clone(),
+    //                         );
+    //                         self.hir.register_type_existence(
+    //                             tid.clone(),
+    //                             TyExistence {
+    //                                 ty_name_span: native.ident.span.clone().into(),
+    //                                 genarg_len: native.genargs.len(),
+    //                             },
+    //                         )?;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     // hir から型の存在とジェネリック引数の長さを取得できるようになる
+    //     // hir からモジュールの存在を取得できるようになる
+    //
+    //     let mctxes = pkg
+    //         .modules
+    //         .iter()
+    //         .map(|(mod_id, modu)| {
+    //             let mctx = ModuleLevelTyResolveCtx::new(
+    //                 self.pkg_name.clone(),
+    //                 modu.modpath.clone(),
+    //                 modu,
+    //                 &self.hir,
+    //             )?;
+    //
+    //             Ok((*mod_id, mctx))
+    //         })
+    //         .collect::<RsvResult<HashMap<ModId, ModuleLevelTyResolveCtx>>>()?;
+    //
+    //     // 型エイリアス type alias を正規化し記録する
+    //     let aliases = TyAliasResolveCtx::new(&mctxes, alias_defs).try_resolve(&self.hir)?;
+    //     for (tid, alias) in aliases {
+    //         self.hir
+    //             .register_type_content(&tid, TyDefContentKind::TypeAlias(Box::new(alias)))?;
+    //     }
+    //
+    //     // 型の実体(シグニチャ)を記録する
+    //     for (mod_id, modu) in &pkg.modules {
+    //         let mctx = mctxes.get(mod_id).unwrap();
+    //
+    //         for g in &modu.globals {
+    //             if let biwac_ast::Globals::TypeDef(type_def) = g {
+    //                 match type_def {
+    //                     TypeDef::Struct(struct_) => {
+    //                         let tid = TyId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             struct_.id.id.clone(),
+    //                         );
+    //
+    //                         self.hir.register_type_content(
+    //                             &tid,
+    //                             TyDefContentKind::Struct(Box::new(
+    //                                 StructDefContent::try_resolve_in_module(
+    //                                     struct_, mctx, &self.hir,
+    //                                 )?,
+    //                             )),
+    //                         )?;
+    //                     }
+    //                     TypeDef::TypeAlias(_) => {
+    //                         // すでに解決済み
+    //                     }
+    //                     TypeDef::NativeTypeAlias(native) => {
+    //                         let tid = TyId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             native.ident.id.clone(),
+    //                         );
+    //
+    //                         self.hir.register_type_content(
+    //                             &tid,
+    //                             TyDefContentKind::NativeTypeAlias(Box::new(
+    //                                 NativeTypeAliasDefContent {
+    //                                     alias_name_span: native.ident.span.clone(),
+    //                                     genargs: native
+    //                                         .genargs
+    //                                         .clone()
+    //                                         .into_iter()
+    //                                         .map(|g| g.into())
+    //                                         .collect(),
+    //                                     native: native.native.clone(),
+    //                                     native_span: native.native_span.clone(),
+    //                                 },
+    //                             )),
+    //                         )?;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     // hir から型の実体を取得できるようになる
+    //
+    //     // 値(fn, const)の存在(シグニチャ)を記録する
+    //     for (mod_id, modu) in pkg.modules {
+    //         let mctx = mctxes.get(&mod_id).unwrap();
+    //
+    //         for g in modu.globals {
+    //             match g {
+    //                 biwac_ast::Globals::FnDef(fn_def) => {
+    //                     // 関連関数のとき
+    //                     if let Some(impl_ctx) = &fn_def.impl_ctx {
+    //                         let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
+    //                         let self_ty = ictx.try_resolve_ty(&impl_ctx.self_typ, &self.hir)?;
+    //
+    //                         let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+    //
+    //                         let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                             (&fn_def.args, &fn_def.rtype),
+    //                             &fctx,
+    //                             &self.hir,
+    //                         )?;
+    //
+    //                         self.hir.register_impl_value_existence(
+    //                             self_ty.kind,
+    //                             ictx.impl_block_genargs,
+    //                             &fn_def.id.clone(),
+    //                             ImplValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
+    //                                 signature,
+    //                                 fn_def,
+    //                                 ictx.impl_block_genarg_vec,
+    //                             ))),
+    //                         )?;
+    //                     } else {
+    //                         // 通常の関数のとき
+    //                         let vid = ValId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             fn_def.id.id.clone(),
+    //                         );
+    //                         let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
+    //                         let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+    //
+    //                         let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                             (&fn_def.args, &fn_def.rtype),
+    //                             &fctx,
+    //                             &self.hir,
+    //                         )?;
+    //
+    //                         self.hir.register_value_existence(
+    //                             vid,
+    //                             ValDefContentKind::Fn(Box::new(biwac_hir::FnDefContent::new(
+    //                                 signature,
+    //                                 fn_def,
+    //                                 ictx.impl_block_genarg_vec,
+    //                             ))),
+    //                         )?;
+    //                     }
+    //                 }
+    //                 biwac_ast::Globals::NativeFnDef(fn_def) => {
+    //                     // 関連関数のとき
+    //                     if let Some(impl_ctx) = &fn_def.impl_ctx {
+    //                         let ictx = ImplLevelTyResolveCtx::new(mctx, &impl_ctx.genargs)?;
+    //                         let self_ty = ictx.try_resolve_ty(&impl_ctx.self_typ, &self.hir)?;
+    //
+    //                         let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+    //
+    //                         let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                             (&fn_def.args, &fn_def.rtype),
+    //                             &fctx,
+    //                             &self.hir,
+    //                         )?;
+    //
+    //                         self.hir.register_impl_value_existence(
+    //                             self_ty.kind,
+    //                             ictx.impl_block_genargs,
+    //                             &fn_def.id.clone(),
+    //                             ImplValDefContentKind::NativeFn(Box::new(
+    //                                 biwac_hir::NativeFnDefContent::new(
+    //                                     signature,
+    //                                     fn_def,
+    //                                     ictx.impl_block_genarg_vec,
+    //                                 ),
+    //                             )),
+    //                         )?;
+    //                     } else {
+    //                         // 通常の関数のとき
+    //                         let vid = ValId::from_modpath(
+    //                             PkgId::new(self.pkg_name.clone()),
+    //                             &modu.modpath,
+    //                             fn_def.id.id.clone(),
+    //                         );
+    //                         let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
+    //                         let fctx = FnLevelTyResolveCtx::new(&ictx, &fn_def.genargs)?;
+    //
+    //                         let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                             (&fn_def.args, &fn_def.rtype),
+    //                             &fctx,
+    //                             &self.hir,
+    //                         )?;
+    //
+    //                         self.hir.register_value_existence(
+    //                             vid,
+    //                             ValDefContentKind::Native(Box::new(
+    //                                 biwac_hir::NativeFnDefContent::new(
+    //                                     signature,
+    //                                     fn_def,
+    //                                     ictx.impl_block_genarg_vec,
+    //                                 ),
+    //                             )),
+    //                         )?;
+    //                     }
+    //                 }
+    //                 biwac_ast::Globals::MethodDef(method_def) => {
+    //                     let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
+    //                     let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
+    //
+    //                     let fctx = FnLevelTyResolveCtx::new(&ictx, &method_def.genargs)?;
+    //
+    //                     // 第一引数 self は含まない
+    //                     let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                         (&method_def.args, &method_def.rtype),
+    //                         &fctx,
+    //                         &self.hir,
+    //                     )?;
+    //
+    //                     // メソッドとして登録
+    //                     self.hir.register_impl_value_existence(
+    //                         self_ty.kind,
+    //                         ictx.impl_block_genargs,
+    //                         &method_def.id.clone(),
+    //                         ImplValDefContentKind::Method(Box::new(
+    //                             biwac_hir::MethodDefContent::new(
+    //                                 signature,
+    //                                 method_def,
+    //                                 ictx.impl_block_genarg_vec,
+    //                             ),
+    //                         )),
+    //                     )?;
+    //                 }
+    //                 biwac_ast::Globals::NativeMethodDef(method_def) => {
+    //                     let ictx = ImplLevelTyResolveCtx::new(mctx, &method_def.impl_genargs)?;
+    //                     let self_ty = ictx.try_resolve_ty(&method_def.self_typ, &self.hir)?;
+    //
+    //                     let fctx = FnLevelTyResolveCtx::new(&ictx, &method_def.genargs)?;
+    //
+    //                     // 第一引数 self は含まない
+    //                     let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                         (&method_def.args, &method_def.rtype),
+    //                         &fctx,
+    //                         &self.hir,
+    //                     )?;
+    //
+    //                     // メソッドとして登録
+    //                     self.hir.register_impl_value_existence(
+    //                         self_ty.kind.clone(),
+    //                         ictx.impl_block_genargs,
+    //                         &method_def.id.clone(),
+    //                         ImplValDefContentKind::NativeMethod(Box::new(
+    //                             biwac_hir::NativeMethodDefContent::new(
+    //                                 signature,
+    //                                 method_def,
+    //                                 self_ty,
+    //                                 ictx.impl_block_genarg_vec,
+    //                             ),
+    //                         )),
+    //                     )?;
+    //                 }
+    //                 biwac_ast::Globals::VarDecl(_var_decl) => {
+    //                     todo!()
+    //                 }
+    //                 biwac_ast::Globals::Import(_) => {
+    //                     // nothing to do
+    //                 }
+    //                 biwac_ast::Globals::TypeDef(_) => {
+    //                     // nothing to do
+    //                 }
+    //                 biwac_ast::Globals::NativeCode(native) => {
+    //                     self.hir
+    //                         .register_module_native_code(modu.modpath.clone(), &native);
+    //                 }
+    //                 biwac_ast::Globals::NovelScene(scene_def) => {
+    //                     let vid = ValId::from_modpath(
+    //                         PkgId::new(self.pkg_name.clone()),
+    //                         &modu.modpath,
+    //                         scene_def.id.id.clone(),
+    //                     );
+    //                     let ictx = ImplLevelTyResolveCtx::new_empty(mctx);
+    //                     let fctx = FnLevelTyResolveCtx::new(&ictx, &Vec::new())?; // ジェネリック引数列は必ず空
+    //
+    //                     let signature = biwac_hir::FnDefContentSignature::try_resolve(
+    //                         (&scene_def.args, &scene_def.rtype),
+    //                         &fctx,
+    //                         &self.hir,
+    //                     )?;
+    //
+    //                     self.hir.register_value_existence(
+    //                         vid,
+    //                         ValDefContentKind::NovelScene(Box::new(
+    //                             biwac_hir::NovelSceneDefContent::new(signature, scene_def),
+    //                         )),
+    //                     )?;
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     // hir から値の存在(シグニチャ)を取得できるようになる
+    //
+    //     // 関数内の名前解決を行う
+    //     let mctxes = mctxes
+    //         .into_iter()
+    //         .map(|(mod_id, mctx)| Ok((mod_id, ModuleLevelResolveCtx::new(mctx, &self.hir)?)))
+    //         .collect::<RsvResult<HashMap<ModId, ModuleLevelResolveCtx>>>()?;
+    //
+    //     // 通常の関数に対し
+    //     // 解決を行う
+    //     let mut fn_bodies = vec![];
+    //     for (vid, val) in &self.hir.vals {
+    //         match val {
+    //             ValDefContentKind::Fn(f) => {
+    //                 match &f.body {
+    //                     biwac_hir::Progressive::NotYet(fn_def) => {
+    //                         let mctx = mctxes
+    //                             .get(&fn_def.id.span.module())
+    //                             .expect("compiler bug: module not found");
+    //                         let ictx = ImplLevelResolveCtx::new_empty(mctx);
+    //                         let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
+    //
+    //                         let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+    //                             (fn_def, &f.signature),
+    //                             &mut fctx,
+    //                             &self.hir,
+    //                         )?;
+    //
+    //                         fn_bodies.push((vid.clone(), fn_body));
+    //                     }
+    //                     biwac_hir::Progressive::Completed(_) => {
+    //                         // nothing to do
+    //                     }
+    //                 }
+    //             }
+    //             ValDefContentKind::NovelScene(scene) => {
+    //                 match &scene.body {
+    //                     biwac_hir::Progressive::NotYet(scene_def) => {
+    //                         let mctx = mctxes
+    //                             .get(&scene_def.id.span.module())
+    //                             .expect("compiler bug: module not found");
+    //                         let ictx = ImplLevelResolveCtx::new_empty(mctx);
+    //                         let mut fctx = FnLevelResolveCtx::new(&ictx, &scene.signature.genargs)?;
+    //
+    //                         let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+    //                             (scene_def, &scene.signature),
+    //                             &mut fctx,
+    //                             &self.hir,
+    //                         )?;
+    //
+    //                         fn_bodies.push((vid.clone(), fn_body));
+    //                     }
+    //                     biwac_hir::Progressive::Completed(_) => {
+    //                         // nothing to do
+    //                     }
+    //                 }
+    //             }
+    //             ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
+    //                 // nothing to do
+    //             }
+    //         }
+    //     }
+    //
+    //     // 解決済みの関数のボディ情報を登録する
+    //     for (vid, fn_body) in fn_bodies {
+    //         self.hir.register_value_definition(&vid, fn_body)?;
+    //     }
+    //
+    //     // ユーザ定義型の関連関数、メソッドに対し
+    //     // 解決を行う
+    //     let mut impl_fn_bodies = vec![];
+    //     for (tid, defined_ty_impl) in &self.hir.tys {
+    //         for (val_name, impl_list) in &defined_ty_impl.vals {
+    //             for (impl_vid, val) in &impl_list.vals {
+    //                 match &val.val_content {
+    //                     ImplValDefContentKind::Fn(f) => {
+    //                         match &f.body {
+    //                             biwac_hir::Progressive::NotYet(fn_body) => {
+    //                                 let mctx = mctxes
+    //                                     .get(&f.fn_name_span.module())
+    //                                     .expect("compiler bug: module not found");
+    //                                 let ictx = ImplLevelResolveCtx::new(
+    //                                     mctx,
+    //                                     val.impl_block_genargs.clone(),
+    //                                 )?;
+    //                                 let mut fctx =
+    //                                     FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
+    //
+    //                                 let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+    //                                     (fn_body, &f.signature),
+    //                                     &mut fctx,
+    //                                     &self.hir,
+    //                                 )?;
+    //
+    //                                 impl_fn_bodies.push((
+    //                                     tid.clone(),
+    //                                     val_name.clone(),
+    //                                     *impl_vid,
+    //                                     fn_body,
+    //                                 ));
+    //                             }
+    //                             biwac_hir::Progressive::Completed(_) => {
+    //                                 // nothing to do
+    //                             }
+    //                         }
+    //                     }
+    //                     ImplValDefContentKind::Method(m) => {
+    //                         match &m.body {
+    //                             biwac_hir::Progressive::NotYet(fn_body) => {
+    //                                 let mctx = mctxes
+    //                                     .get(&m.fn_name_span.module())
+    //                                     .expect("compiler bug: module not found");
+    //                                 let ictx = ImplLevelResolveCtx::new(
+    //                                     mctx,
+    //                                     val.impl_block_genargs.clone(),
+    //                                 )?;
+    //                                 let mut fctx =
+    //                                     FnLevelResolveCtx::new(&ictx, &m.signature.genargs)?;
+    //
+    //                                 let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+    //                                     (fn_body, &m.signature),
+    //                                     &mut fctx,
+    //                                     &self.hir,
+    //                                 )?;
+    //
+    //                                 impl_fn_bodies.push((
+    //                                     tid.clone(),
+    //                                     val_name.clone(),
+    //                                     *impl_vid,
+    //                                     fn_body,
+    //                                 ));
+    //                             }
+    //                             biwac_hir::Progressive::Completed(_) => {
+    //                                 // nothing to do
+    //                             }
+    //                         }
+    //                     }
+    //                     ImplValDefContentKind::NativeFn(_)
+    //                     | ImplValDefContentKind::NativeMethod(_) => {
+    //                         // nothing to do
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //
+    //     // 解決済みの関数のボディ情報を登録する
+    //     for (tid, val_name, impl_vid, fn_body) in impl_fn_bodies {
+    //         self.hir
+    //             .register_impl_value_definition(&tid, &val_name, &impl_vid, fn_body)?;
+    //     }
+    //
+    //     // プリミティブ型などの関連関数、メソッドに対し
+    //     // 解決を行う
+    //     let mut special_impl_fn_bodies = vec![];
+    //     for (ty, special_ty_impl) in &self.hir.special_ty_impls {
+    //         for (val_name, val) in &special_ty_impl.vals {
+    //             match &val {
+    //                 ImplValDefContentKind::Fn(f) => {
+    //                     match &f.body {
+    //                         biwac_hir::Progressive::NotYet(fn_body) => {
+    //                             let mctx = mctxes
+    //                                 .get(&f.fn_name_span.module())
+    //                                 .expect("compiler bug: module not found");
+    //                             // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
+    //                             let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
+    //                             let mut fctx = FnLevelResolveCtx::new(&ictx, &f.signature.genargs)?;
+    //
+    //                             let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+    //                                 (fn_body, &f.signature),
+    //                                 &mut fctx,
+    //                                 &self.hir,
+    //                             )?;
+    //
+    //                             special_impl_fn_bodies.push((
+    //                                 ty.clone(),
+    //                                 val_name.clone(),
+    //                                 fn_body,
+    //                             ));
+    //                         }
+    //                         biwac_hir::Progressive::Completed(_) => {
+    //                             // nothing to do
+    //                         }
+    //                     }
+    //                 }
+    //                 ImplValDefContentKind::Method(m) => {
+    //                     match &m.body {
+    //                         biwac_hir::Progressive::NotYet(fn_body) => {
+    //                             let mctx = mctxes
+    //                                 .get(&m.fn_name_span.module())
+    //                                 .expect("compiler bug: module not found");
+    //                             // プリミティブ型などに対して impl block レベルでジェネリック型宣言はないはずなので空
+    //                             let ictx = ImplLevelResolveCtx::new(mctx, [].into())?;
+    //                             let mut fctx = FnLevelResolveCtx::new(&ictx, &m.signature.genargs)?;
+    //
+    //                             let fn_body = biwac_hir::FnDefContentBody::try_resolve(
+    //                                 (fn_body, &m.signature),
+    //                                 &mut fctx,
+    //                                 &self.hir,
+    //                             )?;
+    //
+    //                             special_impl_fn_bodies.push((
+    //                                 ty.clone(),
+    //                                 val_name.clone(),
+    //                                 fn_body,
+    //                             ));
+    //                         }
+    //                         biwac_hir::Progressive::Completed(_) => {
+    //                             // nothing to do
+    //                         }
+    //                     }
+    //                 }
+    //                 ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+    //                     // nothing to do
+    //                 }
+    //             }
+    //         }
+    //     }
+    //
+    //     // 解決済みの関数のボディ情報を登録する
+    //     for (ty, val_name, fn_body) in special_impl_fn_bodies {
+    //         self.hir
+    //             .register_special_impl_value_definition(&ty, &val_name, fn_body)?;
+    //     }
+    //
+    //     Ok(self.hir)
+    // }
 }

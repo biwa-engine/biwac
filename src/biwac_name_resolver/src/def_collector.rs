@@ -3,42 +3,35 @@ use std::{
     collections::{HashMap, hash_map::Entry},
 };
 
-use biwac_base::{InternedIdent, ModId, PackageId};
+use biwac_base::{InternedIdent, PackageId};
+use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::{DefId, PackageLocalDefId, Span, TyDefId, ValDefId};
 
-use crate::{ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, TyNameTree};
+use crate::{
+    AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, ResolveError,
+    TyNameTree,
+    context::{ResolveCtx, impl_level::ImplResolveCtx, module_level::ModuleResolveCtx},
+};
 
 pub(crate) enum TyOrVal<T, V> {
     Ty(T),
     Val(V),
-}
-pub(crate) enum DefCollectError {
-    // module 側から既存の symbol との重複を検知した場合
-    DuplicatedSymbolAndModuleName {
-        name: InternedIdent,
-        mod_id: ModId,
-        symbol_span: Span,
-    },
-
-    // module 内で symbol 同士の重複を検知した場合
-    DuplicatedSymbolName {
-        name: InternedIdent,
-        span1: Span,
-        span2: Span,
-    },
 }
 
 /// DefCollector
 /// collects definitions in self package.
 pub struct DefCollector {
     next_pkg_local_def_id: u32,
+
+    impl_collector: ImplCollector,
 }
 
 impl DefCollector {
     pub fn new() -> Self {
         Self {
             next_pkg_local_def_id: 0,
+            impl_collector: ImplCollector::new(),
         }
     }
 
@@ -55,21 +48,20 @@ impl DefCollector {
         pkg_id: PackageId,
         pkg: &Pkg,
         external_package_trees: HashMap<InternedIdent, PackageNameTree>,
-    ) -> Result<NameTree, Vec<DefCollectError>> {
+    ) -> Result<NameTree, Vec<ResolveError>> {
         let root_module_tree = self.collect_in_module(&pkg.root_module)?;
         let package_tree = PackageNameTree {
             pkg_id,
-            root_mod_id: root_module_tree.mod_id,
-            children: root_module_tree.children,
+            root_module_tree,
         };
 
         let mut packages = external_package_trees;
         packages.insert(pkg_name, package_tree);
         let name_tree = NameTree { packages };
 
-        // TODO: collect impls
+        self.collect_impls(pkg_name, &name_tree, pkg)?;
 
-        self.collect_impls(&pkg_name, &name_tree)?;
+        // TODO: collect impls in name tree
 
         Ok(name_tree)
     }
@@ -79,7 +71,7 @@ impl DefCollector {
     fn collect_in_module(
         &mut self,
         module: &LoadedModule,
-    ) -> Result<ModuleNameTree, Vec<DefCollectError>> {
+    ) -> Result<ModuleNameTree, Vec<ResolveError>> {
         let mut children = HashMap::<InternedIdent, (ModuleNameTreeItem, Span)>::new();
         let mut errors = Vec::new();
 
@@ -167,7 +159,7 @@ impl DefCollector {
                         }
                     },
                     Entry::Occupied(e) => {
-                        errors.push(DefCollectError::DuplicatedSymbolName {
+                        errors.push(ResolveError::DuplicatedSymbolName {
                             name: ident.id,
                             span1: ident.span.clone(),
                             span2: e.get().1.clone(),
@@ -191,7 +183,7 @@ impl DefCollector {
                     }
                 },
                 Entry::Occupied(e) => {
-                    errors.push(DefCollectError::DuplicatedSymbolAndModuleName {
+                    errors.push(ResolveError::DuplicatedSymbolAndModuleName {
                         name: *interned_mod_name,
                         mod_id: module.mod_id,
                         symbol_span: e.get().1.clone(),
@@ -215,10 +207,105 @@ impl DefCollector {
 
     fn collect_impls(
         &mut self,
-        pkg_name: &InternedIdent,
+        pkg_name: InternedIdent,
         name_tree: &NameTree,
-    ) -> Result<(), Vec<DefCollectError>> {
-        // TODO:
-        Ok(())
+        pkg: &Pkg,
+    ) -> Result<(), Vec<ResolveError>> {
+        self.collect_impls_in_module(
+            name_tree,
+            pkg_name,
+            &name_tree.packages.get(&pkg_name).unwrap().root_module_tree,
+            &pkg.root_module,
+        )
+    }
+
+    fn collect_impls_in_module(
+        &mut self,
+        name_tree: &NameTree,
+        pkg_name: InternedIdent,
+        module_tree: &ModuleNameTree,
+        module: &LoadedModule,
+    ) -> Result<(), Vec<ResolveError>> {
+        let mctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast)?;
+        let mut errors = Vec::new();
+
+        for g in &module.ast.globals {
+            if let biwac_ast::Globals::ImplBlock(impl_block) = g {
+                let ictx = match ImplResolveCtx::new(&mctx, impl_block) {
+                    Ok(ictx) => ictx,
+                    Err(errs) => {
+                        errors.extend(errs);
+                        break;
+                    }
+                };
+
+                let self_ty = ictx.opt_self_ty().unwrap();
+
+                for f in &impl_block.assoc_fns {
+                    let def_id = ValDefId::new(self.alloc_def_id());
+                    match self.register_impl(&self_ty, &f.id.id, AssocNameTreeItem::Val { def_id })
+                    {
+                        Ok(()) => {
+                            f.def_id.set(def_id);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                        }
+                    }
+                }
+
+                // TODO: other definitions
+            }
+        }
+
+        for module in module.children.values() {
+            if let Err(errs) =
+                self.collect_impls_in_module(name_tree, pkg_name, module_tree, module)
+            {
+                errors.extend(errs);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    #[inline]
+    fn register_impl(
+        &mut self,
+        ty_kind: &TyKind,
+        name: &InternedIdent,
+        item: AssocNameTreeItem,
+    ) -> Result<(), ResolveError> {
+        self.impl_collector.register_impl(ty_kind, name, item)
+    }
+}
+
+struct ImplCollector {
+    impls: HashMap<TyDefId, HashMap<InternedIdent, TyAssocList>>,
+}
+
+struct TyAssocList {
+    impls: Vec<(Vec<TyKind>, AssocNameTreeItem)>,
+}
+
+impl ImplCollector {
+    fn new() -> Self {
+        Self {
+            impls: HashMap::new(),
+        }
+    }
+
+    fn register_impl(
+        &mut self,
+        ty_kind: &TyKind,
+        name: &InternedIdent,
+        item: AssocNameTreeItem,
+    ) -> Result<(), ResolveError> {
+        // TODO: duplication check
+        todo!()
     }
 }
