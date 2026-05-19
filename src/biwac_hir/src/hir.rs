@@ -7,12 +7,12 @@ pub(crate) mod symbols;
 pub(crate) mod types;
 
 use biwac_base::{IdentInterner, InternedIdent, ModPath, PackageName};
-use biwac_span::{Span, TyDefId, ValDefId};
+use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId};
 
 use crate::{
-    AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, GenTyId, HirError,
-    HirResult, Ident, ImplValDefContentKind, InferTy, LocGenTyId, NativeCode, StructDefContent, Ty,
-    TyDefContentKind, TyKind, ValDefContentKind,
+    AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, HirError, HirResult,
+    Ident, ImplValDefContentKind, InferTy, NativeCode, StructDefContent, Ty, TyDefContentKind,
+    TyKind, ValDefContentKind,
 };
 
 // Progressive は漸進的に値が更新されていくことを示す
@@ -134,7 +134,7 @@ impl ImplValId {
 // ジェネリック引数列と、実体の組
 #[derive(Debug, Clone)]
 pub struct TyValImplGenargsContentPair {
-    pub impl_block_genargs: HashMap<String, (LocGenTyId, Span)>,
+    pub impl_block_genargs: HashMap<String, (LocalGenDefId, Span)>,
     pub genargs: Vec<Ty>,
     pub val_content: ImplValDefContentKind,
 }

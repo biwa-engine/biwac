@@ -4,7 +4,7 @@ mod name_tree;
 mod symbols;
 mod types;
 
-use biwac_span::{DefIdKind, Span, ValDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, ValDefId};
 pub use def_collector::DefCollector;
 pub use name_tree::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, TyNameTree,
@@ -16,7 +16,7 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 
 use biwac_ast::{DefTyp, ImportDecl, Path, TypeDef};
-use biwac_base::{InternedIdent, ModId, ModPath, PackageName, PackageNameError};
+use biwac_base::{InternedIdent, ModId, ModPath, PackageId, PackageName, PackageNameError};
 
 use biwac_dependency_loader::DepsSymbolKind;
 use biwac_hir::{
@@ -88,9 +88,19 @@ pub enum ResolveError {
         path: Box<Path>,
     },
 
-    TypeNotFound {
-        qualid: Box<Path>,
-        tid: Box<TyId>,
+    GenericTypeWithGenArgs {
+        path: Box<Path>,
+        def_id: GenDefId,
+    },
+
+    LocalGenericTypeWithGenArgs {
+        path: Box<Path>,
+        def_id: LocalGenDefId,
+    },
+
+    TypeNotFoundPackageFound {
+        path: Box<Path>,
+        pkg_id: PackageId,
     },
     TypeNotFoundModuleFound {
         path: Box<Path>,
@@ -99,10 +109,6 @@ pub enum ResolveError {
     TypeNotFoundValueFound {
         path: Box<Path>,
         def_id: ValDefId,
-    },
-    ValueNotFound {
-        qualid: Box<Path>,
-        vid: Box<ValId>,
     },
     ValueNotFoundModuleFound {
         qualid: Box<Path>,
@@ -279,32 +285,32 @@ impl ResolveCtx {
         let mut external_tys = HashMap::new();
         for pkg in &deps.deps_pkgs {
             for sym in &pkg.symbols {
-                let span = SSpan::External {
-                    pkg: pkg.name.clone(),
-                    modu: sym.id.modu.clone(),
-                };
-                match &sym.body {
-                    DepsSymbolKind::Struct(struct_) => {
-                        external_tys.insert(
-                            TyId::new(
-                                PkgId::new(pkg.name.clone()),
-                                sym.id.modu.clone().into(),
-                                sym.id.id.clone(),
-                            ),
-                            TyDefContentKind::Struct(Box::new(struct_.as_struct_def(span))),
-                        );
-                    }
-                    DepsSymbolKind::Function(fn_sign) => {
-                        external_vals.insert(
-                            ValId::new(
-                                PkgId::new(pkg.name.clone()),
-                                sym.id.modu.clone().into(),
-                                sym.id.id.clone(),
-                            ),
-                            fn_sign.as_fn_signature(span),
-                        );
-                    }
-                }
+                // let span = SSpan::External {
+                //     pkg: pkg.name.clone(),
+                //     modu: sym.id.modu.clone(),
+                // };
+                // match &sym.body {
+                //     DepsSymbolKind::Struct(struct_) => {
+                //         external_tys.insert(
+                //             TyId::new(
+                //                 PkgId::new(pkg.name.clone()),
+                //                 sym.id.modu.clone().into(),
+                //                 sym.id.id.clone(),
+                //             ),
+                //             TyDefContentKind::Struct(Box::new(struct_.as_struct_def(span))),
+                //         );
+                //     }
+                //     DepsSymbolKind::Function(fn_sign) => {
+                //         external_vals.insert(
+                //             ValId::new(
+                //                 PkgId::new(pkg.name.clone()),
+                //                 sym.id.modu.clone().into(),
+                //                 sym.id.id.clone(),
+                //             ),
+                //             fn_sign.as_fn_signature(span),
+                //         );
+                //     }
+                // }
             }
         }
 

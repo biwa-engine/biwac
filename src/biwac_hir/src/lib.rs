@@ -11,8 +11,8 @@ pub use crate::hir::{
             Variable,
         },
         globals::{
-            DecledArg, FnDefContent, FnDefContentBody, FnDefContentSignature, GenTyId,
-            ImplValDefContentKind, LocGenTyId, MethodDefContent, NativeCode, NativeFnArgDecl,
+            DecledArg, FnDefContent, FnDefContentBody, FnDefContentSignature,
+            ImplValDefContentKind, MethodDefContent, NativeCode, NativeFnArgDecl,
             NativeFnDefContent, NativeMethodDefContent, NativeTypeAliasDefContent,
             NovelSceneDefContent, StructDefContent, TyDefContentKind, TypeAliasDefContent,
             ValDefContentKind,

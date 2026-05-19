@@ -1,7 +1,4 @@
-use biwac_hir::{
-    DefinedTy, FnDefContentSignature, GenTyId, Ident, LocGenTyId, PkgId, StructDefContent, Ty,
-    TyKind,
-};
+use biwac_hir::{DefinedTy, FnDefContentSignature, Ident, PkgId, StructDefContent, Ty, TyKind};
 use biwac_span::Span;
 
 use crate::{DepsFunction, DepsStruct, DepsTy};
@@ -45,22 +42,23 @@ impl DepsFunction {
 
 impl DepsStruct {
     pub fn as_struct_def(&self, span: Span) -> StructDefContent {
-        StructDefContent {
-            // TODO: 重複チェック
-            members: self
-                .members
-                .iter()
-                .map(|m| (m.id.clone(), m.ty.as_ty(span.clone())))
-                .collect(),
-
-            genargs: self
-                .genargs
-                .iter()
-                .enumerate()
-                .map(|(i, _)| GenTyId::new(i))
-                .collect(),
-            struct_name_span: span,
-        }
+        todo!()
+        // StructDefContent {
+        //     // TODO: 重複チェック
+        //     members: self
+        //         .members
+        //         .iter()
+        //         .map(|m| (m.id.clone(), m.ty.as_ty(span.clone())))
+        //         .collect(),
+        //
+        //     genargs: self
+        //         .genargs
+        //         .iter()
+        //         .enumerate()
+        //         .map(|(i, _)| GenTyId::new(i))
+        //         .collect(),
+        //     struct_name_span: span,
+        // }
     }
 }
 

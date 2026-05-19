@@ -35,7 +35,7 @@ impl DefCollector {
         }
     }
 
-    fn alloc_def_id(&mut self) -> DefId {
+    pub(crate) fn alloc_def_id(&mut self) -> DefId {
         let pkg_local_def_id = PackageLocalDefId::new(self.next_pkg_local_def_id);
         self.next_pkg_local_def_id += 1;
 
@@ -231,7 +231,7 @@ impl DefCollector {
 
         for g in &module.ast.globals {
             if let biwac_ast::Globals::ImplBlock(impl_block) = g {
-                let ictx = match ImplResolveCtx::new(&mctx, impl_block) {
+                let ictx = match ImplResolveCtx::new(&mctx, impl_block, self) {
                     Ok(ictx) => ictx,
                     Err(errs) => {
                         errors.extend(errs);

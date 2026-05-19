@@ -54,39 +54,61 @@ impl PackageLocalDefId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TyDefId(DefId);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ValDefId(DefId);
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefIdKind {
+    Package(PackageId),
     Mod(ModId),
     Ty(TyDefId),
     Val(ValDefId),
+    Gen(GenDefId),
+    LocalGen(LocalGenDefId),
 }
 
-impl TyDefId {
-    #[inline]
-    pub fn new(def_id: DefId) -> Self {
-        Self(def_id)
-    }
+macro_rules! impl_typed_def_id {
+    ($typed_def_id:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $typed_def_id(DefId);
 
-    #[inline]
-    pub fn pkg(&self) -> PackageId {
-        self.0.pkg
-    }
+        impl $typed_def_id {
+            #[inline]
+            pub fn new(def_id: DefId) -> Self {
+                Self(def_id)
+            }
+
+            #[inline]
+            pub fn pkg(&self) -> PackageId {
+                self.0.pkg
+            }
+        }
+    };
 }
 
-impl ValDefId {
-    #[inline]
-    pub fn new(def_id: DefId) -> Self {
-        Self(def_id)
-    }
+impl_typed_def_id!(TyDefId);
+impl_typed_def_id!(ValDefId);
 
-    #[inline]
-    pub fn pkg(&self) -> PackageId {
-        self.0.pkg
-    }
-}
+// 型定義側で
+// 宣言されるジェネリクス型に割り当てられるid
+// GenDefIdに対するTyの割り当て(HashMap<GenDefId, Ty>)を保持することで、
+// あるジェネリック型の使用箇所におけるのメンバなどへの型付けを計算できる
+//  ```
+//  struct Foo[T, U] {
+//            ^^^^^^
+//      x: T,
+//      y: U,
+//      z: Int,
+//  }
+//  ```
+impl_typed_def_id!(GenDefId);
+
+// impl block や fn のローカルなスコープで宣言された
+// ジェネリック型に通しで振られるid
+// ```
+//  impl[T] Foo[T, Int] {
+//      ^^^
+//      fn bar[U](self) -> Baz[T, U] {
+//            ^^^
+//          ...
+//      }
+//  }
+// ```
+impl_typed_def_id!(LocalGenDefId);

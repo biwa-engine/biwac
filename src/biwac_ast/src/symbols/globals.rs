@@ -1,12 +1,18 @@
 use std::cell::OnceCell;
 
-use biwac_span::{Span, TyDefId, ValDefId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId};
 
 use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
 #[derive(Debug, Clone)]
-pub struct GenArgsDecl {
-    pub genargs: Vec<Ident>,
+pub struct GenArgDeclItem<I> {
+    pub id: Ident,
+    pub def_id: OnceCell<I>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GenArgsDecl<I> {
+    pub genargs: Vec<GenArgDeclItem<I>>,
     pub span: Span,
 }
 
@@ -15,7 +21,7 @@ pub struct StructDef {
     pub id: Ident,
     pub def_id: OnceCell<TyDefId>,
     pub members: Vec<(Ident, TypRepr)>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<GenDefId>>,
 }
 
 //  type alias
@@ -29,7 +35,7 @@ pub struct StructDef {
 pub struct TypeAlias {
     pub ident: Ident,
     pub def_id: OnceCell<TyDefId>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<GenDefId>>,
     pub right: TypRepr,
 }
 
@@ -43,7 +49,7 @@ pub struct TypeAlias {
 pub struct NativeTypeAlias {
     pub ident: Ident,
     pub def_id: OnceCell<TyDefId>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<GenDefId>>,
     pub native: String,
     pub native_span: Span,
 }
@@ -78,7 +84,7 @@ pub struct FnDef {
     pub rtype: RetTypRepr,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,7 +97,7 @@ pub struct NativeFnDef {
     pub native_span: Span,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,7 +130,7 @@ pub struct MethodDef {
     pub rtype: RetTypRepr,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,7 +143,7 @@ pub struct NativeMethodDef {
     pub native_span: Span,
     pub span: Span,
     pub flags: Vec<CompilerFlag>,
-    pub genargs: Option<GenArgsDecl>,
+    pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,7 +152,7 @@ pub struct ImplBlock {
     pub methods: Vec<MethodDef>,
     pub native_assoc_fns: Vec<NativeFnDef>,
     pub native_methods: Vec<NativeMethodDef>,
-    pub genargs_decl: Option<GenArgsDecl>,
+    pub genargs_decl: Option<GenArgsDecl<LocalGenDefId>>,
     pub self_typ: TypRepr,
 }
 

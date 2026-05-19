@@ -1,58 +1,9 @@
 use std::collections::HashMap;
 
-use biwac_ast::{FnDef, MethodDef, NativeFnDef, NovelScene, symbols::globals::NativeMethodDef};
-use biwac_span::Span;
+use biwac_ast::{FnDef, MethodDef, NativeFnDef, NativeMethodDef, NovelScene};
+use biwac_span::{GenDefId, LocalGenDefId, Span};
 
 use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, Progressive, Stmt, Ty};
-
-// // 型名前空間のシンボルを
-// // 識別するid
-// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-// pub struct TyId {
-//     pub(crate) pkg: PkgId,
-//     pub(crate) quals: Vec<String>,
-//     pub(crate) id: String,
-// }
-
-// 型定義側で
-// 宣言されるジェネリクス型に割り当てられるid
-// GenTyIdに対するTyの割り当て(HashMap<GenTyId, Ty>)を保持することで、
-// あるジェネリック型の使用箇所におけるのメンバなどへの型付けを計算できる
-//  ```
-//  struct Foo[T, U] {
-//            ^^^^^^
-//      x: T,
-//      y: U,
-//      z: Int,
-//  }
-//  ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GenTyId(usize);
-
-// impl block や fn のローカルなスコープで宣言された
-// ジェネリック型に通しで振られるid
-// ```
-//  impl[T] Foo[T, Int] {
-//      ^^^
-//      fn bar[U](self) -> Baz[T, U] {
-//            ^^^
-//          ...
-//      }
-//  }
-// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LocGenTyId(usize);
-
-// // 値名前空間のシンボル
-// // - 関数
-// // - グローバル変数(const)
-// // を識別するid
-// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-// pub struct ValId {
-//     pub(crate) pkg: PkgId,
-//     pub(crate) quals: Vec<String>,
-//     pub(crate) id: String,
-// }
 
 // 値名前空間のシンボル
 #[derive(Debug, Clone)]
@@ -88,7 +39,7 @@ pub struct FnDefContent {
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<LocVarId, Ty>,
 
-    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
+    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
 // ```
@@ -104,7 +55,7 @@ pub struct FnDefContentSignature {
     // Ty::Void
     pub rty: Ty,
 
-    pub genargs: Vec<(Ident, LocGenTyId)>,
+    pub genargs: Vec<(Ident, LocalGenDefId)>,
     pub span: Span,
 }
 
@@ -130,7 +81,7 @@ pub struct NativeFnDefContent {
     pub native_span: Span,
     pub span: Span,
 
-    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
+    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,7 +119,7 @@ pub struct MethodDefContent {
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<LocVarId, Ty>,
 
-    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
+    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
 // TODO: NativeFnDefContent と同じで済むなら同じに
@@ -184,7 +135,7 @@ pub struct NativeMethodDefContent {
     pub span: Span,
 
     pub self_ty: Ty,
-    pub impl_genargs: Vec<(Ident, LocGenTyId)>,
+    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
 // 各種の型の定義
@@ -200,14 +151,14 @@ pub enum TyDefContentKind {
 #[derive(Debug, Clone)]
 pub struct StructDefContent {
     pub members: HashMap<String, Ty>,
-    pub genargs: Vec<GenTyId>,
+    pub genargs: Vec<GenDefId>,
     // TODO: その他各種情報
     pub struct_name_span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct TypeAliasDefContent {
-    pub genargs: Vec<GenTyId>,
+    pub genargs: Vec<GenDefId>,
     pub right: Ty,
     pub alias_name_span: Span,
 }
@@ -246,91 +197,11 @@ pub struct NovelSceneDefContent {
     pub var_tys: HashMap<LocVarId, Ty>,
 }
 
-// impl TyId {
-//     pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
-//         Self { pkg, quals, id }
-//     }
-//
-//     pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
-//         Self {
-//             pkg,
-//             quals: match modpath {
-//                 ModPath::Main => vec![],
-//                 ModPath::Lib => vec![],
-//                 ModPath::Mod(m) => m.clone(),
-//             },
-//             id,
-//         }
-//     }
-//
-//     pub fn pkg(&self) -> &PkgId {
-//         &self.pkg
-//     }
-//
-//     pub fn quals(&self) -> &[String] {
-//         &self.quals
-//     }
-//
-//     pub fn id(&self) -> &str {
-//         &self.id
-//     }
-// }
-//
-// impl ValId {
-//     pub fn new(pkg: PkgId, quals: Vec<String>, id: String) -> Self {
-//         Self { pkg, quals, id }
-//     }
-//
-//     pub fn from_modpath(pkg: PkgId, modpath: &ModPath, id: String) -> Self {
-//         Self {
-//             pkg,
-//             quals: match modpath {
-//                 ModPath::Main => vec![],
-//                 ModPath::Lib => vec![],
-//                 ModPath::Mod(m) => m.clone(),
-//             },
-//             id,
-//         }
-//     }
-//
-//     pub fn pkg(&self) -> &PkgId {
-//         &self.pkg
-//     }
-//
-//     pub fn quals(&self) -> &[String] {
-//         &self.quals
-//     }
-//
-//     pub fn id(&self) -> &str {
-//         &self.id
-//     }
-// }
-
-impl GenTyId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    pub fn value(&self) -> usize {
-        self.0
-    }
-}
-
-impl LocGenTyId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    pub fn value(&self) -> usize {
-        self.0
-    }
-}
-
 impl FnDefContent {
     pub fn new(
         signature: FnDefContentSignature,
         fn_def: FnDef,
-        impl_genargs: Vec<(Ident, LocGenTyId)>,
+        impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
             fn_name_span: fn_def.id.span.clone(),
@@ -347,7 +218,7 @@ impl MethodDefContent {
     pub fn new(
         signature: FnDefContentSignature,
         method_def: MethodDef,
-        impl_genargs: Vec<(Ident, LocGenTyId)>,
+        impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
             fn_name_span: method_def.id.span.clone(),
@@ -365,7 +236,7 @@ impl NativeFnDefContent {
     pub fn new(
         signature: FnDefContentSignature,
         fn_def: NativeFnDef,
-        impl_genargs: Vec<(Ident, LocGenTyId)>,
+        impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
             signature,
@@ -383,7 +254,7 @@ impl NativeMethodDefContent {
         signature: FnDefContentSignature,
         method_def: NativeMethodDef,
         self_ty: Ty,
-        impl_genargs: Vec<(Ident, LocGenTyId)>,
+        impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
             signature,

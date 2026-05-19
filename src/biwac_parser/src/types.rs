@@ -1,4 +1,9 @@
-use biwac_ast::{PrimTyp, TypRepr, TypReprVal, symbols::globals::GenArgsDecl};
+use std::cell::OnceCell;
+
+use biwac_ast::{
+    PrimTyp, TypRepr, TypReprVal,
+    symbols::globals::{GenArgDeclItem, GenArgsDecl},
+};
 use biwac_lexer::{TkKind, TkKindName};
 use biwac_span::Span;
 
@@ -143,9 +148,9 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     /// ジェネリック型引数宣言は、そのスコープで始めて現れるジェネリック型の宣言であり、
     /// その引数列には<identifier>しか含まれない。
     /// ジェネリック型を具体化するときのジェネリック型引数の代入列とは別の意味合いである。
-    pub(crate) fn opt_consume_generic_argument_declaration(
+    pub(crate) fn opt_consume_generic_argument_declaration<I>(
         &mut self,
-    ) -> Result<Option<GenArgsDecl>, ParseError<'src>> {
+    ) -> Result<Option<GenArgsDecl<I>>, ParseError<'src>> {
         let mut genargs = vec![];
         let begin = if let Some(t) = self.peek()
             && matches!(t.kind, TkKind::MarkLBracket)
@@ -165,7 +170,13 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 self.next();
 
                 return Ok(Some(GenArgsDecl {
-                    genargs,
+                    genargs: genargs
+                        .into_iter()
+                        .map(|id| GenArgDeclItem::<I> {
+                            id,
+                            def_id: OnceCell::<I>::new(),
+                        })
+                        .collect(),
                     span: Span::merge(&begin, &end),
                 }));
             } else {
@@ -177,7 +188,13 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         self.next();
 
                         return Ok(Some(GenArgsDecl {
-                            genargs,
+                            genargs: genargs
+                                .into_iter()
+                                .map(|id| GenArgDeclItem::<I> {
+                                    id,
+                                    def_id: OnceCell::<I>::new(),
+                                })
+                                .collect(),
                             span: Span::merge(&begin, &end),
                         }));
                     } else if let TkKind::MarkComma = t.kind {

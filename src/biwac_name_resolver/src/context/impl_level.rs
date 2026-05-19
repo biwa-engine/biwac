@@ -2,17 +2,18 @@ use std::collections::HashMap;
 
 use biwac_ast::ImplBlock;
 use biwac_base::InternedIdent;
-use biwac_hir::{LocGenTyId, TyKind};
+use biwac_hir::TyKind;
+use biwac_span::{DefIdKind, LocalGenDefId};
 
 use crate::{
-    ResolveError,
+    DefCollector, ResolveError,
     context::{ResolveCtx, module_level::ModuleResolveCtx},
 };
 
 #[derive(Debug)]
 pub struct ImplResolveCtx<'mctx> {
     mctx: &'mctx ModuleResolveCtx<'mctx>,
-    genargs: HashMap<InternedIdent, LocGenTyId>,
+    genargs: HashMap<InternedIdent, LocalGenDefId>,
     self_ty: TyKind,
 }
 
@@ -22,12 +23,12 @@ impl ResolveCtx for ImplResolveCtx<'_> {
         path: &biwac_ast::Path,
     ) -> Result<biwac_span::DefIdKind, crate::ResolveError> {
         if path.segments.len() == 1
-            && let Some(_) = self.genargs.get(&path.segments[0].ident.id)
+            && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
         {
-            todo!();
+            Ok(DefIdKind::LocalGen(*def_id))
+        } else {
+            self.mctx.resolve_path(path)
         }
-
-        todo!()
     }
 
     fn opt_self_ty(&self) -> Option<TyKind> {
@@ -39,16 +40,26 @@ impl<'mctx> ImplResolveCtx<'mctx> {
     pub(crate) fn new(
         mctx: &'mctx ModuleResolveCtx<'mctx>,
         impl_block: &ImplBlock,
+        def_collector: &mut DefCollector,
     ) -> Result<Self, Vec<ResolveError>> {
         let self_ty = mctx.resolve_typ(&impl_block.self_typ)?;
 
-        // TODO: impl_block にset
         let genargs = match &impl_block.genargs_decl {
             Some(genargs) => genargs
                 .genargs
                 .iter()
-                .enumerate()
-                .map(|(i, ident)| (ident.id, LocGenTyId::new(i)))
+                .map(|item| {
+                    let def_id = if let Some(def_id) = item.def_id.get() {
+                        *def_id
+                    } else {
+                        let def_id = LocalGenDefId::new(def_collector.alloc_def_id());
+                        // set def_id in AST
+                        item.def_id.set(def_id);
+                        def_id
+                    };
+
+                    (item.id.id, def_id)
+                })
                 .collect(),
             None => HashMap::new(),
         };

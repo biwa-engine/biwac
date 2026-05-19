@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use biwac_span::{Span, TyDefId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId};
 
-use crate::{FnDefContentSignature, GenTyId, LocGenTyId};
+use crate::FnDefContentSignature;
 
 // Ty は 型 を表す
 // ただし、型の種類そのものは TyKind が表し、
@@ -88,7 +88,7 @@ pub enum TyKind {
     // `Foo[T, Int]` のようにジェネリック引数列に型を代入している場合、
     // GenTyId -> TyKind のマップが作られ、メンバなど各種型はそれにより解決される
     // これはその結果解決される型が`Int`のように完全に具体であるか、
-    // `T`のようにジェネリック型(`TyKind::LocGen(LocGenTyId)`)であるか、
+    // `T`のようにジェネリック型(`TyKind::LocGen(LocalGenDefId)`)であるか、
     // 推論を必要とする型(`TyKind::Infer(InferTy)`)であるか、
     // にかかわらず機能する
     //
@@ -103,7 +103,7 @@ pub enum TyKind {
     //      z: Int,
     //  }
     // ```
-    Gen(GenTyId),
+    Gen(GenDefId),
 
     // LocGen は(impl block や fn の)ローカルでのジェネリック型を表す
     // impl block レベルでの文脈と,
@@ -124,7 +124,7 @@ pub enum TyKind {
     //      }
     //  }
     // ```
-    LocGen(LocGenTyId),
+    LocGen(LocalGenDefId),
 
     // Infer は型推論で用いられる
     Infer(InferTy),
@@ -159,10 +159,10 @@ pub struct FnTy {
     // TyKind::Void
     pub rty: Box<Ty>,
 
-    pub genargs: Vec<LocGenTyId>,
+    pub genargs: Vec<LocalGenDefId>,
     // グローバルなシンボル(関数、関連関数、メソッド)として定義済みの関数が、
-    // 引数や戻り値にジェネリック型が登場する(genargs内にそのLocGenTyIdがあれば関数自体が多相である)ことを表すためにある
-    // なお、ジェネリック引数宣言 genargs: Vec<LocGenTyId> に登場するLocGenTyIdが
+    // 引数や戻り値にジェネリック型が登場する(genargs内にそのLocalGenDefIdがあれば関数自体が多相である)ことを表すためにある
+    // なお、ジェネリック引数宣言 genargs: Vec<LocalGenDefId> に登場するLocalGenDefIdが
     // 関数の引数または戻り値に一度以上登場することは保証されなければならない
 }
 
@@ -209,7 +209,7 @@ impl TyKind {
             (Self::Void, Self::Void) => true,
             (Self::Fn(f1), Self::Fn(f2)) => {
                 if f1.genargs.len() == f2.genargs.len() && f1.args.len() == f2.args.len() {
-                    // NOTE: 関数のジェネリック引数列はFnTyではVec<LocGenTyId>として保持しているにすぎず
+                    // NOTE: 関数のジェネリック引数列はFnTyではVec<LocalGenDefId>として保持しているにすぎず
                     // これを比較することに意味はないので行わない
                     f1.args
                         .iter()
@@ -249,7 +249,7 @@ impl TyKind {
 
     // ジェネリック型の具体型への割り当て assigns を受け取り
     // 具体化した型を返す
-    fn embody_by_gen_ty_id(self, assigns: &HashMap<GenTyId, Self>) -> Self {
+    fn embody_by_gen_ty_id(self, assigns: &HashMap<GenDefId, Self>) -> Self {
         match self {
             Self::Gen(gid) => {
                 if let Some(t) = assigns.get(&gid) {
@@ -286,7 +286,7 @@ impl TyKind {
 
     // ジェネリック型の具体型への割り当て assigns を受け取り
     // 具体化した型を返す
-    fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocGenTyId, Self>) -> Self {
+    fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocalGenDefId, Self>) -> Self {
         match self {
             Self::LocGen(lgid) => {
                 if let Some(t) = assigns.get(&lgid) {
@@ -327,7 +327,7 @@ impl Ty {
     // ジェネリック型の具体型への割り当て assigns を受け取り
     // 具体化した型を返す
     // span は元のまま、kind のみ具体化する
-    pub fn embody_by_gen_ty_id(self, assigns: &HashMap<GenTyId, TyKind>) -> Self {
+    pub fn embody_by_gen_ty_id(self, assigns: &HashMap<GenDefId, TyKind>) -> Self {
         Self {
             kind: self.kind.embody_by_gen_ty_id(assigns),
             span: self.span,
@@ -337,7 +337,7 @@ impl Ty {
     // ジェネリック型の具体型への割り当て assigns を受け取り
     // 具体化した型を返す
     // span は元のまま、kind のみ具体化する
-    pub fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocGenTyId, TyKind>) -> Self {
+    pub fn embody_by_loc_gen_ty_id(self, assigns: &HashMap<LocalGenDefId, TyKind>) -> Self {
         Self {
             kind: self.kind.embody_by_loc_gen_ty_id(assigns),
             span: self.span,

@@ -5,7 +5,7 @@ pub(crate) mod val_phase;
 
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
 use biwac_hir::{DefinedTy, Ty, TyKind};
-use biwac_span::{DefIdKind, Span, TyDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId};
 
 use crate::ResolveError;
 
@@ -39,10 +39,29 @@ pub(crate) trait ResolveCtx {
                             .collect::<Result<Vec<Ty>, Vec<ResolveError>>>()
                         {
                             Ok(genargs) => match ty_def_id_try_from_path(&def_typ.path) {
-                                Ok(ty_def_id) => Ok(TyKind::Defined(DefinedTy {
-                                    def_id: ty_def_id,
-                                    genargs,
-                                })),
+                                Ok(TyDefIdKind::Ty(def_id)) => {
+                                    Ok(TyKind::Defined(DefinedTy { def_id, genargs }))
+                                }
+                                Ok(TyDefIdKind::Gen(def_id)) => {
+                                    if genargs.is_empty() {
+                                        Ok(TyKind::Gen(def_id))
+                                    } else {
+                                        Err(vec![ResolveError::GenericTypeWithGenArgs {
+                                            path: Box::new(def_typ.path.clone()),
+                                            def_id,
+                                        }])
+                                    }
+                                }
+                                Ok(TyDefIdKind::LocalGen(def_id)) => {
+                                    if genargs.is_empty() {
+                                        Ok(TyKind::LocGen(def_id))
+                                    } else {
+                                        Err(vec![ResolveError::LocalGenericTypeWithGenArgs {
+                                            path: Box::new(def_typ.path.clone()),
+                                            def_id,
+                                        }])
+                                    }
+                                }
                                 Err(e) => Err(vec![e]),
                             },
                             Err(mut errors) => match res_def_id {
@@ -60,10 +79,12 @@ pub(crate) trait ResolveCtx {
                         }
                     }
                     None => match ty_def_id_try_from_path(&def_typ.path) {
-                        Ok(ty_def_id) => Ok(TyKind::Defined(DefinedTy {
-                            def_id: ty_def_id,
+                        Ok(TyDefIdKind::Ty(def_id)) => Ok(TyKind::Defined(DefinedTy {
+                            def_id,
                             genargs: Vec::new(),
                         })),
+                        Ok(TyDefIdKind::Gen(def_id)) => Ok(TyKind::Gen(def_id)),
+                        Ok(TyDefIdKind::LocalGen(def_id)) => Ok(TyKind::LocGen(def_id)),
                         Err(e) => Err(vec![e]),
                     },
                 }
@@ -107,9 +128,13 @@ pub(crate) fn def_id_kind_try_from_path(path: &Path) -> Result<DefIdKind, Resolv
     panic!("compiler bug: `Path` not resolved yet.")
 }
 
-pub(crate) fn ty_def_id_try_from_path(path: &Path) -> Result<TyDefId, ResolveError> {
+pub(crate) fn ty_def_id_try_from_path(path: &Path) -> Result<TyDefIdKind, ResolveError> {
     match def_id_kind_try_from_path(path)? {
-        DefIdKind::Ty(ty_def_id) => Ok(ty_def_id),
+        DefIdKind::Package(pkg_id) => Err(ResolveError::TypeNotFoundPackageFound {
+            path: Box::new(path.clone()),
+            pkg_id,
+        }),
+        DefIdKind::Ty(ty_def_id) => Ok(TyDefIdKind::Ty(ty_def_id)),
         DefIdKind::Mod(mod_id) => Err(ResolveError::TypeNotFoundModuleFound {
             path: Box::new(path.clone()),
             mod_id,
@@ -118,5 +143,13 @@ pub(crate) fn ty_def_id_try_from_path(path: &Path) -> Result<TyDefId, ResolveErr
             path: Box::new(path.clone()),
             def_id: val_def_id,
         }),
+        DefIdKind::Gen(gen_def_id) => Ok(TyDefIdKind::Gen(gen_def_id)),
+        DefIdKind::LocalGen(local_gen_def_id) => Ok(TyDefIdKind::LocalGen(local_gen_def_id)),
     }
+}
+
+enum TyDefIdKind {
+    Ty(TyDefId),
+    Gen(GenDefId),
+    LocalGen(LocalGenDefId),
 }
