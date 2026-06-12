@@ -1,25 +1,34 @@
 use biwac_hir::{
     BinaryExpr, BlockExpr, Callee, Expr, ExprVal, FnCall, IfExpr, Literal, MemberAccess,
-    MethodCall, Primary, Stmt, StructLiteral, TyKind, UnaryExpr, Variable,
+    MethodCall, Primary, Stmt, StructLiteral, TyKind, UnaryExpr,
 };
 
-use crate::{RsvResult, TryResolve, context::val_phase::ResolvedValue};
+use crate::{
+    context::{ResolveCtx, val_phase::ResolvedValue},
+    symbols::NameResolve,
+};
 
-impl TryResolve<&biwac_ast::Primary> for Primary {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::Primary,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        match &value {
-            biwac_ast::Primary::Literal(l) => {
-                Ok(Self::Literal(Literal::try_resolve(l, fctx, hir)?))
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::Primary {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        match self {
+            biwac_ast::Primary::Literal(l) => Ok(()),
+            biwac_ast::Primary::Variable(v) => match v {
+                biwac_ast::Variable::Path(path) => {
+                    ctx.resolve_path(path).map(|_| ()).map_err(|e| vec![e])
+                }
+                biwac_ast::Variable::SelfVar(_) => {
+                    // TODO:
+                    todo!()
+                }
+            },
+            biwac_ast::Primary::FnCall(f) => {
+                // TODO:
+                todo!()
             }
-            biwac_ast::Primary::Variable(v) => Ok(Self::Variable(Variable {
-                id: fctx.try_resolve_variable(v, hir)?,
-                span: v.span.clone(),
-            })),
-            biwac_ast::Primary::FnCall(f) => Ok(Self::FnCall(FnCall::try_resolve(f, fctx, hir)?)),
             biwac_ast::Primary::MemberAccess(m) => {
                 Ok(Self::MemberAccess(MemberAccess::try_resolve(m, fctx, hir)?))
             }
@@ -32,12 +41,12 @@ impl TryResolve<&biwac_ast::Primary> for Primary {
     }
 }
 
-impl TryResolve<&biwac_ast::IfExpr> for IfExpr {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::IfExpr,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::IfExpr {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
         Ok(Self {
             cond: Box::new(Expr::try_resolve(&value.cond, fctx, hir)?),
             then: BlockExpr::try_resolve(&value.then, fctx, hir)?,
@@ -47,6 +56,19 @@ impl TryResolve<&biwac_ast::IfExpr> for IfExpr {
     }
 }
 
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::BlockExpr {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        for stmt in &self.stmts {
+            // stmt.
+            todo!();
+        }
+        Ok(())
+    }
+}
 impl TryResolve<&biwac_ast::BlockExpr> for BlockExpr {
     fn try_resolve<'mctx>(
         value: &biwac_ast::BlockExpr,
@@ -160,17 +182,14 @@ impl TryResolve<&biwac_ast::Literal> for Literal {
     }
 }
 
-impl TryResolve<&biwac_ast::Exprs> for Expr {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::Exprs,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        match value {
-            biwac_ast::Exprs::Primary(prim) => Ok(Self {
-                expr: ExprVal::Primary(Primary::try_resolve(prim, fctx, hir)?),
-                id: fctx.new_expr_id(),
-            }),
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::Exprs {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        match self {
+            biwac_ast::Exprs::Primary(prim) => prim.resolve(ctx, def_collector),
             biwac_ast::Exprs::Unary(u) => Ok(Self {
                 expr: ExprVal::Unary(UnaryExpr {
                     op: u.op,

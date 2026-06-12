@@ -1,23 +1,13 @@
+pub(crate) mod fn_level;
 pub(crate) mod impl_level;
 pub(crate) mod module_level;
-pub(crate) mod ty_phase;
-pub(crate) mod val_phase;
+pub(crate) mod ty_def_level;
 
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
 use biwac_hir::{DefinedTy, Ty, TyKind};
-use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId};
 
 use crate::ResolveError;
-
-fn ty_from_primitive(ptyp: &PrimTyp, span: Span) -> Ty {
-    match ptyp {
-        PrimTyp::Int => Ty::new(TyKind::Int, span.into()),
-        // TODO: Uint
-        PrimTyp::Uint => Ty::new(TyKind::Int, span.into()),
-        PrimTyp::Float => Ty::new(TyKind::Float, span.into()),
-        PrimTyp::Bool => Ty::new(TyKind::Bool, span.into()),
-    }
-}
 
 pub(crate) trait ResolveCtx {
     fn resolve_path(&self, path: &Path) -> Result<DefIdKind, ResolveError>;

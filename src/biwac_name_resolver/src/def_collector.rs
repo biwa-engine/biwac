@@ -45,19 +45,21 @@ impl DefCollector {
     pub fn collect(
         &mut self,
         pkg_name: InternedIdent,
-        pkg_id: PackageId,
         pkg: &Pkg,
         external_package_trees: HashMap<InternedIdent, PackageNameTree>,
     ) -> Result<NameTree, Vec<ResolveError>> {
         let root_module_tree = self.collect_in_module(&pkg.root_module)?;
         let package_tree = PackageNameTree {
-            pkg_id,
+            pkg_id: PackageId::SELF_PACKAGE,
             root_module_tree,
         };
 
         let mut packages = external_package_trees;
         packages.insert(pkg_name, package_tree);
-        let name_tree = NameTree { packages };
+        let name_tree = NameTree {
+            self_pkg_name: pkg_name,
+            packages,
+        };
 
         self.collect_impls(pkg_name, &name_tree, pkg)?;
 

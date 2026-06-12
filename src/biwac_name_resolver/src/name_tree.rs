@@ -5,6 +5,7 @@ use biwac_span::{TyDefId, ValDefId};
 
 #[derive(Debug)]
 pub struct NameTree {
+    pub(crate) self_pkg_name: InternedIdent,
     pub(crate) packages: HashMap<InternedIdent, PackageNameTree>,
 }
 

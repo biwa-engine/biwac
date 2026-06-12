@@ -4,7 +4,7 @@ mod name_tree;
 mod symbols;
 mod types;
 
-use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, ValDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId, ValDefId};
 pub use def_collector::DefCollector;
 pub use name_tree::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, TyNameTree,
@@ -25,16 +25,7 @@ use biwac_hir::{
 };
 use biwac_package_loader::Pkg;
 
-use crate::context::{
-    ty_phase::{
-        fn_level::FnLevelTyResolveCtx, impl_level::ImplLevelTyResolveCtx,
-        module_level::ModuleLevelTyResolveCtx, ty_alias_level::TyAliasResolveCtx,
-    },
-    val_phase::{
-        fn_level::FnLevelResolveCtx, impl_level::ImplLevelResolveCtx,
-        module_level::ModuleLevelResolveCtx,
-    },
-};
+use crate::symbols::resolve_in_self_package;
 
 // このcrate biwac_name_resolver は、
 // package内のあらゆる名前の解決をすることを目指す。
@@ -74,6 +65,12 @@ pub enum ResolveError {
         name: InternedIdent,
         span: Span,
         def_id_kind: DefIdKind,
+    },
+
+    DuplicatedStructMember {
+        name: InternedIdent,
+        span1: Span,
+        span2: Span,
     },
 
     UnexpectedSelfType {
@@ -116,9 +113,8 @@ pub enum ResolveError {
         modpath: Box<ModPath>,
     },
     ValueNotFoundTypeFound {
-        qualid: Box<Path>,
-        import_decl: Box<ImportDecl>,
-        tid: Box<TyId>,
+        path: Box<Path>,
+        def_id: TyDefId,
     },
     ImplementedValueNotFound {
         ty: Box<Ty>,
@@ -126,6 +122,18 @@ pub enum ResolveError {
     },
     IdentifierNotFound {
         qualid: Path,
+    },
+
+    DuplicatedGenName {
+        name: InternedIdent,
+        def_id1: GenDefId,
+        def_id2: GenDefId,
+    },
+
+    DuplicatedLocalGenName {
+        name: InternedIdent,
+        def_id1: LocalGenDefId,
+        def_id2: LocalGenDefId,
     },
     DuplicatedImportedName {
         name: String,
@@ -152,14 +160,14 @@ pub enum ResolveError {
         tid1: Box<Ident>,
         tid2: Box<Ident>,
     },
-    GenericArgLengthMismatched {
-        // TODO: エラーメッセージを正確に出しやすく
-        deftyp: Box<DefTyp>,
-        tid: Box<TyId>,
-        ty_existence: Box<TyExistence>,
-    },
+    // GenericArgLengthMismatched {
+    //     // TODO: エラーメッセージを正確に出しやすく
+    //     deftyp: Box<DefTyp>,
+    //     tid: Box<TyId>,
+    //     ty_existence: Box<TyExistence>,
+    // },
     CyclingTypeAlias {
-        tid: Box<TyId>,
+        def_id: Box<GenDefId>,
         detected_position: Box<Span>,
     },
     InsufficientDependencyPackageData {
@@ -176,149 +184,143 @@ pub enum ResolveError {
                                         // },
 }
 
-pub type RsvResult<T> = Result<T, ResolveError>;
-
-// <----                           function id                                      ---->
-// <----                               type id                                      ---->
-// <package-name> :: <module-name>::<module-name>                         :: <identifier> :: [  ]
-//
-//
-// <self-type>                                                            :: <identifier> :: [  ]
-//
-// <package-name> :: <module-name>::<module-name> :: <identifier> :: [  ]
-// <----                      type id                       ---->
-//
-//
-
-trait TryResolve<T>: Sized {
-    fn try_resolve<'mctx>(
-        value: T,
-        fctx: &mut FnLevelResolveCtx<'mctx>,
-        hir: &Hir,
-    ) -> RsvResult<Self>;
-}
-
-// trait ImplLevelTryResolve<T>: Sized {
-//     fn try_resolve_in_impl<'mctx>(
-//         value: T,
-//         ictx: &ImplLevelResolveCtx<'mctx>,
-//         hir: &Hir,
-//     ) -> RsvResult<Self>;
-// }
-
-// trait ModuleLevelTryResolve<T>: Sized {
-//     fn try_resolve_in_module<'pctx>(
-//         value: T,
-//         mctx: &ModuleLevelResolveCtx,
-//         hir: &Hir,
-//     ) -> RsvResult<Self>;
-// }
-
-trait ModuleLevelTryResolveTy<T>: Sized {
-    fn try_resolve_in_module(
-        value: T,
-        mctx: &ModuleLevelTyResolveCtx,
-        hir: &Hir,
-    ) -> RsvResult<Self>;
-}
-
-trait TryResolveTy<T>: Sized {
-    fn try_resolve<'mctx>(
-        value: T,
-        fctx: &FnLevelTyResolveCtx<'mctx>,
-        hir: &Hir,
-    ) -> RsvResult<Self>;
-}
-
 impl From<HirError> for ResolveError {
     fn from(value: HirError) -> Self {
         Self::HirError(value)
     }
 }
 
-pub struct ResolveCtx {
-    hir: Hir,
-    pkg_name: PackageName,
+trait ResolveErrorHandler {
+    fn handle(self, errors: &mut Vec<ResolveError>);
 }
 
-impl ResolveCtx {
+impl<T> ResolveErrorHandler for Result<T, Vec<ResolveError>> {
+    fn handle(self, errors: &mut Vec<ResolveError>) {
+        if let Err(errs) = self {
+            errors.extend(errs);
+        }
+    }
+}
+
+impl<T> ResolveErrorHandler for Result<T, ResolveError> {
+    fn handle(self, errors: &mut Vec<ResolveError>) {
+        if let Err(e) = self {
+            errors.push(e);
+        }
+    }
+}
+
+pub struct NameResolver {
+    pkg: Pkg,
+    pkg_name: InternedIdent,
+}
+
+impl NameResolver {
     pub fn new(
         metadata: &biwac_base::MetadataHolder,
         deps: &biwac_dependency_loader::Deps,
+        pkg_name: InternedIdent,
+        pkg: Pkg,
     ) -> Result<Self, ResolveError> {
-        // dependencies に重複したパッケージ名がないか検査
-        let mut dep_pkg_names = HashSet::new();
-        let meta = metadata.metadata.as_ref().unwrap(); // ロード済みなのでSome
-        for pkg in &meta.dependencies {
-            if !dep_pkg_names.insert(pkg.name.value()) {
-                // not newly inserted
-                return Err(ResolveError::DuplicatedDepsPackageName {
-                    pkg: pkg.name.clone(),
-                });
-            }
-        }
-
-        // dependency list file にすべての依存パッケージが記述されていることを検査
-        let deps_pkgs: HashMap<_, _> = deps
-            .deps_pkgs
-            .iter()
-            .map(|pkg| (pkg.name.value(), &pkg.symbols))
-            .collect();
-
-        for pkg in &meta.dependencies {
-            if !deps_pkgs.contains_key(pkg.name.value()) {
-                return Err(ResolveError::InsufficientDependencyPackageData {
-                    pkg: pkg.name.clone(),
-                });
-            }
-        }
-
-        if deps_pkgs.contains_key(meta.name.value()) {
-            return Err(ResolveError::DependsOnSamePackageName {
-                pkg: meta.name.clone(),
-            });
-        }
-
-        // パッケージ名に重複がないことを検査済みのため、
-        // パッケージ内で重複がない限り、シンボルの重複は起こり得ない
-        let mut external_vals = HashMap::new();
-        let mut external_tys = HashMap::new();
-        for pkg in &deps.deps_pkgs {
-            for sym in &pkg.symbols {
-                // let span = SSpan::External {
-                //     pkg: pkg.name.clone(),
-                //     modu: sym.id.modu.clone(),
-                // };
-                // match &sym.body {
-                //     DepsSymbolKind::Struct(struct_) => {
-                //         external_tys.insert(
-                //             TyId::new(
-                //                 PkgId::new(pkg.name.clone()),
-                //                 sym.id.modu.clone().into(),
-                //                 sym.id.id.clone(),
-                //             ),
-                //             TyDefContentKind::Struct(Box::new(struct_.as_struct_def(span))),
-                //         );
-                //     }
-                //     DepsSymbolKind::Function(fn_sign) => {
-                //         external_vals.insert(
-                //             ValId::new(
-                //                 PkgId::new(pkg.name.clone()),
-                //                 sym.id.modu.clone().into(),
-                //                 sym.id.id.clone(),
-                //             ),
-                //             fn_sign.as_fn_signature(span),
-                //         );
-                //     }
-                // }
-            }
-        }
-
-        Ok(Self {
-            hir: Hir::new(meta.name.clone(), external_tys, external_vals),
-            pkg_name: meta.name.clone(),
-        })
+        Ok(Self { pkg, pkg_name })
     }
+
+    pub fn try_resolve(self) -> Result<Hir, Vec<ResolveError>> {
+        let external_package_trees = HashMap::new();
+
+        // definition collection (package internal)
+        let mut def_collector = DefCollector::new();
+        let name_tree = def_collector.collect(self.pkg_name, &self.pkg, external_package_trees)?;
+
+        // symbol resolution (package internal)
+        resolve_in_self_package(&self.pkg, &name_tree, &mut def_collector)?;
+
+        // TODO: collect and check result
+
+        // TODO: cache on disk
+
+        // TODO: lowering to HIR
+
+        todo!()
+    }
+
+    // pub fn new(
+    //     metadata: &biwac_base::MetadataHolder,
+    //     deps: &biwac_dependency_loader::Deps,
+    // ) -> Result<Self, ResolveError> {
+    //     // dependencies に重複したパッケージ名がないか検査
+    //     let mut dep_pkg_names = HashSet::new();
+    //     let meta = metadata.metadata.as_ref().unwrap(); // ロード済みなのでSome
+    //     for pkg in &meta.dependencies {
+    //         if !dep_pkg_names.insert(pkg.name.value()) {
+    //             // not newly inserted
+    //             return Err(ResolveError::DuplicatedDepsPackageName {
+    //                 pkg: pkg.name.clone(),
+    //             });
+    //         }
+    //     }
+    //
+    //     // dependency list file にすべての依存パッケージが記述されていることを検査
+    //     let deps_pkgs: HashMap<_, _> = deps
+    //         .deps_pkgs
+    //         .iter()
+    //         .map(|pkg| (pkg.name.value(), &pkg.symbols))
+    //         .collect();
+    //
+    //     for pkg in &meta.dependencies {
+    //         if !deps_pkgs.contains_key(pkg.name.value()) {
+    //             return Err(ResolveError::InsufficientDependencyPackageData {
+    //                 pkg: pkg.name.clone(),
+    //             });
+    //         }
+    //     }
+    //
+    //     if deps_pkgs.contains_key(meta.name.value()) {
+    //         return Err(ResolveError::DependsOnSamePackageName {
+    //             pkg: meta.name.clone(),
+    //         });
+    //     }
+    //
+    //     // パッケージ名に重複がないことを検査済みのため、
+    //     // パッケージ内で重複がない限り、シンボルの重複は起こり得ない
+    //     let mut external_vals = HashMap::new();
+    //     let mut external_tys = HashMap::new();
+    //     for pkg in &deps.deps_pkgs {
+    //         for sym in &pkg.symbols {
+    //             // let span = SSpan::External {
+    //             //     pkg: pkg.name.clone(),
+    //             //     modu: sym.id.modu.clone(),
+    //             // };
+    //             // match &sym.body {
+    //             //     DepsSymbolKind::Struct(struct_) => {
+    //             //         external_tys.insert(
+    //             //             TyId::new(
+    //             //                 PkgId::new(pkg.name.clone()),
+    //             //                 sym.id.modu.clone().into(),
+    //             //                 sym.id.id.clone(),
+    //             //             ),
+    //             //             TyDefContentKind::Struct(Box::new(struct_.as_struct_def(span))),
+    //             //         );
+    //             //     }
+    //             //     DepsSymbolKind::Function(fn_sign) => {
+    //             //         external_vals.insert(
+    //             //             ValId::new(
+    //             //                 PkgId::new(pkg.name.clone()),
+    //             //                 sym.id.modu.clone().into(),
+    //             //                 sym.id.id.clone(),
+    //             //             ),
+    //             //             fn_sign.as_fn_signature(span),
+    //             //         );
+    //             //     }
+    //             // }
+    //         }
+    //     }
+    //
+    //     Ok(Self {
+    //         hir: Hir::new(meta.name.clone(), external_tys, external_vals),
+    //         pkg_name: meta.name.clone(),
+    //     })
+    // }
 
     // pub fn try_resolve(mut self, pkg: Pkg) -> RsvResult<Hir> {
     //     // 型の存在を記録する

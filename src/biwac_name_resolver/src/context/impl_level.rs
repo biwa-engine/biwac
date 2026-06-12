@@ -22,10 +22,15 @@ impl ResolveCtx for ImplResolveCtx<'_> {
         &self,
         path: &biwac_ast::Path,
     ) -> Result<biwac_span::DefIdKind, crate::ResolveError> {
-        if path.segments.len() == 1
+        if path.abs_header.is_none()
+            && path.segments.len() == 1
             && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
         {
-            Ok(DefIdKind::LocalGen(*def_id))
+            let def_id_kind = DefIdKind::LocalGen(*def_id);
+            path.segments[0]
+                .resolved_id
+                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind));
+            Ok(def_id_kind)
         } else {
             self.mctx.resolve_path(path)
         }

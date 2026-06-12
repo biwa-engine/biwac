@@ -1,114 +1,145 @@
-use biwac_ast::TypDecl;
-use biwac_hir::{
-    AssignStmt, BlockStmt, Expr, ExprStmt, IfStmt, InferTy, Primary, ReturnStmt, Stmt, Ty, TyKind,
-    VarDecl, WhileStmt,
+use crate::{
+    context::{ResolveCtx, fn_level::FnResolveCtx},
+    symbols::NameResolve,
 };
 
-use crate::{RsvResult, TryResolve};
-
-impl TryResolve<&biwac_ast::Stmt> for Stmt {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::Stmt,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        match &value {
-            biwac_ast::Stmt::If(i) => Ok(Self::If(IfStmt::try_resolve(i, fctx, hir)?)),
-            biwac_ast::Stmt::While(w) => Ok(Self::While(WhileStmt::try_resolve(w, fctx, hir)?)),
-            biwac_ast::Stmt::Block(b) => Ok(Self::Block(BlockStmt::try_resolve(b, fctx, hir)?)),
-            biwac_ast::Stmt::Expr(expr) => Ok(Self::Expr(ExprStmt {
-                span: expr.span.clone(),
-                expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
-            })),
-            biwac_ast::Stmt::Return(expr) => Ok(Self::Return(ReturnStmt {
-                span: expr.span.clone(),
-                expr: Expr::try_resolve(&expr.expr, fctx, hir)?,
-            })),
-            biwac_ast::Stmt::VarDecl(var) => {
-                Ok(Self::VarDecl(VarDecl::try_resolve(var, fctx, hir)?))
-            }
-            biwac_ast::Stmt::Assign(assign) => Ok(Self::Assign(AssignStmt {
-                span: assign.span.clone(),
-                dst: Primary::try_resolve(&assign.dst, fctx, hir)?,
-                src: Expr::try_resolve(&assign.src, fctx, hir)?,
-            })),
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::Stmt {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        match self {
+            biwac_ast::Stmt::If(i) => i.resolve(ctx, def_collector),
+            biwac_ast::Stmt::While(w) => w.resolve(ctx, def_collector),
+            biwac_ast::Stmt::Block(b) => b.resolve(ctx, def_collector),
+            biwac_ast::Stmt::Expr(expr) => expr.expr.resolve(ctx, def_collector),
+            biwac_ast::Stmt::Return(ret) => ret.expr.resolve(ctx, def_collector),
+            biwac_ast::Stmt::VarDecl(var_decl) => var_decl.resolve(ctx, def_collector),
+            biwac_ast::Stmt::Assign(assign) => assign.resolve(ctx, def_collector),
         }
     }
 }
 
-impl TryResolve<&biwac_ast::BlockStmt> for BlockStmt {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::BlockStmt,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::BlockStmt {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
         // ブロック文はスコープを作る
         fctx.enter_scope();
 
-        let stmts = value
-            .stmts
-            .iter()
-            .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
-            .collect::<RsvResult<Vec<Stmt>>>()?;
+        for stmt in &self.stmts {
+            if let Err(errs) = stmt.resolve(ctx, def_collector) {
+                errors.extend(errs);
+            }
+        }
 
         fctx.exit_scope();
 
-        Ok(BlockStmt {
-            span: value.span.clone(),
-            stmts,
-        })
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
-impl TryResolve<&biwac_ast::IfStmt> for IfStmt {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::IfStmt,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        Ok(Self {
-            cond: Expr::try_resolve(&value.cond, fctx, hir)?,
-            then: BlockStmt::try_resolve(&value.then, fctx, hir)?,
-            els: match &value.els {
-                Some(els) => Some(BlockStmt::try_resolve(els, fctx, hir)?),
-                None => None,
-            },
-        })
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::IfStmt {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        if let Err(errs) = self.cond.resolve(ctx, def_collector) {
+            errors.extend(errs);
+        }
+
+        if let Err(errs) = self.then.resolve(ctx, def_collector) {
+            errors.extend(errs);
+        }
+
+        if let Some(els) = &self.els
+            && let Err(errs) = els.resolve(ctx, def_collector)
+        {
+            errors.extend(errs);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
-impl TryResolve<&biwac_ast::WhileStmt> for WhileStmt {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::WhileStmt,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        Ok(Self {
-            cond: Expr::try_resolve(&value.cond, fctx, hir)?,
-            stmts: BlockStmt::try_resolve(&value.stmts, fctx, hir)?,
-        })
+impl<C: ResolveCtx> NameResolve<C> for biwac_ast::WhileStmt {
+    fn resolve(
+        &self,
+        ctx: &C,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        if let Err(errs) = self.cond.resolve(ctx, def_collector) {
+            errors.extend(errs);
+        }
+
+        if let Err(errs) = self.stmts.resolve(ctx, def_collector) {
+            errors.extend(errs);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
-impl TryResolve<&biwac_ast::VarDecl> for VarDecl {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::VarDecl,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        // 変数の宣言をcontextに登録
-        let ty = match &value.typ {
-            TypDecl::Typ(typ) => fctx.try_resolve_ty(typ, hir)?,
-            TypDecl::Any => Ty::new(
-                TyKind::Infer(InferTy::Unknown),
-                value.id.span.clone().into(),
-            ), // 型が不明で推論を要する
-        };
-        let id = fctx.declare_variable(&value.id.clone().into(), ty)?;
+impl<'ctx, C: ResolveCtx> NameResolve<FnResolveCtx<'ctx, C>> for biwac_ast::VarDecl {
+    fn resolve(
+        &self,
+        ctx: &FnResolveCtx<'ctx, C>,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        if let biwac_ast::TypDecl::Typ(typ) = &self.typ {
+            ctx.resolve_typ(typ)?;
+        }
 
-        Ok(Self {
-            id,
-            init: Expr::try_resolve(&value.init, fctx, hir)?,
-        })
+        // TODO:
+        // 宣言した変数を今のスコープに詰んで解決できるようにしたい
+        // let id = fctx.declare_variable(&value.id.clone().into(), ty)?;
+        todo!();
+
+        Ok(())
+    }
+}
+
+impl<'ctx, C: ResolveCtx> NameResolve<FnResolveCtx<'ctx, C>> for biwac_ast::AssignStmt {
+    fn resolve(
+        &self,
+        ctx: &FnResolveCtx<'ctx, C>,
+        def_collector: &mut crate::DefCollector,
+    ) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        if let Err(errs) = self.dst.resolve(ctx, def_collector) {
+            errors.extend(errs);
+        }
+
+        if let Err(errs) = self.src.resolve(ctx, def_collector) {
+            errors.extend(errs);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
