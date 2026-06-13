@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use biwac_base::{IdentInterner, ModId, ModPath};
 use biwac_span::Span;
 
@@ -47,7 +49,8 @@ fn foo() {
                 val: 0,
                 span: Span::new(mod_id, 24, 25)
             }))),
-            span: Span::new(mod_id, 16, 26)
+            span: Span::new(mod_id, 16, 26),
+            var_id: OnceCell::new()
         }),
         fn_foo.stmts.first().unwrap()
     );
@@ -62,7 +65,8 @@ fn foo() {
                 val: "string".to_string(),
                 span: Span::new(mod_id, 58, 66)
             }))),
-            span: Span::new(mod_id, 48, 67)
+            span: Span::new(mod_id, 48, 67),
+            var_id: OnceCell::new()
         }),
         fn_foo.stmts.get(1).unwrap()
     );

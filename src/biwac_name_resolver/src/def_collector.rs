@@ -91,18 +91,6 @@ impl DefCollector {
 
                     Some((fn_def.id.clone(), TyOrVal::Val(def_id)))
                 }
-                biwac_ast::Globals::MethodDef(method_def) => {
-                    let def_id = ValDefId::new(self.alloc_def_id());
-                    method_def.def_id.set(def_id).unwrap();
-
-                    Some((method_def.id.clone(), TyOrVal::Val(def_id)))
-                }
-                biwac_ast::Globals::NativeMethodDef(method_def) => {
-                    let def_id = ValDefId::new(self.alloc_def_id());
-                    method_def.def_id.set(def_id).unwrap();
-
-                    Some((method_def.id.clone(), TyOrVal::Val(def_id)))
-                }
                 biwac_ast::Globals::VarDecl(_var_decl) => {
                     // TODO:
                     None

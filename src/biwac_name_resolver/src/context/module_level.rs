@@ -115,7 +115,8 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                     None => {
                                         path.segments[0]
                                             .resolved_id
-                                            .set(PathSegmentResolution::Err);
+                                            .set(PathSegmentResolution::Err)
+                                            .unwrap();
                                         return Err(ResolveError::IdentNotFound {
                                             ident: first_segment_ident.clone(),
                                         });

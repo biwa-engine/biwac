@@ -62,8 +62,6 @@ pub enum Globals {
     TypeDef(TypeDef),
     ImplBlock(ImplBlock),
     NativeFnDef(NativeFnDef),
-    MethodDef(MethodDef),
-    NativeMethodDef(NativeMethodDef),
     NativeCode(NativeCode),
     NovelScene(NovelScene),
 }

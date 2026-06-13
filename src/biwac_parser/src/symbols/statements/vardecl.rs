@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use biwac_lexer::TkKindName;
 use biwac_span::Span;
 
@@ -42,6 +44,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             typ,
             init,
             span: Span::merge(&begin, &end),
+            var_id: OnceCell::new(),
         })
     }
 }

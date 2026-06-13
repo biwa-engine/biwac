@@ -1,4 +1,6 @@
-use biwac_span::Span;
+use std::cell::OnceCell;
+
+use biwac_span::{Span, VarId};
 
 use crate::{Exprs, Ident, Primary, TypDecl};
 
@@ -51,6 +53,7 @@ pub struct VarDecl {
     pub id: Ident,
     pub init: Exprs,
     pub span: Span,
+    pub var_id: OnceCell<VarId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

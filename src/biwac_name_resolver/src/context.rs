@@ -5,7 +5,7 @@ pub(crate) mod ty_def_level;
 
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
 use biwac_hir::{DefinedTy, Ty, TyKind};
-use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId, VarId};
 
 use crate::ResolveError;
 
@@ -118,7 +118,7 @@ pub(crate) fn def_id_kind_try_from_path(path: &Path) -> Result<DefIdKind, Resolv
     panic!("compiler bug: `Path` not resolved yet.")
 }
 
-pub(crate) fn ty_def_id_try_from_path(path: &Path) -> Result<TyDefIdKind, ResolveError> {
+fn ty_def_id_try_from_path(path: &Path) -> Result<TyDefIdKind, ResolveError> {
     match def_id_kind_try_from_path(path)? {
         DefIdKind::Package(pkg_id) => Err(ResolveError::TypeNotFoundPackageFound {
             path: Box::new(path.clone()),
@@ -135,6 +135,10 @@ pub(crate) fn ty_def_id_try_from_path(path: &Path) -> Result<TyDefIdKind, Resolv
         }),
         DefIdKind::Gen(gen_def_id) => Ok(TyDefIdKind::Gen(gen_def_id)),
         DefIdKind::LocalGen(local_gen_def_id) => Ok(TyDefIdKind::LocalGen(local_gen_def_id)),
+        DefIdKind::Var(var_id) => Err(ResolveError::TypeNotFoundVariableFound {
+            path: Box::new(path.clone()),
+            var_id,
+        }),
     }
 }
 
@@ -142,4 +146,13 @@ enum TyDefIdKind {
     Ty(TyDefId),
     Gen(GenDefId),
     LocalGen(LocalGenDefId),
+}
+
+pub(crate) trait LocalResolveCtx: ResolveCtx {
+    fn declare_variable(&mut self, ident: &biwac_ast::Ident) -> Result<VarId, ResolveError>;
+    fn inner_scope<F: FnOnce(&mut Self) -> Result<(), Vec<ResolveError>>>(
+        &mut self,
+        f: F,
+    ) -> Result<(), Vec<ResolveError>>;
+    fn resolve_self_var(&self, span: &Span) -> Result<VarId, ResolveError>;
 }

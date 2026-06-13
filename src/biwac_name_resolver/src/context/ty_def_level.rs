@@ -24,7 +24,8 @@ impl<'ctx, C: ResolveCtx> ResolveCtx for TyDefResolveCtx<'ctx, C> {
             let def_id_kind = DefIdKind::Gen(*def_id);
             path.segments[0]
                 .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind));
+                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind.clone()))
+                .unwrap();
             Ok(def_id_kind)
         } else {
             self.ctx.resolve_path(path)
@@ -48,7 +49,7 @@ impl<'ctx, C: ResolveCtx> TyDefResolveCtx<'ctx, C> {
                 } else {
                     let def_id = GenDefId::new(def_collector.alloc_def_id());
                     // set def_id in AST
-                    item.def_id.set(def_id);
+                    item.def_id.set(def_id).unwrap();
                     def_id
                 };
 

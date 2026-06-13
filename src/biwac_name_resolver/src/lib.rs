@@ -4,7 +4,7 @@ mod name_tree;
 mod symbols;
 mod types;
 
-use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId, ValDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
 pub use def_collector::DefCollector;
 pub use name_tree::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, TyNameTree,
@@ -15,13 +15,13 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use biwac_ast::{DefTyp, ImportDecl, Path, TypeDef};
+use biwac_ast::{DefTyp, Ident, ImportDecl, Path, TypeDef};
 use biwac_base::{InternedIdent, ModId, ModPath, PackageId, PackageName, PackageNameError};
 
 use biwac_dependency_loader::DepsSymbolKind;
 use biwac_hir::{
-    Hir, HirError, Ident, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId,
-    StructDefContent, Ty, TyDefContentKind, TyExistence, ValDefContentKind,
+    Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId, StructDefContent, Ty,
+    TyDefContentKind, TyExistence, ValDefContentKind,
 };
 use biwac_package_loader::Pkg;
 
@@ -76,6 +76,9 @@ pub enum ResolveError {
     UnexpectedSelfType {
         span: Span,
     },
+    UnexpectedSelfVariable {
+        span: Span,
+    },
 
     IdentNotFound {
         ident: biwac_ast::Ident,
@@ -106,6 +109,10 @@ pub enum ResolveError {
     TypeNotFoundValueFound {
         path: Box<Path>,
         def_id: ValDefId,
+    },
+    TypeNotFoundVariableFound {
+        path: Box<Path>,
+        var_id: VarId,
     },
     ValueNotFoundModuleFound {
         qualid: Box<Path>,
@@ -148,9 +155,10 @@ pub enum ResolveError {
         tid1: Box<biwac_ast::Ident>,
         tid2: Box<biwac_ast::Ident>,
     },
-    DuplicatedVarName {
-        vid1: Box<Ident>,
-        vid2: Box<Ident>,
+    DuplicatedVariableName {
+        id: InternedIdent,
+        var1: Span,
+        var2: Span,
     },
     DuplicatedValueName {
         tid1: Box<Ident>,

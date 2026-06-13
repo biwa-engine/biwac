@@ -1,211 +1,156 @@
-use biwac_hir::{
-    BinaryExpr, BlockExpr, Callee, Expr, ExprVal, FnCall, IfExpr, Literal, MemberAccess,
-    MethodCall, Primary, Stmt, StructLiteral, TyKind, UnaryExpr,
-};
+use crate::{ResolveErrorHandler, context::LocalResolveCtx, symbols::LocalNameResolve};
 
-use crate::{
-    context::{ResolveCtx, val_phase::ResolvedValue},
-    symbols::NameResolve,
-};
-
-impl<C: ResolveCtx> NameResolve<C> for biwac_ast::Primary {
-    fn resolve(
-        &self,
-        ctx: &C,
-        def_collector: &mut crate::DefCollector,
-    ) -> Result<(), Vec<crate::ResolveError>> {
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Primary {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
         match self {
-            biwac_ast::Primary::Literal(l) => Ok(()),
+            biwac_ast::Primary::Literal(literal) => literal.resolve(ctx),
             biwac_ast::Primary::Variable(v) => match v {
                 biwac_ast::Variable::Path(path) => {
                     ctx.resolve_path(path).map(|_| ()).map_err(|e| vec![e])
                 }
-                biwac_ast::Variable::SelfVar(_) => {
-                    // TODO:
-                    todo!()
+                biwac_ast::Variable::SelfVar(span) => {
+                    // TODO: store resolved id
+                    ctx.resolve_self_var(span).map(|_| ()).map_err(|e| vec![e])
                 }
             },
-            biwac_ast::Primary::FnCall(f) => {
-                // TODO:
-                todo!()
-            }
-            biwac_ast::Primary::MemberAccess(m) => {
-                Ok(Self::MemberAccess(MemberAccess::try_resolve(m, fctx, hir)?))
-            }
-            biwac_ast::Primary::MethodCall(m) => {
-                Ok(Self::MethodCall(MethodCall::try_resolve(m, fctx, hir)?))
-            }
-            biwac_ast::Primary::IfExpr(i) => Ok(Self::IfExpr(IfExpr::try_resolve(i, fctx, hir)?)),
-            biwac_ast::Primary::Block(b) => Ok(Self::Block(BlockExpr::try_resolve(b, fctx, hir)?)),
+            biwac_ast::Primary::FnCall(fn_call) => fn_call.resolve(ctx),
+            biwac_ast::Primary::MemberAccess(member_access) => member_access.resolve(ctx),
+            biwac_ast::Primary::MethodCall(method_call) => method_call.resolve(ctx),
+            biwac_ast::Primary::IfExpr(if_expr) => if_expr.resolve(ctx),
+            biwac_ast::Primary::Block(block) => block.resolve(ctx),
         }
     }
 }
 
-impl<C: ResolveCtx> NameResolve<C> for biwac_ast::IfExpr {
-    fn resolve(
-        &self,
-        ctx: &C,
-        def_collector: &mut crate::DefCollector,
-    ) -> Result<(), Vec<crate::ResolveError>> {
-        Ok(Self {
-            cond: Box::new(Expr::try_resolve(&value.cond, fctx, hir)?),
-            then: BlockExpr::try_resolve(&value.then, fctx, hir)?,
-            els: BlockExpr::try_resolve(&value.els, fctx, hir)?,
-            span: value.span.clone(),
-        })
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::IfExpr {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        self.cond.resolve(ctx).handle(&mut errors);
+        self.then.resolve(ctx).handle(&mut errors);
+        self.els.resolve(ctx).handle(&mut errors);
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
-impl<C: ResolveCtx> NameResolve<C> for biwac_ast::BlockExpr {
-    fn resolve(
-        &self,
-        ctx: &C,
-        def_collector: &mut crate::DefCollector,
-    ) -> Result<(), Vec<crate::ResolveError>> {
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::BlockExpr {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
         for stmt in &self.stmts {
-            // stmt.
-            todo!();
+            stmt.resolve(ctx).handle(&mut errors);
         }
-        Ok(())
-    }
-}
-impl TryResolve<&biwac_ast::BlockExpr> for BlockExpr {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::BlockExpr,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        Ok(Self {
-            stmts: value
-                .stmts
-                .iter()
-                .map(|stmt| Stmt::try_resolve(stmt, fctx, hir))
-                .collect::<RsvResult<_>>()?,
-            expr: Box::new(Expr::try_resolve(&value.expr, fctx, hir)?),
-            span: value.span.clone(),
-        })
-    }
-}
 
-impl TryResolve<&biwac_ast::FnCall> for FnCall {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::FnCall,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        Ok(Self {
-            // TODO: 関数呼び出し側にもジェネリック型注釈を導入
-            callee: match fctx.try_resolve_value(&value.qualed_id, hir)? {
-                ResolvedValue::Local(var_id) => Callee::Var(var_id),
-                ResolvedValue::Global(vid) => Callee::Fn(vid),
-                ResolvedValue::Assoc(assoc_callee) => Callee::Assoc(assoc_callee),
-            },
-            args: value
-                .args
-                .iter()
-                .map(|expr| Expr::try_resolve(expr, fctx, hir))
-                .collect::<RsvResult<Vec<Expr>>>()?,
-            span: value.span.clone(),
-        })
-    }
-}
+        self.expr.resolve(ctx).handle(&mut errors);
 
-impl TryResolve<&biwac_ast::MemberAccess> for MemberAccess {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::MemberAccess,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        Ok(Self {
-            span: value.span(),
-            left: Box::new(Expr::try_resolve(&value.left, fctx, hir)?),
-            member: value.member.clone().into(),
-        })
-    }
-}
-
-impl TryResolve<&biwac_ast::MethodCall> for MethodCall {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::MethodCall,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        Ok(Self {
-            span: value.span.clone(),
-            left: Box::new(Expr::try_resolve(&value.left, fctx, hir)?),
-            method: value.method.clone().into(),
-            args: value
-                .args
-                .iter()
-                .map(|a| Expr::try_resolve(a, fctx, hir))
-                .collect::<RsvResult<_>>()?,
-        })
-    }
-}
-
-impl TryResolve<&biwac_ast::Literal> for Literal {
-    fn try_resolve<'mctx>(
-        value: &biwac_ast::Literal,
-        fctx: &mut crate::context::val_phase::fn_level::FnLevelResolveCtx<'mctx>,
-        hir: &biwac_hir::Hir,
-    ) -> RsvResult<Self> {
-        match value {
-            biwac_ast::Literal::Integer(u) => Ok(Self::Integer(u.clone())),
-            biwac_ast::Literal::String(s) => Ok(Self::String(s.clone())),
-            biwac_ast::Literal::Bool(b) => Ok(Self::Bool(b.clone())),
-            biwac_ast::Literal::Struct(s) => Ok(Self::Struct(StructLiteral {
-                // NOTE: struct リテラルにはジェネリック型注釈が必要か否か
-                tid: match fctx
-                    .try_resolve_defined_ty(
-                        &biwac_ast::DefTyp {
-                            qualid: s.qualid.clone(),
-                            genargs: None, // ジェネリック引数列が明示されていない
-                        },
-                        hir,
-                    )?
-                    .kind
-                {
-                    TyKind::Defined(defined_ty) => defined_ty.tid,
-                    _ => panic!("compiler bug: not a user-defined type"),
-                },
-                members: s
-                    .members
-                    .iter()
-                    .map(|(ident, expr)| match Expr::try_resolve(expr, fctx, hir) {
-                        Ok(expr) => Ok((ident.clone().into(), expr)),
-                        Err(e) => Err(e),
-                    })
-                    .collect::<RsvResult<Vec<(biwac_hir::Ident, Expr)>>>()?,
-                span: s.span.clone(),
-            })),
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
         }
     }
 }
 
-impl<C: ResolveCtx> NameResolve<C> for biwac_ast::Exprs {
-    fn resolve(
-        &self,
-        ctx: &C,
-        def_collector: &mut crate::DefCollector,
-    ) -> Result<(), Vec<crate::ResolveError>> {
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::FnCall {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        ctx.resolve_path(&self.path).handle(&mut errors);
+
+        for arg in &self.args {
+            arg.resolve(ctx).handle(&mut errors);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::MemberAccess {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        self.left.resolve(ctx)
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::MethodCall {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        self.left.resolve(ctx).handle(&mut errors);
+
+        for arg in &self.args {
+            arg.resolve(ctx).handle(&mut errors);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Literal {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
         match self {
-            biwac_ast::Exprs::Primary(prim) => prim.resolve(ctx, def_collector),
-            biwac_ast::Exprs::Unary(u) => Ok(Self {
-                expr: ExprVal::Unary(UnaryExpr {
-                    op: u.op,
-                    right: Box::new(Self::try_resolve(&u.right, fctx, hir)?),
-                    span: u.span.clone(),
-                }),
-                id: fctx.new_expr_id(),
-            }),
-            biwac_ast::Exprs::Binary(b) => Ok(Self {
-                expr: ExprVal::Binary(BinaryExpr {
-                    op: b.op,
-                    left: Box::new(Self::try_resolve(&b.left, fctx, hir)?),
-                    right: Box::new(Self::try_resolve(&b.right, fctx, hir)?),
-                }),
-                id: fctx.new_expr_id(),
-            }),
+            biwac_ast::Literal::Integer(_)
+            | biwac_ast::Literal::String(_)
+            | biwac_ast::Literal::Bool(_) => Ok(()),
+
+            biwac_ast::Literal::Struct(struct_) => {
+                let mut errors = Vec::new();
+
+                ctx.resolve_path(&struct_.path).handle(&mut errors);
+
+                for (_, expr) in &struct_.members {
+                    expr.resolve(ctx).handle(&mut errors);
+                }
+
+                if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors)
+                }
+            }
+        }
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::UnaryExpr {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        self.right.resolve(ctx)
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::BinaryExpr {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        self.left.resolve(ctx).handle(&mut errors);
+        self.right.resolve(ctx).handle(&mut errors);
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Exprs {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        match self {
+            biwac_ast::Exprs::Primary(prim) => prim.resolve(ctx),
+            biwac_ast::Exprs::Unary(u) => u.resolve(ctx),
+            biwac_ast::Exprs::Binary(b) => b.resolve(ctx),
         }
     }
 }

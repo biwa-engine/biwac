@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use biwac_span::Span;
 
 use biwac_ast::{TypDecl, VarDecl};
@@ -42,6 +44,7 @@ impl<'src> NovelSourceStream<'src> {
             typ,
             span: Span::merge(&begin, &init.span()),
             init,
+            var_id: OnceCell::new(),
         })
     }
 }

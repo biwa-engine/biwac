@@ -54,6 +54,19 @@ impl PackageLocalDefId {
     }
 }
 
+/// 32 bit local variable id (simple increment).
+/// Unless its parent (function, associated function, or method) is not changed,
+/// it is consistent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VarId(u32);
+
+impl VarId {
+    #[inline]
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefIdKind {
     Package(PackageId),
@@ -62,6 +75,7 @@ pub enum DefIdKind {
     Val(ValDefId),
     Gen(GenDefId),
     LocalGen(LocalGenDefId),
+    Var(VarId),
 }
 
 macro_rules! impl_typed_def_id {

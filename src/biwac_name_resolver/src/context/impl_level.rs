@@ -29,7 +29,8 @@ impl ResolveCtx for ImplResolveCtx<'_> {
             let def_id_kind = DefIdKind::LocalGen(*def_id);
             path.segments[0]
                 .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind));
+                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind.clone()))
+                .unwrap();
             Ok(def_id_kind)
         } else {
             self.mctx.resolve_path(path)
@@ -59,7 +60,7 @@ impl<'mctx> ImplResolveCtx<'mctx> {
                     } else {
                         let def_id = LocalGenDefId::new(def_collector.alloc_def_id());
                         // set def_id in AST
-                        item.def_id.set(def_id);
+                        item.def_id.set(def_id).unwrap();
                         def_id
                     };
 
