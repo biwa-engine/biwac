@@ -27,6 +27,12 @@ pub struct DefCollector {
     impl_collector: ImplCollector,
 }
 
+impl Default for DefCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefCollector {
     pub fn new() -> Self {
         Self {
@@ -161,7 +167,7 @@ impl DefCollector {
 
         for (interned_mod_name, module) in &module.children {
             match children.entry(*interned_mod_name) {
-                Entry::Vacant(e) => match self.collect_in_module(&module) {
+                Entry::Vacant(e) => match self.collect_in_module(module) {
                     Ok(module_tree) => {
                         e.insert((
                             ModuleNameTreeItem::Mod(module_tree),
@@ -236,7 +242,7 @@ impl DefCollector {
                     match self.register_impl(&self_ty, &f.id.id, AssocNameTreeItem::Val { def_id })
                     {
                         Ok(()) => {
-                            f.def_id.set(def_id);
+                            f.def_id.set(def_id).unwrap();
                         }
                         Err(e) => {
                             errors.push(e);
