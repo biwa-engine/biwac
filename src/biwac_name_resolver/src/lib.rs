@@ -1,5 +1,6 @@
 pub(crate) mod context;
 mod def_collector;
+mod lowering;
 mod name_tree;
 mod symbols;
 mod types;

@@ -51,20 +51,31 @@ pub struct FnResolveCtx<'ctx, C: ResolveCtx> {
 }
 
 impl<'ctx, C: ResolveCtx> ResolveCtx for FnResolveCtx<'ctx, C> {
-    fn resolve_path(
-        &self,
-        path: &biwac_ast::Path,
-    ) -> Result<biwac_span::DefIdKind, crate::ResolveError> {
-        if path.abs_header.is_none()
-            && path.segments.len() == 1
-            && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
-        {
-            let def_id_kind = DefIdKind::LocalGen(*def_id);
-            path.segments[0]
-                .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind.clone()))
-                .unwrap();
-            Ok(def_id_kind)
+    fn resolve_path(&self, path: &biwac_ast::Path) -> Result<(), crate::ResolveError> {
+        if path.abs_header.is_none() && path.segments.len() == 1 {
+            let interned_ident = &path.segments[0].ident.id;
+
+            for scope in self.scopes.iter().rev() {
+                if let Some((var_id, _)) = scope.vars.get(interned_ident) {
+                    let def_id_kind = DefIdKind::Var(*var_id);
+                    path.segments[0]
+                        .resolved_id
+                        .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
+                        .unwrap();
+                    return Ok(());
+                }
+            }
+
+            if let Some(def_id) = self.genargs.get(interned_ident) {
+                let def_id_kind = DefIdKind::LocalGen(*def_id);
+                path.segments[0]
+                    .resolved_id
+                    .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
+                    .unwrap();
+                Ok(())
+            } else {
+                self.ctx.resolve_path(path)
+            }
         } else {
             self.ctx.resolve_path(path)
         }

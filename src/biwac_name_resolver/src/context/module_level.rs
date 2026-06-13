@@ -67,12 +67,12 @@ impl<'t> ModuleResolveCtx<'t> {
 }
 
 impl ResolveCtx for ModuleResolveCtx<'_> {
-    fn resolve_path(&self, path: &Path) -> Result<DefIdKind, ResolveError> {
+    fn resolve_path(&self, path: &Path) -> Result<(), ResolveError> {
         for (i, segment) in path.segments.iter().enumerate() {
             match segment.resolved_id.get() {
-                Some(PathSegmentResolution::Ok(def_id_kind)) => {
+                Some(PathSegmentResolution::Ok(_)) => {
                     if i + 1 == path.segments.len() {
-                        return Ok(def_id_kind.clone());
+                        return Ok(());
                     } else {
                         continue;
                     }
@@ -103,9 +103,9 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
             None => {
                 let first_segment_ident = &path.segments[0].ident;
                 match self.module.children.get(&first_segment_ident.id) {
-                    Some(ModuleNameTreeItem::Mod(module)) => Ok(DefIdKind::Mod(module.mod_id)),
-                    Some(ModuleNameTreeItem::Ty(ty)) => Ok(DefIdKind::Ty(ty.def_id)),
-                    Some(ModuleNameTreeItem::Val(val_def_id)) => Ok(DefIdKind::Val(*val_def_id)),
+                    Some(ModuleNameTreeItem::Mod(_))
+                    | Some(ModuleNameTreeItem::Ty(_))
+                    | Some(ModuleNameTreeItem::Val(_)) => Ok(()),
                     None => match self.imports.get(&first_segment_ident.id) {
                         Some(path) => self.resolve_path(path),
                         None => {
@@ -143,17 +143,17 @@ fn resolve_path_in_module(
     path: &Path,
     depth: usize,
     module: &ModuleNameTree,
-) -> Result<DefIdKind, ResolveError> {
+) -> Result<(), ResolveError> {
     let segment = &path.segments[depth];
     match resolve_ident_in_module(&segment.ident.id, module) {
         Some(def_id_kind) => {
             segment
                 .resolved_id
-                .set(PathSegmentResolution::Ok(def_id_kind.clone()))
+                .set(PathSegmentResolution::Ok(def_id_kind))
                 .unwrap();
 
             if path.segments.len() == depth + 1 {
-                Ok(def_id_kind)
+                Ok(())
             } else {
                 resolve_path_in_module(path, depth + 1, module)
             }

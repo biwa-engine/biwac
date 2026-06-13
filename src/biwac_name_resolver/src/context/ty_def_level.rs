@@ -13,10 +13,7 @@ pub struct TyDefResolveCtx<'ctx, C: ResolveCtx> {
 }
 
 impl<'ctx, C: ResolveCtx> ResolveCtx for TyDefResolveCtx<'ctx, C> {
-    fn resolve_path(
-        &self,
-        path: &biwac_ast::Path,
-    ) -> Result<biwac_span::DefIdKind, crate::ResolveError> {
+    fn resolve_path(&self, path: &biwac_ast::Path) -> Result<(), crate::ResolveError> {
         if path.abs_header.is_none()
             && path.segments.len() == 1
             && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
@@ -24,9 +21,9 @@ impl<'ctx, C: ResolveCtx> ResolveCtx for TyDefResolveCtx<'ctx, C> {
             let def_id_kind = DefIdKind::Gen(*def_id);
             path.segments[0]
                 .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind.clone()))
+                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
                 .unwrap();
-            Ok(def_id_kind)
+            Ok(())
         } else {
             self.ctx.resolve_path(path)
         }

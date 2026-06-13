@@ -8,6 +8,7 @@ use biwac_span::{DefIdKind, LocalGenDefId};
 use crate::{
     DefCollector, ResolveError,
     context::{ResolveCtx, module_level::ModuleResolveCtx},
+    lowering::ty_kind_unwrap_from_typ_repr,
 };
 
 #[derive(Debug)]
@@ -18,10 +19,7 @@ pub struct ImplResolveCtx<'mctx> {
 }
 
 impl ResolveCtx for ImplResolveCtx<'_> {
-    fn resolve_path(
-        &self,
-        path: &biwac_ast::Path,
-    ) -> Result<biwac_span::DefIdKind, crate::ResolveError> {
+    fn resolve_path(&self, path: &biwac_ast::Path) -> Result<(), crate::ResolveError> {
         if path.abs_header.is_none()
             && path.segments.len() == 1
             && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
@@ -29,9 +27,9 @@ impl ResolveCtx for ImplResolveCtx<'_> {
             let def_id_kind = DefIdKind::LocalGen(*def_id);
             path.segments[0]
                 .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind.clone()))
+                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
                 .unwrap();
-            Ok(def_id_kind)
+            Ok(())
         } else {
             self.mctx.resolve_path(path)
         }
@@ -48,7 +46,8 @@ impl<'mctx> ImplResolveCtx<'mctx> {
         impl_block: &ImplBlock,
         def_collector: &mut DefCollector,
     ) -> Result<Self, Vec<ResolveError>> {
-        let self_ty = mctx.resolve_typ(&impl_block.self_typ)?;
+        mctx.resolve_typ(&impl_block.self_typ)?;
+        let self_ty = ty_kind_unwrap_from_typ_repr(&impl_block.self_typ, None);
 
         let genargs = match &impl_block.genargs_decl {
             Some(genargs) => genargs
