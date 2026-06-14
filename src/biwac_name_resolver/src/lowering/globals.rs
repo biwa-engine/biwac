@@ -327,19 +327,14 @@ fn lower_type_alias(
 
     let right = ty_from_typ_repr(&alias_def.right, None);
 
-    let ty_content = TyDefKind::TypeAlias(Box::new(TypeAliasDef {
-        genargs,
-        right,
-        alias_name_span: alias_def.ident.span.clone(),
-    }));
-    let fallback = DefinedTyImpl {
-        ty_content: ty_content.clone(),
-        vals: HashMap::new(),
-    };
-    hir.tys
-        .entry(ty_def_id)
-        .or_insert_with(|| fallback)
-        .ty_content = ty_content;
+    hir.ty_aliases.insert(
+        ty_def_id,
+        TypeAliasDef {
+            genargs,
+            right,
+            alias_name_span: alias_def.ident.span.clone(),
+        },
+    );
 }
 
 fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlias) {

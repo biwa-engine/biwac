@@ -113,7 +113,6 @@ pub struct DecledArg {
 pub enum TyDefKind {
     Struct(Box<StructDef>),
     // Enum(EnumDefContent),
-    TypeAlias(Box<TypeAliasDef>),
     NativeTypeAlias(Box<NativeTypeAliasDef>),
 }
 

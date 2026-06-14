@@ -168,7 +168,7 @@ pub enum ResolveError {
     //     ty_existence: Box<TyExistence>,
     // },
     CyclingTypeAlias {
-        def_id: Box<GenDefId>,
+        def_id: Box<TyDefId>,
         detected_position: Box<Span>,
     },
     InsufficientDependencyPackageData {

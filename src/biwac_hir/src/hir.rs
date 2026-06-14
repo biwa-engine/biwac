@@ -9,7 +9,9 @@ pub(crate) mod types;
 use biwac_base::{InternedIdent, ModPath, PackageName};
 use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId};
 
-use crate::{AssocValDefKind, DefinedTy, NativeCode, Ty, TyDefKind, TyKind, ValDefKind};
+use crate::{
+    AssocValDefKind, DefinedTy, NativeCode, Ty, TyDefKind, TyKind, TypeAliasDef, ValDefKind,
+};
 
 ///  Hir は
 ///  High-level Intermediate Representation (高レベル中間表現) である
@@ -38,6 +40,8 @@ pub struct Hir {
     // ほとんど、型名前空間 type namespace 内の一意なシンボルの集合と言える
     // 外部パッケージの値は予め登録される
     pub tys: HashMap<TyDefId, DefinedTyImpl>,
+
+    pub ty_aliases: HashMap<TyDefId, TypeAliasDef>,
 
     // プリミティブ型やジェネリック型など
     // 特殊な型に対する実装
@@ -121,8 +125,9 @@ impl Hir {
         // external_tys: HashMap<TyId, TyDefContentKind>,
         // external_vals: HashMap<ValId, FnDefContentSignature>,
     ) -> Self {
-        let mut vals = HashMap::new();
-        let mut tys = HashMap::new();
+        let vals = HashMap::new();
+        let tys = HashMap::new();
+        let ty_aliases = HashMap::new();
 
         // // NOTE:
         // // std のコンパイル時にはlang itemは登録しない
@@ -178,6 +183,7 @@ impl Hir {
             pkg_name,
             vals,
             tys,
+            ty_aliases,
             special_ty_impls: HashMap::new(),
             modules: HashSet::new(),
             module_global_natives: HashMap::new(),

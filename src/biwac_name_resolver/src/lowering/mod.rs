@@ -1,3 +1,4 @@
+mod alias_expansion;
 mod expressions;
 mod globals;
 mod novel;
@@ -20,7 +21,10 @@ pub(crate) fn lower(pkg_name: PackageName, pkg: Pkg) -> Result<Hir, Vec<ResolveE
     // Pass 1: register all type definitions so impl blocks can reference them.
     lower_module_types(&mut hir, &pkg.root_module, &mut errors);
 
-    // Pass 2: lower all values (fns, impls, novel scenes, native code).
+    // Pass 2: expand type aliases recursively, detect cycles.
+    alias_expansion::expand_aliases(&mut hir, &mut errors);
+
+    // Pass 3: lower all values (fns, impls, novel scenes, native code).
     lower_module_vals(&mut hir, &pkg.root_module, &mut errors);
 
     if errors.is_empty() {
