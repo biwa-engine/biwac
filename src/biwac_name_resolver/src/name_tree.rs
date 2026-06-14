@@ -24,7 +24,10 @@ pub struct ModuleNameTree {
 #[derive(Debug)]
 pub struct TyNameTree {
     pub(crate) def_id: TyDefId,
+    /// Associated items (fns, types) registered via impl blocks, keyed by item name.
     pub(crate) children: RefCell<HashMap<InternedIdent, AssocNameTreeItem>>,
+    /// If this entry is a type alias, stores the canonical (chain-followed) non-alias TyDefId.
+    pub(crate) alias_target: RefCell<Option<TyDefId>>,
 }
 
 #[derive(Debug)]

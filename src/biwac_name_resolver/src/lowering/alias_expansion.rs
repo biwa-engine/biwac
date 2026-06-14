@@ -120,7 +120,7 @@ fn collect_alias_refs_inner(
     }
 }
 
-fn expand_ty(ty: Ty, aliases: &HashMap<TyDefId, TypeAliasDef>) -> Ty {
+pub(super) fn expand_ty(ty: Ty, aliases: &HashMap<TyDefId, TypeAliasDef>) -> Ty {
     let span = ty.span;
     match ty.kind {
         TyKind::Defined(DefinedTy { def_id, genargs }) => {

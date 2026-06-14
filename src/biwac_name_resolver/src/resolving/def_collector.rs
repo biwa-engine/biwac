@@ -1,12 +1,13 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
 };
 
+use biwac_ast::{PathSegmentResolution, TypReprVal};
 use biwac_base::{InternedIdent, PackageId};
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::{DefId, PackageLocalDefId, Span, TyDefId, ValDefId};
+use biwac_span::{DefId, DefIdKind, PackageLocalDefId, Span, TyDefId, ValDefId};
 
 use crate::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, ResolveError,
@@ -19,12 +20,11 @@ pub(crate) enum TyOrVal<T, V> {
     Val(V),
 }
 
-/// DefCollector
-/// collects definitions in self package.
+/// DefCollector collects definitions in the self package.
 pub struct DefCollector {
     next_pkg_local_def_id: u32,
-
-    impl_collector: ImplCollector,
+    /// Maps alias TyDefId → canonical (non-alias) TyDefId; populated during collect().
+    pub(super) alias_canonical: HashMap<TyDefId, TyDefId>,
 }
 
 impl Default for DefCollector {
@@ -37,14 +37,13 @@ impl DefCollector {
     pub fn new() -> Self {
         Self {
             next_pkg_local_def_id: 0,
-            impl_collector: ImplCollector::new(),
+            alias_canonical: HashMap::new(),
         }
     }
 
     pub(crate) fn alloc_def_id(&mut self) -> DefId {
         let pkg_local_def_id = PackageLocalDefId::new(self.next_pkg_local_def_id);
         self.next_pkg_local_def_id += 1;
-
         DefId::new_in_self_pkg(pkg_local_def_id)
     }
 
@@ -54,12 +53,12 @@ impl DefCollector {
         pkg: &Pkg,
         external_package_trees: HashMap<InternedIdent, PackageNameTree>,
     ) -> Result<NameTree, Vec<ResolveError>> {
+        // Step 1: assign IDs to all non-impl symbols, build module-level NameTree.
         let root_module_tree = self.collect_in_module(&pkg.root_module)?;
         let package_tree = PackageNameTree {
             pkg_id: PackageId::SELF_PACKAGE,
             root_module_tree,
         };
-
         let mut packages = external_package_trees;
         packages.insert(pkg_name, package_tree);
         let name_tree = NameTree {
@@ -67,15 +66,24 @@ impl DefCollector {
             packages,
         };
 
-        self.collect_impls(pkg_name, &name_tree, pkg)?;
+        // Build TyDefId -> &TyNameTree index for the self package.
+        let mut ty_index: HashMap<TyDefId, &TyNameTree> = HashMap::new();
+        collect_ty_trees(
+            &name_tree.packages[&pkg_name].root_module_tree,
+            &mut ty_index,
+        );
 
-        // TODO: collect impls in name tree
+        // Step 2: resolve type alias RHS paths, detect cycles, populate alias_target.
+        self.resolve_alias_targets(pkg_name, pkg, &name_tree, &ty_index)?;
+
+        // Step 3: collect impl-block symbols under their canonical (non-alias) types.
+        self.collect_impls(pkg_name, &name_tree, pkg, &ty_index)?;
 
         Ok(name_tree)
     }
 
-    // NOTE: impl-block はimpl対象の型を名前解決する必要があるため、
-    // ここでは処理できない
+    // NOTE: impl blocks are not processed here because they require name resolution
+    // to determine the self type.
     fn collect_in_module(
         &mut self,
         module: &LoadedModule,
@@ -88,13 +96,11 @@ impl DefCollector {
                 biwac_ast::Globals::FnDef(fn_def) => {
                     let def_id = ValDefId::new(self.alloc_def_id());
                     fn_def.def_id.set(def_id).unwrap();
-
                     Some((fn_def.id.clone(), TyOrVal::Val(def_id)))
                 }
                 biwac_ast::Globals::NativeFnDef(fn_def) => {
                     let def_id = ValDefId::new(self.alloc_def_id());
                     fn_def.def_id.set(def_id).unwrap();
-
                     Some((fn_def.id.clone(), TyOrVal::Val(def_id)))
                 }
                 biwac_ast::Globals::VarDecl(_var_decl) => {
@@ -106,19 +112,16 @@ impl DefCollector {
                     biwac_ast::TypeDef::Struct(struct_def) => {
                         let def_id = TyDefId::new(self.alloc_def_id());
                         struct_def.def_id.set(def_id).unwrap();
-
                         Some((struct_def.id.clone(), TyOrVal::Ty(def_id)))
                     }
                     biwac_ast::TypeDef::TypeAlias(alias_def) => {
                         let def_id = TyDefId::new(self.alloc_def_id());
                         alias_def.def_id.set(def_id).unwrap();
-
                         Some((alias_def.ident.clone(), TyOrVal::Ty(def_id)))
                     }
                     biwac_ast::TypeDef::NativeTypeAlias(alias_def) => {
                         let def_id = TyDefId::new(self.alloc_def_id());
                         alias_def.def_id.set(def_id).unwrap();
-
                         Some((alias_def.ident.clone(), TyOrVal::Ty(def_id)))
                     }
                 },
@@ -126,14 +129,9 @@ impl DefCollector {
                 biwac_ast::Globals::NovelScene(scene_def) => {
                     let def_id = ValDefId::new(self.alloc_def_id());
                     scene_def.def_id.set(def_id).unwrap();
-
                     Some((scene_def.id.clone(), TyOrVal::Val(def_id)))
                 }
-                biwac_ast::Globals::ImplBlock(_) => {
-                    // TODO:
-
-                    None
-                }
+                biwac_ast::Globals::ImplBlock(_) => None,
             };
 
             if let Some((ident, def_id)) = opt_ident_and_def_id {
@@ -143,9 +141,8 @@ impl DefCollector {
                             e.insert((
                                 ModuleNameTreeItem::Ty(TyNameTree {
                                     def_id,
-
-                                    // TODO: collect ty associated items
                                     children: RefCell::new(HashMap::new()),
+                                    alias_target: RefCell::new(None),
                                 }),
                                 ident.span.clone(),
                             ));
@@ -201,63 +198,133 @@ impl DefCollector {
         }
     }
 
-    fn collect_impls(
+    /// Resolves the RHS path of every TypeAlias in the package, builds the alias→canonical map,
+    /// detects cycles, and records alias_target in TyNameTree.
+    fn resolve_alias_targets(
         &mut self,
         pkg_name: InternedIdent,
-        name_tree: &NameTree,
         pkg: &Pkg,
+        name_tree: &NameTree,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
     ) -> Result<(), Vec<ResolveError>> {
-        self.collect_impls_in_module(
-            name_tree,
+        // direct_map[alias_id] = immediate_target_id
+        let mut direct_map: HashMap<TyDefId, TyDefId> = HashMap::new();
+        // span_map[alias_id] = span of the alias name (for cycle error reporting)
+        let mut span_map: HashMap<TyDefId, Span> = HashMap::new();
+
+        self.collect_alias_direct_targets(
             pkg_name,
-            &name_tree.packages.get(&pkg_name).unwrap().root_module_tree,
+            pkg,
+            name_tree,
+            ty_index,
+            &mut direct_map,
+            &mut span_map,
+        )?;
+
+        // Cycle detection
+        let mut errors = Vec::new();
+        detect_alias_cycles(&direct_map, &span_map, &mut errors);
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+
+        // Follow chains to compute canonical (non-alias) targets.
+        let canonical_map: HashMap<TyDefId, TyDefId> = direct_map
+            .keys()
+            .map(|&alias_id| (alias_id, follow_alias_chain(alias_id, &direct_map)))
+            .collect();
+
+        // Populate TyNameTree.alias_target and store in self.
+        for (&alias_id, &canonical_id) in &canonical_map {
+            if let Some(ty_tree) = ty_index.get(&alias_id) {
+                *ty_tree.alias_target.borrow_mut() = Some(canonical_id);
+            }
+        }
+        self.alias_canonical = canonical_map;
+
+        Ok(())
+    }
+
+    fn collect_alias_direct_targets(
+        &self,
+        pkg_name: InternedIdent,
+        pkg: &Pkg,
+        name_tree: &NameTree,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
+        direct_map: &mut HashMap<TyDefId, TyDefId>,
+        span_map: &mut HashMap<TyDefId, Span>,
+    ) -> Result<(), Vec<ResolveError>> {
+        let root_module_tree = &name_tree.packages[&pkg_name].root_module_tree;
+        self.collect_alias_direct_targets_in_module(
+            pkg_name,
+            name_tree,
+            ty_index,
+            root_module_tree,
             &pkg.root_module,
+            direct_map,
+            span_map,
         )
     }
 
-    fn collect_impls_in_module(
-        &mut self,
-        name_tree: &NameTree,
+    fn collect_alias_direct_targets_in_module(
+        &self,
         pkg_name: InternedIdent,
+        name_tree: &NameTree,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
         module_tree: &ModuleNameTree,
         module: &LoadedModule,
+        direct_map: &mut HashMap<TyDefId, TyDefId>,
+        span_map: &mut HashMap<TyDefId, Span>,
     ) -> Result<(), Vec<ResolveError>> {
-        let mctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast)?;
+        let mctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast, ty_index)?;
         let mut errors = Vec::new();
 
         for g in &module.ast.globals {
-            if let biwac_ast::Globals::ImplBlock(impl_block) = g {
-                let ictx = match ImplResolveCtx::new(&mctx, impl_block, self) {
-                    Ok(ictx) => ictx,
-                    Err(errs) => {
-                        errors.extend(errs);
-                        break;
-                    }
+            if let biwac_ast::Globals::TypeDef(biwac_ast::TypeDef::TypeAlias(alias)) = g {
+                let alias_id = match alias.def_id.get() {
+                    Some(id) => *id,
+                    None => continue,
                 };
+                span_map.insert(alias_id, alias.ident.span.clone());
 
-                let self_ty = ictx.opt_self_ty().unwrap();
-
-                for f in &impl_block.assoc_fns {
-                    let def_id = ValDefId::new(self.alloc_def_id());
-                    match self.register_impl(&self_ty, &f.id.id, AssocNameTreeItem::Val { def_id })
-                    {
+                // Resolve only the main path of the RHS (genargs resolved in full pass).
+                let target_id = match &alias.right.val {
+                    TypReprVal::Defined(def_typ) => match mctx.resolve_path(&def_typ.path) {
                         Ok(()) => {
-                            f.def_id.set(def_id).unwrap();
+                            let last_seg = def_typ.path.segments.last().unwrap();
+                            match last_seg.resolved_id.get() {
+                                Some(PathSegmentResolution::Ok(DefIdKind::Ty(id))) => Some(*id),
+                                _ => None,
+                            }
                         }
                         Err(e) => {
                             errors.push(e);
+                            None
                         }
-                    }
-                }
+                    },
+                    _ => None, // Primitive or Self aliases have no TyDefId target.
+                };
 
-                // TODO: other definitions
+                if let Some(target_id) = target_id {
+                    direct_map.insert(alias_id, target_id);
+                }
             }
         }
 
-        for module in module.children.values() {
-            if let Err(errs) =
-                self.collect_impls_in_module(name_tree, pkg_name, module_tree, module)
-            {
+        for (child_name, child_module) in &module.children {
+            let child_tree = match module_tree.children.get(child_name) {
+                Some(ModuleNameTreeItem::Mod(m)) => m,
+                _ => continue,
+            };
+            if let Err(errs) = self.collect_alias_direct_targets_in_module(
+                pkg_name,
+                name_tree,
+                ty_index,
+                child_tree,
+                child_module,
+                direct_map,
+                span_map,
+            ) {
                 errors.extend(errs);
             }
         }
@@ -269,39 +336,270 @@ impl DefCollector {
         }
     }
 
-    #[inline]
-    fn register_impl(
+    fn collect_impls(
         &mut self,
-        ty_kind: &TyKind,
-        name: &InternedIdent,
-        item: AssocNameTreeItem,
-    ) -> Result<(), ResolveError> {
-        self.impl_collector.register_impl(ty_kind, name, item)
+        pkg_name: InternedIdent,
+        name_tree: &NameTree,
+        pkg: &Pkg,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
+    ) -> Result<(), Vec<ResolveError>> {
+        let root_module_tree = &name_tree.packages[&pkg_name].root_module_tree;
+        self.collect_impls_in_module(
+            name_tree,
+            pkg_name,
+            root_module_tree,
+            &pkg.root_module,
+            ty_index,
+        )
+    }
+
+    fn collect_impls_in_module(
+        &mut self,
+        name_tree: &NameTree,
+        pkg_name: InternedIdent,
+        module_tree: &ModuleNameTree,
+        module: &LoadedModule,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
+    ) -> Result<(), Vec<ResolveError>> {
+        let mctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast, ty_index)?;
+        let mut errors = Vec::new();
+
+        for g in &module.ast.globals {
+            if let biwac_ast::Globals::ImplBlock(impl_block) = g {
+                let ictx = match ImplResolveCtx::new(&mctx, impl_block, self) {
+                    Ok(ictx) => ictx,
+                    Err(errs) => {
+                        errors.extend(errs);
+                        continue;
+                    }
+                };
+
+                let self_ty = ictx.opt_self_ty().unwrap();
+
+                // Determine the canonical TyDefId (following alias chain).
+                let canonical_id = match canonical_ty_def_id(&self_ty, &self.alias_canonical) {
+                    Some(id) => id,
+                    None => {
+                        // Primitive or Fn types: associated items not tracked in TyNameTree.
+                        // They are handled via hir.special_ty_impls in lowering.
+                        for f in &impl_block.assoc_fns {
+                            let def_id = ValDefId::new(self.alloc_def_id());
+                            let _ = f.def_id.set(def_id);
+                        }
+                        for m in &impl_block.methods {
+                            let def_id = ValDefId::new(self.alloc_def_id());
+                            let _ = m.def_id.set(def_id);
+                        }
+                        for f in &impl_block.native_assoc_fns {
+                            let def_id = ValDefId::new(self.alloc_def_id());
+                            let _ = f.def_id.set(def_id);
+                        }
+                        for m in &impl_block.native_methods {
+                            let def_id = ValDefId::new(self.alloc_def_id());
+                            let _ = m.def_id.set(def_id);
+                        }
+                        continue;
+                    }
+                };
+
+                let ty_tree = match ty_index.get(&canonical_id) {
+                    Some(t) => t,
+                    None => {
+                        // Type defined in external package or not found; skip.
+                        continue;
+                    }
+                };
+
+                let mut borrow = ty_tree.children.borrow_mut();
+
+                for f in &impl_block.assoc_fns {
+                    let def_id = ValDefId::new(self.alloc_def_id());
+                    match borrow.entry(f.id.id) {
+                        Entry::Vacant(e) => {
+                            e.insert(AssocNameTreeItem::Val { def_id });
+                            let _ = f.def_id.set(def_id);
+                        }
+                        Entry::Occupied(_) => {
+                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
+                                name: f.id.id,
+                                span: f.id.span.clone(),
+                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
+                            });
+                            let _ = f.def_id.set(def_id);
+                        }
+                    }
+                }
+
+                for m in &impl_block.methods {
+                    let def_id = ValDefId::new(self.alloc_def_id());
+                    match borrow.entry(m.id.id) {
+                        Entry::Vacant(e) => {
+                            e.insert(AssocNameTreeItem::Val { def_id });
+                            let _ = m.def_id.set(def_id);
+                        }
+                        Entry::Occupied(_) => {
+                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
+                                name: m.id.id,
+                                span: m.id.span.clone(),
+                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
+                            });
+                            let _ = m.def_id.set(def_id);
+                        }
+                    }
+                }
+
+                for f in &impl_block.native_assoc_fns {
+                    let def_id = ValDefId::new(self.alloc_def_id());
+                    match borrow.entry(f.id.id) {
+                        Entry::Vacant(e) => {
+                            e.insert(AssocNameTreeItem::Val { def_id });
+                            let _ = f.def_id.set(def_id);
+                        }
+                        Entry::Occupied(_) => {
+                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
+                                name: f.id.id,
+                                span: f.id.span.clone(),
+                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
+                            });
+                            let _ = f.def_id.set(def_id);
+                        }
+                    }
+                }
+
+                for m in &impl_block.native_methods {
+                    let def_id = ValDefId::new(self.alloc_def_id());
+                    match borrow.entry(m.id.id) {
+                        Entry::Vacant(e) => {
+                            e.insert(AssocNameTreeItem::Val { def_id });
+                            let _ = m.def_id.set(def_id);
+                        }
+                        Entry::Occupied(_) => {
+                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
+                                name: m.id.id,
+                                span: m.id.span.clone(),
+                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
+                            });
+                            let _ = m.def_id.set(def_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (child_name, child_module) in &module.children {
+            let child_tree = match module_tree.children.get(child_name) {
+                Some(ModuleNameTreeItem::Mod(m)) => m,
+                _ => continue,
+            };
+            if let Err(errs) = self.collect_impls_in_module(
+                name_tree,
+                pkg_name,
+                child_tree,
+                child_module,
+                ty_index,
+            ) {
+                errors.extend(errs);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
-struct ImplCollector {
-    impls: HashMap<TyDefId, HashMap<InternedIdent, TyAssocList>>,
+/// Builds a flat TyDefId → &TyNameTree index by walking the module tree.
+pub(super) fn collect_ty_trees<'a>(
+    module: &'a ModuleNameTree,
+    map: &mut HashMap<TyDefId, &'a TyNameTree>,
+) {
+    for item in module.children.values() {
+        match item {
+            ModuleNameTreeItem::Ty(ty_tree) => {
+                map.insert(ty_tree.def_id, ty_tree);
+            }
+            ModuleNameTreeItem::Mod(mod_tree) => {
+                collect_ty_trees(mod_tree, map);
+            }
+            ModuleNameTreeItem::Val(_) => {}
+        }
+    }
 }
 
-struct TyAssocList {
-    impls: Vec<(Vec<TyKind>, AssocNameTreeItem)>,
+/// Returns the canonical (non-alias) TyDefId for a TyKind, or None for non-defined types.
+fn canonical_ty_def_id(
+    ty_kind: &TyKind,
+    alias_canonical: &HashMap<TyDefId, TyDefId>,
+) -> Option<TyDefId> {
+    match ty_kind {
+        TyKind::Defined(biwac_hir::DefinedTy { def_id, .. }) => {
+            Some(*alias_canonical.get(def_id).unwrap_or(def_id))
+        }
+        _ => None,
+    }
 }
 
-impl ImplCollector {
-    fn new() -> Self {
-        Self {
-            impls: HashMap::new(),
+fn detect_alias_cycles(
+    direct_map: &HashMap<TyDefId, TyDefId>,
+    span_map: &HashMap<TyDefId, Span>,
+    errors: &mut Vec<ResolveError>,
+) {
+    let mut visited: HashSet<TyDefId> = HashSet::new();
+    let mut in_progress: HashSet<TyDefId> = HashSet::new();
+
+    for &alias_id in direct_map.keys() {
+        if !visited.contains(&alias_id) {
+            dfs_detect(
+                alias_id,
+                direct_map,
+                span_map,
+                &mut visited,
+                &mut in_progress,
+                errors,
+            );
+        }
+    }
+}
+
+fn dfs_detect(
+    current: TyDefId,
+    direct_map: &HashMap<TyDefId, TyDefId>,
+    span_map: &HashMap<TyDefId, Span>,
+    visited: &mut HashSet<TyDefId>,
+    in_progress: &mut HashSet<TyDefId>,
+    errors: &mut Vec<ResolveError>,
+) {
+    in_progress.insert(current);
+
+    if let Some(&next) = direct_map.get(&current) {
+        if in_progress.contains(&next) {
+            if let Some(span) = span_map.get(&next) {
+                errors.push(ResolveError::CyclingTypeAlias {
+                    def_id: Box::new(next),
+                    detected_position: Box::new(span.clone()),
+                });
+            }
+        } else if !visited.contains(&next) {
+            dfs_detect(next, direct_map, span_map, visited, in_progress, errors);
         }
     }
 
-    fn register_impl(
-        &mut self,
-        ty_kind: &TyKind,
-        name: &InternedIdent,
-        item: AssocNameTreeItem,
-    ) -> Result<(), ResolveError> {
-        // TODO: duplication check
-        todo!()
+    in_progress.remove(&current);
+    visited.insert(current);
+}
+
+fn follow_alias_chain(start: TyDefId, direct_map: &HashMap<TyDefId, TyDefId>) -> TyDefId {
+    let mut current = start;
+    let mut seen: HashSet<TyDefId> = HashSet::new();
+    seen.insert(current);
+    while let Some(&next) = direct_map.get(&current) {
+        if seen.contains(&next) {
+            break; // cycle (already reported); stop here
+        }
+        seen.insert(next);
+        current = next;
     }
+    current
 }

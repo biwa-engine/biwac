@@ -2,10 +2,11 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_ast::{AbsolutePathHeader, Globals, ModAst, Path, PathSegmentResolution};
 use biwac_base::InternedIdent;
-use biwac_span::DefIdKind;
+use biwac_span::{DefIdKind, TyDefId};
 
 use crate::{
-    ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, resolving::context::ResolveCtx,
+    AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, TyNameTree,
+    resolving::context::ResolveCtx,
 };
 
 #[derive(Debug)]
@@ -14,6 +15,7 @@ pub struct ModuleResolveCtx<'t> {
     self_pkg_name: InternedIdent,
     module: &'t ModuleNameTree,
     imports: HashMap<InternedIdent, &'t Path>,
+    ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
 }
 
 impl<'t> ModuleResolveCtx<'t> {
@@ -22,6 +24,7 @@ impl<'t> ModuleResolveCtx<'t> {
         self_pkg_name: InternedIdent,
         module_tree: &'t ModuleNameTree,
         module_ast: &'t ModAst,
+        ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
     ) -> Result<Self, Vec<ResolveError>> {
         let mut imports = HashMap::new();
         let mut errors = Vec::new();
@@ -61,6 +64,7 @@ impl<'t> ModuleResolveCtx<'t> {
                 self_pkg_name,
                 module: module_tree,
                 imports,
+                ty_index,
             })
         } else {
             Err(errors)
@@ -70,6 +74,7 @@ impl<'t> ModuleResolveCtx<'t> {
 
 impl ResolveCtx for ModuleResolveCtx<'_> {
     fn resolve_path(&self, path: &Path) -> Result<(), ResolveError> {
+        // If already resolved, fast path.
         for (i, segment) in path.segments.iter().enumerate() {
             match segment.resolved_id.get() {
                 Some(PathSegmentResolution::Ok(_)) => {
@@ -93,23 +98,21 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
         match &path.abs_header {
             Some(AbsolutePathHeader::Package(_)) => {
                 let self_package = &self.global_tree.packages.get(&self.self_pkg_name).unwrap();
-
-                resolve_path_in_module(path, 0, &self_package.root_module_tree)
+                resolve_path_in_module(path, 0, &self_package.root_module_tree, self.ty_index)
             }
 
-            // keyword `Self` can be used only in type definition or type implementation.
             Some(AbsolutePathHeader::SelfTyp(span)) => {
                 Err(ResolveError::UnexpectedSelfType { span: span.clone() })
             }
 
             None => {
                 let first_segment_ident = &path.segments[0].ident;
-                match self.module.children.get(&first_segment_ident.id) {
-                    Some(ModuleNameTreeItem::Mod(_))
-                    | Some(ModuleNameTreeItem::Ty(_))
-                    | Some(ModuleNameTreeItem::Val(_)) => Ok(()),
-                    None => match self.imports.get(&first_segment_ident.id) {
-                        Some(path) => self.resolve_path(path),
+                if self.module.children.contains_key(&first_segment_ident.id) {
+                    // Relative path found in current module - resolve properly.
+                    resolve_path_in_module(path, 0, self.module, self.ty_index)
+                } else {
+                    match self.imports.get(&first_segment_ident.id) {
+                        Some(import_path) => self.resolve_path(import_path),
                         None => {
                             let package =
                                 match self.global_tree.packages.get(&first_segment_ident.id) {
@@ -126,29 +129,36 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                 };
 
                             if path.segments.len() == 1 {
-                                // returns Some(PackageId)
+                                // Returns Some(PackageId) — not yet supported.
                                 todo!()
                             } else {
-                                resolve_path_in_module(path, 1, &package.root_module_tree)
+                                resolve_path_in_module(
+                                    path,
+                                    1,
+                                    &package.root_module_tree,
+                                    self.ty_index,
+                                )
                             }
                         }
-                    },
+                    }
                 }
             }
         }
     }
 }
 
-/// `depth` means Path.segments[depth] should be resolved now.
-/// Path.abs_header must have been resolved.
+/// Resolves path starting at `depth` within a module tree.
+/// Sets `resolved_id` on each path segment and navigates into child modules or type children.
 fn resolve_path_in_module(
     path: &Path,
     depth: usize,
     module: &ModuleNameTree,
+    ty_index: &HashMap<TyDefId, &TyNameTree>,
 ) -> Result<(), ResolveError> {
     let segment = &path.segments[depth];
-    match resolve_ident_in_module(&segment.ident.id, module) {
-        Some(def_id_kind) => {
+    match module.children.get(&segment.ident.id) {
+        Some(item) => {
+            let def_id_kind = module_item_to_def_id_kind(item);
             segment
                 .resolved_id
                 .set(PathSegmentResolution::Ok(def_id_kind))
@@ -157,12 +167,27 @@ fn resolve_path_in_module(
             if path.segments.len() == depth + 1 {
                 Ok(())
             } else {
-                resolve_path_in_module(path, depth + 1, module)
+                match item {
+                    ModuleNameTreeItem::Mod(child_module) => {
+                        resolve_path_in_module(path, depth + 1, child_module, ty_index)
+                    }
+                    ModuleNameTreeItem::Ty(ty_tree) => {
+                        resolve_path_in_ty(path, depth + 1, ty_tree, ty_index)
+                    }
+                    ModuleNameTreeItem::Val(_) => {
+                        path.segments[depth + 1]
+                            .resolved_id
+                            .set(PathSegmentResolution::Err)
+                            .unwrap();
+                        Err(ResolveError::PathResolutionFailed {
+                            path: Box::new(path.clone()),
+                        })
+                    }
+                }
             }
         }
         None => {
             segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
-
             Err(ResolveError::PathResolutionFailed {
                 path: Box::new(path.clone()),
             })
@@ -170,10 +195,73 @@ fn resolve_path_in_module(
     }
 }
 
-fn resolve_ident_in_module(name: &InternedIdent, module: &ModuleNameTree) -> Option<DefIdKind> {
-    module.children.get(name).map(|item| match item {
+/// Resolves path starting at `depth` within a type's associated items.
+/// Follows alias_target if the type is an alias.
+fn resolve_path_in_ty(
+    path: &Path,
+    depth: usize,
+    ty_tree: &TyNameTree,
+    ty_index: &HashMap<TyDefId, &TyNameTree>,
+) -> Result<(), ResolveError> {
+    // Follow alias chain to find the canonical type's children.
+    let canonical_tree = if let Some(canonical_id) = *ty_tree.alias_target.borrow() {
+        ty_index.get(&canonical_id).copied().unwrap_or(ty_tree)
+    } else {
+        ty_tree
+    };
+
+    let segment = &path.segments[depth];
+    let children = canonical_tree.children.borrow();
+    match children.get(&segment.ident.id) {
+        Some(AssocNameTreeItem::Val { def_id }) => {
+            segment
+                .resolved_id
+                .set(PathSegmentResolution::Ok(DefIdKind::Val(*def_id)))
+                .unwrap();
+            if path.segments.len() == depth + 1 {
+                Ok(())
+            } else {
+                path.segments[depth + 1]
+                    .resolved_id
+                    .set(PathSegmentResolution::Err)
+                    .unwrap();
+                Err(ResolveError::PathResolutionFailed {
+                    path: Box::new(path.clone()),
+                })
+            }
+        }
+        Some(AssocNameTreeItem::Ty { def_id }) => {
+            segment
+                .resolved_id
+                .set(PathSegmentResolution::Ok(DefIdKind::Ty(*def_id)))
+                .unwrap();
+            if path.segments.len() == depth + 1 {
+                Ok(())
+            } else if let Some(child_ty_tree) = ty_index.get(def_id) {
+                resolve_path_in_ty(path, depth + 1, child_ty_tree, ty_index)
+            } else {
+                path.segments[depth + 1]
+                    .resolved_id
+                    .set(PathSegmentResolution::Err)
+                    .unwrap();
+                Err(ResolveError::PathResolutionFailed {
+                    path: Box::new(path.clone()),
+                })
+            }
+        }
+        None => {
+            segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
+            Err(ResolveError::PathResolutionFailed {
+                path: Box::new(path.clone()),
+            })
+        }
+    }
+}
+
+fn module_item_to_def_id_kind(item: &ModuleNameTreeItem) -> DefIdKind {
+    match item {
         ModuleNameTreeItem::Mod(module) => DefIdKind::Mod(module.mod_id),
         ModuleNameTreeItem::Ty(ty) => DefIdKind::Ty(ty.def_id),
         ModuleNameTreeItem::Val(val_def_id) => DefIdKind::Val(*val_def_id),
-    })
+    }
 }

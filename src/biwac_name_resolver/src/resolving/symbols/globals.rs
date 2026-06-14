@@ -150,9 +150,10 @@ impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::TypeAlias {
     fn resolve(
         &self,
         ctx: &ModuleResolveCtx<'_>,
-        _def_collector: &mut DefCollector,
+        def_collector: &mut DefCollector,
     ) -> Result<(), Vec<ResolveError>> {
-        ctx.resolve_typ(&self.right).map(|_| ())
+        let ctx = TyDefResolveCtx::new(ctx, &self.genargs, def_collector)?;
+        ctx.resolve_typ(&self.right)
     }
 }
 

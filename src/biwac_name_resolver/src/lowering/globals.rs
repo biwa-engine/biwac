@@ -12,8 +12,7 @@ use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
 use crate::ResolveError;
 
 use super::{
-    ExprLowerCtx, expressions::lower_expr, statements::lower_stmt, ty_from_typ_repr,
-    ty_kind_from_typ_repr,
+    ExprLowerCtx, alias_expansion, expressions::lower_expr, statements::lower_stmt, ty_from_typ_repr,
 };
 
 pub(super) fn build_fn_signature(
@@ -375,7 +374,10 @@ pub(super) fn lower_impl_block(
     impl_block: &biwac_ast::ImplBlock,
     errors: &mut Vec<ResolveError>,
 ) {
-    let self_ty_kind = ty_kind_from_typ_repr(&impl_block.self_typ, None);
+    // Expand type aliases so we register under the canonical type, not the alias.
+    let raw_self_ty = ty_from_typ_repr(&impl_block.self_typ, None);
+    let aliases = hir.ty_aliases.clone();
+    let self_ty_kind = alias_expansion::expand_ty(raw_self_ty, &aliases).kind;
     let impl_genargs = collect_impl_genargs(impl_block);
     let impl_block_genargs_map = collect_impl_block_genargs_map(impl_block);
 

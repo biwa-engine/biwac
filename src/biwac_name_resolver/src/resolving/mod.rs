@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
 use biwac_base::InternedIdent;
 use biwac_package_loader::{LoadedModule, Pkg};
+use biwac_span::TyDefId;
 
 use crate::{
-    ModuleNameTree, NameTree, ResolveError,
+    ModuleNameTree, NameTree, ResolveError, TyNameTree,
     resolving::{
         context::{LocalResolveCtx, ResolveCtx, module_level::ModuleResolveCtx},
-        def_collector::DefCollector,
+        def_collector::{DefCollector, collect_ty_trees},
     },
 };
 
@@ -20,6 +23,7 @@ trait NameResolve<C: ResolveCtx> {
 trait LocalNameResolve<C: LocalResolveCtx> {
     fn resolve(&self, ctx: &mut C) -> Result<(), Vec<ResolveError>>;
 }
+
 pub(crate) fn resolve_in_self_package(
     pkg: &Pkg,
     name_tree: &NameTree,
@@ -31,12 +35,17 @@ pub(crate) fn resolve_in_self_package(
         .unwrap()
         .root_module_tree;
 
+    // Build TyDefId -> &TyNameTree index (populated during collect() with impl children).
+    let mut ty_index: HashMap<TyDefId, &TyNameTree> = HashMap::new();
+    collect_ty_trees(root_module_tree, &mut ty_index);
+
     resolve_in_module(
         name_tree,
         name_tree.self_pkg_name,
         root_module_tree,
         &pkg.root_module,
         def_collector,
+        &ty_index,
     )
 }
 
@@ -46,8 +55,9 @@ fn resolve_in_module(
     module_tree: &ModuleNameTree,
     module: &LoadedModule,
     def_collector: &mut DefCollector,
+    ty_index: &HashMap<TyDefId, &TyNameTree>,
 ) -> Result<(), Vec<ResolveError>> {
-    let ctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast)?;
+    let ctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast, ty_index)?;
 
     let mut errors = Vec::new();
 
