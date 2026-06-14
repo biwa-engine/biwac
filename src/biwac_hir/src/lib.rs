@@ -2,7 +2,7 @@ mod error;
 pub mod hir;
 
 pub use crate::hir::{
-    Hir, ImplValId, PkgId, Progressive, TyExistence,
+    Hir, ImplValId, TyExistence,
     symbols::{
         Ident,
         expressions::{
@@ -11,15 +11,13 @@ pub use crate::hir::{
             Variable,
         },
         globals::{
-            DecledArg, FnDefContent, FnDefContentBody, FnDefContentSignature,
-            ImplValDefContentKind, MethodDefContent, NativeCode, NativeFnArgDecl,
-            NativeFnDefContent, NativeMethodDefContent, NativeTypeAliasDefContent,
-            NovelSceneDefContent, StructDefContent, TyDefContentKind, TypeAliasDefContent,
-            ValDefContentKind,
+            AssocValDefKind, DecledArg, FnBody, FnDef, FnSignature, NativeCode, NativeFnArgDecl,
+            NativeFnDef, NativeTypeAliasDefContent, NovelSceneDef, StructDefContent, TyDefKind,
+            TypeAliasDefContent, ValDefKind,
         },
         statements::{
-            AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, LocVarId, ReturnStmt, Stmt,
-            VarDecl, WhileStmt,
+            AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl,
+            WhileStmt,
         },
     },
     types::{DefinedTy, FnTy, InferTy, Ty, TyKind, TyVar},

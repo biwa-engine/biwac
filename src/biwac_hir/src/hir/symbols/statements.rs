@@ -1,21 +1,6 @@
-use biwac_span::Span;
+use biwac_span::{Span, VarId};
 
 use crate::{Expr, Ident, Primary, Ty};
-
-// LocVarId
-// function local variable id
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LocVarId(usize);
-
-impl LocVarId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    pub fn value(&self) -> &usize {
-        &self.0
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct DecledVar {
@@ -44,7 +29,7 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone)]
 pub struct VarDecl {
-    pub id: LocVarId,
+    pub id: VarId,
     pub init: Expr,
 }
 

@@ -1,7 +1,7 @@
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
-use biwac_span::{Span, TyDefId, ValDefId};
+use biwac_span::{Span, TyDefId, ValDefId, VarId};
 
-use crate::{Ident, ImplValId, LocVarId, Stmt, Ty};
+use crate::{Ident, ImplValId, Stmt, Ty};
 
 // ExprId
 // function local expression id
@@ -72,7 +72,7 @@ pub struct Variable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VarIdKind {
-    Local(LocVarId),
+    Local(VarId),
     Global(ValDefId),
 }
 
@@ -126,7 +126,7 @@ pub struct FnCall {
 
 #[derive(Debug, Clone)]
 pub enum Callee {
-    Var(LocVarId),
+    Var(VarId),
     Fn(ValDefId),
     Assoc(AssocCallee),
 }

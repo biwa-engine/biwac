@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId};
 
-use crate::FnDefContentSignature;
+use crate::FnSignature;
 
 // Ty は 型 を表す
 // ただし、型の種類そのものは TyKind が表し、
@@ -345,7 +345,7 @@ impl Ty {
     }
 }
 
-impl FnDefContentSignature {
+impl FnSignature {
     pub fn as_ty(&self) -> Ty {
         Ty::new(
             TyKind::Fn(FnTy {

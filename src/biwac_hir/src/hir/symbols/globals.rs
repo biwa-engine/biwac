@@ -1,43 +1,41 @@
 use std::collections::HashMap;
 
-use biwac_ast::{FnDef, MethodDef, NativeFnDef, NativeMethodDef, NovelScene};
-use biwac_span::{GenDefId, LocalGenDefId, Span};
+use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
 
-use crate::{DecledVar, Expr, ExprId, Ident, LocVarId, Progressive, Stmt, Ty};
+use crate::{DecledVar, Expr, ExprId, Ident, Stmt, Ty};
 
 // 値名前空間のシンボル
 #[derive(Debug, Clone)]
-pub enum ValDefContentKind {
-    Fn(Box<FnDefContent>),
-    Native(Box<NativeFnDefContent>),
-    NovelScene(Box<NovelSceneDefContent>),
-    ExternalFn(Box<FnDefContentSignature>),
+pub enum ValDefKind {
+    Fn(Box<FnDef>),
+    Native(Box<NativeFnDef>),
+    NovelScene(Box<NovelSceneDef>),
+    ExternalFn(Box<FnSignature>),
 }
 
 // impl block 内での
 // 値名前空間のシンボル
 #[derive(Debug, Clone)]
-pub enum ImplValDefContentKind {
-    Fn(Box<FnDefContent>),
-    NativeFn(Box<NativeFnDefContent>),
-    Method(Box<MethodDefContent>),
-    NativeMethod(Box<NativeMethodDefContent>),
+pub enum AssocValDefKind {
+    Fn(Box<FnDef>),
+    NativeFn(Box<NativeFnDef>),
 }
 
+/// function and method
 #[derive(Debug, Clone)]
-pub struct FnDefContent {
+pub struct FnDef {
     pub fn_name_span: Span,
 
     // signature
-    pub signature: FnDefContentSignature,
+    pub signature: FnSignature,
 
     // body
     // needs type inferrence
-    pub body: Progressive<FnDef, FnDefContentBody>,
+    pub body: FnBody,
 
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
-    pub var_tys: HashMap<LocVarId, Ty>,
+    pub var_tys: HashMap<VarId, Ty>,
 
     pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
@@ -48,7 +46,9 @@ pub struct FnDefContent {
 //        signature
 // ```
 #[derive(Debug, Clone)]
-pub struct FnDefContentSignature {
+pub struct FnSignature {
+    // NOTE:
+    // contains `self`
     pub args: Vec<(Ident, Ty)>,
 
     // if the function does not return value ( = void function),
@@ -60,20 +60,20 @@ pub struct FnDefContentSignature {
 }
 
 #[derive(Debug, Clone)]
-pub struct FnDefContentBody {
+pub struct FnBody {
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
-    pub arg_var_ids: Vec<LocVarId>,
+    pub arg_var_ids: Vec<VarId>,
 
     // 関数内で宣言された変数のマップ
-    // 一意なid: LocVarIdを割り当てる
-    pub vars: HashMap<LocVarId, DecledVar>,
+    // 一意なid: VarIdを割り当てる
+    pub vars: HashMap<VarId, DecledVar>,
 }
 
 #[derive(Debug, Clone)]
-pub struct NativeFnDefContent {
+pub struct NativeFnDef {
     // signature
-    pub signature: FnDefContentSignature,
+    pub signature: FnSignature,
 
     pub native_body: String,
 
@@ -93,55 +93,13 @@ pub struct NativeFnArgDecl {
 
 #[derive(Debug, Clone)]
 pub struct DecledArg {
-    pub id: LocVarId,
-}
-
-// TODO: FnDefContent と同じで済むなら同じに
-#[derive(Debug, Clone)]
-pub struct MethodDefContent {
-    pub fn_name_span: Span,
-
-    // NOTE: selfは0が割り当てられることを決めてしまう?
-    // pub self_id: LocVarId,
-
-    // signature
-    pub signature: FnDefContentSignature,
-
-    // body
-    // needs type inferrence
-    pub body: Progressive<MethodDef, FnDefContentBody>,
-
-    // 関数内で宣言された変数のマップ
-    // 一意なid: LocVarIdを割り当てる
-    pub vars: HashMap<LocVarId, DecledVar>,
-
-    // 型推論された結果の式に対する型が記録される
-    pub expr_tys: HashMap<ExprId, Ty>,
-    pub var_tys: HashMap<LocVarId, Ty>,
-
-    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
-}
-
-// TODO: NativeFnDefContent と同じで済むなら同じに
-#[derive(Debug, Clone)]
-pub struct NativeMethodDefContent {
-    // signature
-    pub signature: FnDefContentSignature,
-
-    pub native_body: String,
-
-    pub fn_name_span: Span,
-    pub native_span: Span,
-    pub span: Span,
-
-    pub self_ty: Ty,
-    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
+    pub id: VarId,
 }
 
 // 各種の型の定義
 // e.g.) struct, enum
 #[derive(Debug, Clone)]
-pub enum TyDefContentKind {
+pub enum TyDefKind {
     Struct(Box<StructDefContent>),
     // Enum(EnumDefContent),
     TypeAlias(Box<TypeAliasDefContent>),
@@ -178,7 +136,7 @@ pub struct NativeCode {
 }
 
 #[derive(Debug, Clone)]
-pub struct NovelSceneDefContent {
+pub struct NovelSceneDef {
     pub scene_name_span: Span,
 
     // signature
@@ -186,27 +144,28 @@ pub struct NovelSceneDefContent {
     // (std::game::Game[_]) -> std::game::Game[_]
     // である必要がある
     // これは登録時に検査される
-    pub signature: FnDefContentSignature,
+    pub signature: FnSignature,
 
     // body
     // needs type inferrence
-    pub body: Progressive<NovelScene, FnDefContentBody>,
+    pub body: FnBody,
 
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
-    pub var_tys: HashMap<LocVarId, Ty>,
+    pub var_tys: HashMap<VarId, Ty>,
 }
 
-impl FnDefContent {
+impl FnDef {
     pub fn new(
-        signature: FnDefContentSignature,
-        fn_def: FnDef,
+        fn_ident: &biwac_ast::Ident,
+        signature: FnSignature,
+        body: FnBody,
         impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
-            fn_name_span: fn_def.id.span.clone(),
+            fn_name_span: fn_ident.span.clone(),
             signature,
-            body: Progressive::NotYet(fn_def),
+            body,
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
             impl_genargs,
@@ -214,28 +173,10 @@ impl FnDefContent {
     }
 }
 
-impl MethodDefContent {
+impl NativeFnDef {
     pub fn new(
-        signature: FnDefContentSignature,
-        method_def: MethodDef,
-        impl_genargs: Vec<(Ident, LocalGenDefId)>,
-    ) -> Self {
-        Self {
-            fn_name_span: method_def.id.span.clone(),
-            signature,
-            body: Progressive::NotYet(method_def),
-            vars: HashMap::new(),
-            expr_tys: HashMap::new(),
-            var_tys: HashMap::new(),
-            impl_genargs,
-        }
-    }
-}
-
-impl NativeFnDefContent {
-    pub fn new(
-        signature: FnDefContentSignature,
-        fn_def: NativeFnDef,
+        signature: FnSignature,
+        fn_def: biwac_ast::NativeFnDef,
         impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
@@ -244,25 +185,6 @@ impl NativeFnDefContent {
             fn_name_span: fn_def.id.span,
             native_span: fn_def.native_span,
             span: fn_def.span,
-            impl_genargs,
-        }
-    }
-}
-
-impl NativeMethodDefContent {
-    pub fn new(
-        signature: FnDefContentSignature,
-        method_def: NativeMethodDef,
-        self_ty: Ty,
-        impl_genargs: Vec<(Ident, LocalGenDefId)>,
-    ) -> Self {
-        Self {
-            signature,
-            native_body: method_def.native,
-            fn_name_span: method_def.id.span,
-            native_span: method_def.native_span,
-            span: method_def.span,
-            self_ty,
             impl_genargs,
         }
     }
@@ -277,12 +199,12 @@ impl From<&biwac_ast::NativeCode> for NativeCode {
     }
 }
 
-impl NovelSceneDefContent {
-    pub fn new(signature: FnDefContentSignature, scene_def: NovelScene) -> Self {
+impl NovelSceneDef {
+    pub fn new(scene_ident: &biwac_ast::Ident, signature: FnSignature, body: FnBody) -> Self {
         Self {
-            scene_name_span: scene_def.id.span.clone(),
+            scene_name_span: scene_ident.span.clone(),
             signature,
-            body: Progressive::NotYet(scene_def),
+            body,
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
         }

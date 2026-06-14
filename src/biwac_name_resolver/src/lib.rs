@@ -241,16 +241,21 @@ impl NameResolver {
         let mut def_collector = DefCollector::new();
         let name_tree = def_collector.collect(self.pkg_name, &self.pkg, external_package_trees)?;
 
+        // TODO: cache on disk
+        // def_collector
+        // name_tree
+        // Even if name resolution failed,
+        // def_collector and name_tree must be cached
+        // because symbol definition is not affected by name resolution result.
+
         // symbol resolution (package internal)
         resolve_in_self_package(&self.pkg, &name_tree, &mut def_collector)?;
 
-        // TODO: collect and check result
-
         // TODO: cache on disk
+        // symbol signature
 
-        // TODO: lowering to HIR
-
-        todo!()
+        // lowering to HIR
+        lowering::lower(self.pkg.root_module.ast)
     }
 
     // pub fn new(

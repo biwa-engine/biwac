@@ -1,8 +1,12 @@
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
-use biwac_hir::{DefinedTy, Ty, TyKind};
+use biwac_hir::{DefinedTy, Hir, Ty, TyKind};
 use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId};
 
 use crate::ResolveError;
+
+pub(crate) fn lower(ast: biwac_ast::ModAst) -> Result<Hir, Vec<ResolveError>> {
+    todo!()
+}
 
 pub(crate) fn ty_kind_unwrap_from_typ_repr(typ: &TypRepr, self_typ: Option<&TyKind>) -> TyKind {
     match &typ.val {

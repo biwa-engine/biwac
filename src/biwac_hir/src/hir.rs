@@ -1,57 +1,27 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{HashMap, HashSet},
 };
 
 pub(crate) mod symbols;
 pub(crate) mod types;
 
-use biwac_base::{IdentInterner, InternedIdent, ModPath, PackageName};
+use biwac_base::{InternedIdent, ModPath, PackageName};
 use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId};
 
-use crate::{
-    AssocCallee, DefinedTy, FnDefContentBody, FnDefContentSignature, FnTy, HirError, HirResult,
-    Ident, ImplValDefContentKind, InferTy, NativeCode, StructDefContent, Ty, TyDefContentKind,
-    TyKind, ValDefContentKind,
-};
+use crate::{AssocValDefKind, DefinedTy, NativeCode, Ty, TyDefKind, TyKind, ValDefKind};
 
-// Progressive は漸進的に値が更新されていくことを示す
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Progressive<Y, C> {
-    NotYet(Y),
-    Completed(C),
-}
-
-//  Hir は
-//  High-level Intermediate Representation (高レベル中間表現) である
-//
-//  以下の漸進的な進行を、
-//  パッケージ全体のすべての情報を集約して保持し、
-//  この内部に変更を繰り返し加えることで結果を蓄積していくことで達成する
-//
-//  各進行状態を保持するために Progressive による不完全な状態が存在する
-//  適切な順序で呼び出していくことが必要
-//  不正な順序で呼び出すと直ちにコンパイラはエラー終了する
-//
-//  1. 名前解決
-//      1. すべての型について
-//          1. 型の存在だけ登録
-//          2. 実体(シグニチャ)を登録
-//      2. 各種関数、関連関数、メソッドについて
-//          1. 存在を登録
-//              - シグニチャの型を解決しつつ
-//              - 重複を検査したうえで
-//                  - 関数については、関数、変数の名前空間での名前の重複検査をする
-//                  - 関連関数、メソッドについては、とりあえず実装対象の型の存在を確認する
-//          2. 関数内の名前解決を行い(
-//              関連関数呼び出しは、普通の関数 -> 型の関連関数の順でこの段階でも解決できる
-//              またはケースの制約を導入するか。
-//              メソッド呼び出しは、型推論が必要なためこの時点では解決しない
-//              )、
-//          登録する
-//  2. 各種関数類の関数内の型推論
-//      1. 関連関数、メソッドについて、実装対象の型についてimplの重複を検査する(変更は加えない)
-//      2. 各種関数、関連関数、メソッドについて、内部の型推論を行う
+///  Hir は
+///  High-level Intermediate Representation (高レベル中間表現) である
+///
+///  名前解決完了後、対象パッケージ自身と、依存するパッケージのシグニチャを保持し、
+///  以降の解析,コード生成のためのデータを提供する
+///
+///  ## 以降の解析,コード生成
+///
+///  1. analysis unit (各種関数類) 単位での型推論
+///
+///  2. 型推論完了後、 HIR を元にコード生成
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub pkg_name: PackageName,
@@ -61,7 +31,7 @@ pub struct Hir {
     // - グローバル変数(const)
     // が含まれる
     // 外部パッケージの値は予め登録される
-    pub vals: HashMap<ValDefId, ValDefContentKind>,
+    pub vals: HashMap<ValDefId, ValDefKind>,
 
     // 型の定義とその実装
     // e.g.) struct, enum
@@ -96,7 +66,7 @@ pub struct Hir {
 #[derive(Debug, Clone)]
 pub struct DefinedTyImpl {
     // length of genargs
-    pub ty_content: Progressive<TyExistence, TyDefContentKind>,
+    pub ty_content: TyDefKind,
     // ある関連値名(メンバ名、関連関数名、関連定数名)と、
     // 各ジェネリック引数列に対する実装の実体、のマップ
     pub vals: HashMap<InternedIdent, TyValImplList>,
@@ -104,7 +74,7 @@ pub struct DefinedTyImpl {
 
 #[derive(Debug, Clone)]
 pub struct SpecialTyImpl {
-    pub vals: HashMap<InternedIdent, ImplValDefContentKind>,
+    pub vals: HashMap<InternedIdent, AssocValDefKind>,
 }
 
 // ジェネリック引数列と、実体の組のリスト
@@ -136,18 +106,13 @@ impl ImplValId {
 pub struct TyValImplGenargsContentPair {
     pub impl_block_genargs: HashMap<String, (LocalGenDefId, Span)>,
     pub genargs: Vec<Ty>,
-    pub val_content: ImplValDefContentKind,
+    pub val_content: AssocValDefKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TyExistence {
     pub ty_name_span: Span,
     pub genarg_len: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PkgId {
-    name: PackageName,
 }
 
 impl Hir {
@@ -292,10 +257,10 @@ impl Hir {
     //     }
     // }
 
-    // 型の存在を取得する
-    pub fn get_type_existence(&self, tid: &TyDefId) -> Option<TyExistence> {
-        self.tys.get(tid)?.ty_content.as_type_existence()
-    }
+    // // 型の存在を取得する
+    // pub fn get_type_existence(&self, tid: &TyDefId) -> Option<TyExistence> {
+    //     self.tys.get(tid)?.ty_content.as_type_existence()
+    // }
 
     // // 値(fn, const)の存在およびシグニチャを登録する
     // // TODO: モジュール名との重複を検査
@@ -708,377 +673,344 @@ impl Hir {
     //     }
     // }
 
-    // メソッドのシグニチャ(FnTy)を取得
-    // ただし、第一引数selfはその型自体であり、型推論時に必要ないので含まない
-    // Ident は caller 側の場所を保持したIdent
-    pub fn get_method_of_type(&self, ty: &TyKind, method: &Ident) -> HirResult<Option<Ty>> {
-        match ty {
-            TyKind::Defined(defined_ty) => {
-                let defined_ty_impl = self
-                    .tys
-                    .get(&defined_ty.def_id)
-                    .expect("compiler bug: type not found");
-
-                if let Some(impl_list) = defined_ty_impl.vals.get(&method.id) {
-                    // ジェネリック引数列が重複する(一致する)ものを探す
-                    impl_list
-                        .vals
-                        .values()
-                        .find(|impl_| {
-                            impl_
-                                .genargs
-                                .iter()
-                                .zip(defined_ty.genargs.iter())
-                                .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
-                        })
-                        .map(|impl_| match &impl_.val_content {
-                            ImplValDefContentKind::Fn(_) => {
-                                Err(HirError::ImplementedValueIsNotMethod {
-                                    ty: Box::new(ty.clone()),
-                                    method: Box::new(method.clone()),
-                                    val_content: Box::new(impl_.val_content.clone()),
-                                })
-                            }
-                            ImplValDefContentKind::NativeFn(_) => {
-                                Err(HirError::ImplementedValueIsNotMethod {
-                                    ty: Box::new(ty.clone()),
-                                    method: Box::new(method.clone()),
-                                    val_content: Box::new(impl_.val_content.clone()),
-                                })
-                            }
-                            ImplValDefContentKind::Method(m) => {
-                                // LocGenTyId -> Ty の割り当てがあれば具体化する
-                                let mut assigns = HashMap::new();
-                                for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
-                                {
-                                    if let TyKind::LocGen(lgid) = &t1.kind {
-                                        assigns.insert(*lgid, t2.kind.clone());
-                                    }
-                                }
-
-                                Ok(Ty::new(
-                                    TyKind::Fn(FnTy {
-                                        args: m
-                                            .signature
-                                            .args
-                                            .iter()
-                                            .map(|(_, ty)| {
-                                                ty.clone().embody_by_loc_gen_ty_id(&assigns)
-                                            })
-                                            .collect(),
-                                        rty: Box::new(
-                                            m.signature
-                                                .rty
-                                                .clone()
-                                                .embody_by_loc_gen_ty_id(&assigns),
-                                        ),
-                                        genargs: m
-                                            .signature
-                                            .genargs
-                                            .iter()
-                                            .map(|(_, lgid)| *lgid)
-                                            .collect(),
-                                    }),
-                                    m.signature.span.clone(),
-                                ))
-                            }
-                            ImplValDefContentKind::NativeMethod(m) => {
-                                // LocGenTyId -> Ty の割り当てがあれば具体化する
-                                let mut assigns = HashMap::new();
-                                for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
-                                {
-                                    if let TyKind::LocGen(lgid) = &t1.kind {
-                                        assigns.insert(*lgid, t2.kind.clone());
-                                    }
-                                }
-
-                                Ok(Ty::new(
-                                    TyKind::Fn(FnTy {
-                                        args: m
-                                            .signature
-                                            .args
-                                            .iter()
-                                            .map(|(_, ty)| {
-                                                ty.clone().embody_by_loc_gen_ty_id(&assigns)
-                                            })
-                                            .collect(),
-                                        rty: Box::new(
-                                            m.signature
-                                                .rty
-                                                .clone()
-                                                .embody_by_loc_gen_ty_id(&assigns),
-                                        ),
-                                        genargs: m
-                                            .signature
-                                            .genargs
-                                            .iter()
-                                            .map(|(_, lgid)| *lgid)
-                                            .collect(),
-                                    }),
-                                    m.signature.span.clone(),
-                                ))
-                            }
-                        })
-                        .transpose()
-                } else {
-                    Ok(None)
-                }
-            }
-            TyKind::Int | TyKind::Float | TyKind::Bool => {
-                if let Some(ty_impl) = self.special_ty_impls.get(ty)
-                    && let Some(val) = ty_impl.vals.get(&method.id)
-                {
-                    match val {
-                        ImplValDefContentKind::Fn(_) => {
-                            Err(HirError::ImplementedValueIsNotMethod {
-                                ty: Box::new(ty.clone()),
-                                method: Box::new(method.clone()),
-                                val_content: Box::new(val.clone()),
-                            })
-                        }
-                        ImplValDefContentKind::NativeFn(_) => {
-                            Err(HirError::ImplementedValueIsNotMethod {
-                                ty: Box::new(ty.clone()),
-                                method: Box::new(method.clone()),
-                                val_content: Box::new(val.clone()),
-                            })
-                        }
-                        ImplValDefContentKind::Method(m) => Ok(Some(Ty::new(
-                            TyKind::Fn(FnTy {
-                                args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
-                                rty: Box::new(m.signature.rty.clone()),
-                                genargs: m
-                                    .signature
-                                    .genargs
-                                    .iter()
-                                    .map(|(_, lgid)| *lgid)
-                                    .collect(),
-                            }),
-                            m.signature.span.clone(),
-                        ))),
-                        ImplValDefContentKind::NativeMethod(m) => Ok(Some(Ty::new(
-                            TyKind::Fn(FnTy {
-                                args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
-                                rty: Box::new(m.signature.rty.clone()),
-                                genargs: m
-                                    .signature
-                                    .genargs
-                                    .iter()
-                                    .map(|(_, lgid)| *lgid)
-                                    .collect(),
-                            }),
-                            m.signature.span.clone(),
-                        ))),
-                    }
-                } else {
-                    Ok(None)
-                }
-            }
-            _ => Ok(None),
-        }
-    }
-
-    // ある型に対する関連関数のシグニチャ(FnTy)を取得する
-    pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee, span: &Span) -> HirResult<Ty> {
-        match &assoc_callee.ty.kind {
-            TyKind::Defined(defined_ty) => {
-                let defined_ty_impl = self
-                    .tys
-                    .get(&defined_ty.def_id)
-                    .expect("compiler bug: type not found");
-
-                // alias なら解決先の型について探索する
-                if let Some(ty) =
-                    resolve_ty_alias(defined_ty, defined_ty_impl.ty_content.expect_completed())?
-                {
-                    let assoc_callee = AssocCallee {
-                        ty,
-                        assoc: assoc_callee.assoc.clone(),
-                        impl_vid: assoc_callee.impl_vid,
-                    };
-
-                    self.get_assoc_of_type(&assoc_callee, span)
-                } else {
-                    let impl_list = defined_ty_impl
-                        .vals
-                        .get(&assoc_callee.assoc.id)
-                        .expect("compiler bug: implemented value not found for this name");
-                    let impl_ = impl_list
-                        .vals
-                        .get(&assoc_callee.impl_vid)
-                        .expect("compiler bug: implemented value not found");
-
-                    match &impl_.val_content {
-                        ImplValDefContentKind::Fn(f) => {
-                            Ok(f.signature.as_ty())
-
-                            // WARN: really?
-                            //
-                            // // LocGenTyId -> Ty の割り当てがあれば具体化する
-                            // let mut assigns = HashMap::new();
-                            // for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter()) {
-                            //     if let Ty::LocGen(lgid) = t1 {
-                            //         assigns.insert(*lgid, t2.clone());
-                            //     }
-                            // }
-                            //
-                            // Ok(FnTy {
-                            //     args: f
-                            //         .signature
-                            //         .args
-                            //         .iter()
-                            //         .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
-                            //         .collect(),
-                            //     rty: Box::new(
-                            //         f.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
-                            //     ),
-                            //     genargs: f
-                            //         .signature
-                            //         .genargs
-                            //         .iter()
-                            //         .map(|(_, lgid)| *lgid)
-                            //         .collect(),
-                            // })
-                        }
-                        ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
-                        ImplValDefContentKind::Method(_)
-                        | ImplValDefContentKind::NativeMethod(_) => {
-                            Err(HirError::ImplementedValueIsNotAssoc {
-                                assoc_callee: Box::new(assoc_callee.clone()),
-                                caller_span: Box::new(span.clone().into()),
-                                val_content: Box::new(impl_.val_content.clone()),
-                            })
-                        }
-                    }
-                }
-            }
-            TyKind::Int | TyKind::Float | TyKind::Bool => {
-                let val_content = self
-                    .special_ty_impls
-                    .get(&assoc_callee.ty.kind)
-                    .expect("compiler bug: ty impl not found")
-                    .vals
-                    .get(&assoc_callee.assoc.id)
-                    .expect("compiler bug: ty imple value not found");
-
-                match &val_content {
-                    ImplValDefContentKind::Fn(f) => Ok(f.signature.as_ty()),
-                    ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
-                    ImplValDefContentKind::Method(_) | ImplValDefContentKind::NativeMethod(_) => {
-                        Err(HirError::ImplementedValueIsNotAssoc {
-                            assoc_callee: Box::new(assoc_callee.clone()),
-                            caller_span: Box::new(span.clone().into()),
-                            val_content: Box::new(val_content.clone()),
-                        })
-                    }
-                }
-            }
-            TyKind::Void
-            | TyKind::Gen(_)
-            | TyKind::LocGen(_)
-            | TyKind::Infer(_)
-            | TyKind::Fn(_) => {
-                // error
-                todo!()
-            }
-        }
-    }
-
-    // 型の実体を取得する
-    pub fn get_type_definition(&self, tid: &TyDefId) -> Option<&TyDefContentKind> {
-        match &self.tys.get(tid)?.ty_content {
-            Progressive::NotYet(_) => panic!("compiler bug: type definition not registered yet"),
-            Progressive::Completed(ty_content) => Some(ty_content),
-        }
-    }
-
-    pub fn register_module_native_code(
-        &mut self,
-        modpath: ModPath,
-        native: &biwac_ast::NativeCode,
-    ) {
-        if let Some(e) = self.module_global_natives.get_mut(&modpath) {
-            e.push(NativeCode::from(native));
-        } else {
-            self.module_global_natives
-                .insert(modpath, vec![NativeCode::from(native)]);
-        }
-    }
-
-    pub fn get_fn_sign(&self, vid: &ValDefId) -> Option<&FnDefContentSignature> {
-        // 依存関係を記録
-        self.deps_recorder.borrow_mut().depends_on_val(vid);
-
-        self.vals.get(vid).map(|val| match &val {
-            ValDefContentKind::Fn(f) => &f.signature,
-            ValDefContentKind::Native(f) => &f.signature,
-            ValDefContentKind::NovelScene(n) => &n.signature,
-            ValDefContentKind::ExternalFn(f) => f,
-        })
-    }
+    // // メソッドのシグニチャ(FnTy)を取得
+    // // ただし、第一引数selfはその型自体であり、型推論時に必要ないので含まない
+    // // Ident は caller 側の場所を保持したIdent
+    // pub fn get_method_of_type(&self, ty: &TyKind, method: &Ident) -> HirResult<Option<Ty>> {
+    //     match ty {
+    //         TyKind::Defined(defined_ty) => {
+    //             let defined_ty_impl = self
+    //                 .tys
+    //                 .get(&defined_ty.def_id)
+    //                 .expect("compiler bug: type not found");
+    //
+    //             if let Some(impl_list) = defined_ty_impl.vals.get(&method.id) {
+    //                 // ジェネリック引数列が重複する(一致する)ものを探す
+    //                 impl_list
+    //                     .vals
+    //                     .values()
+    //                     .find(|impl_| {
+    //                         impl_
+    //                             .genargs
+    //                             .iter()
+    //                             .zip(defined_ty.genargs.iter())
+    //                             .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+    //                     })
+    //                     .map(|impl_| match &impl_.val_content {
+    //                         ImplValDefContentKind::Fn(_) => {
+    //                             Err(HirError::ImplementedValueIsNotMethod {
+    //                                 ty: Box::new(ty.clone()),
+    //                                 method: Box::new(method.clone()),
+    //                                 val_content: Box::new(impl_.val_content.clone()),
+    //                             })
+    //                         }
+    //                         ImplValDefContentKind::NativeFn(_) => {
+    //                             Err(HirError::ImplementedValueIsNotMethod {
+    //                                 ty: Box::new(ty.clone()),
+    //                                 method: Box::new(method.clone()),
+    //                                 val_content: Box::new(impl_.val_content.clone()),
+    //                             })
+    //                         }
+    //                         ImplValDefContentKind::Method(m) => {
+    //                             // LocGenTyId -> Ty の割り当てがあれば具体化する
+    //                             let mut assigns = HashMap::new();
+    //                             for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
+    //                             {
+    //                                 if let TyKind::LocGen(lgid) = &t1.kind {
+    //                                     assigns.insert(*lgid, t2.kind.clone());
+    //                                 }
+    //                             }
+    //
+    //                             Ok(Ty::new(
+    //                                 TyKind::Fn(FnTy {
+    //                                     args: m
+    //                                         .signature
+    //                                         .args
+    //                                         .iter()
+    //                                         .map(|(_, ty)| {
+    //                                             ty.clone().embody_by_loc_gen_ty_id(&assigns)
+    //                                         })
+    //                                         .collect(),
+    //                                     rty: Box::new(
+    //                                         m.signature
+    //                                             .rty
+    //                                             .clone()
+    //                                             .embody_by_loc_gen_ty_id(&assigns),
+    //                                     ),
+    //                                     genargs: m
+    //                                         .signature
+    //                                         .genargs
+    //                                         .iter()
+    //                                         .map(|(_, lgid)| *lgid)
+    //                                         .collect(),
+    //                                 }),
+    //                                 m.signature.span.clone(),
+    //                             ))
+    //                         }
+    //                         ImplValDefContentKind::NativeMethod(m) => {
+    //                             // LocGenTyId -> Ty の割り当てがあれば具体化する
+    //                             let mut assigns = HashMap::new();
+    //                             for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter())
+    //                             {
+    //                                 if let TyKind::LocGen(lgid) = &t1.kind {
+    //                                     assigns.insert(*lgid, t2.kind.clone());
+    //                                 }
+    //                             }
+    //
+    //                             Ok(Ty::new(
+    //                                 TyKind::Fn(FnTy {
+    //                                     args: m
+    //                                         .signature
+    //                                         .args
+    //                                         .iter()
+    //                                         .map(|(_, ty)| {
+    //                                             ty.clone().embody_by_loc_gen_ty_id(&assigns)
+    //                                         })
+    //                                         .collect(),
+    //                                     rty: Box::new(
+    //                                         m.signature
+    //                                             .rty
+    //                                             .clone()
+    //                                             .embody_by_loc_gen_ty_id(&assigns),
+    //                                     ),
+    //                                     genargs: m
+    //                                         .signature
+    //                                         .genargs
+    //                                         .iter()
+    //                                         .map(|(_, lgid)| *lgid)
+    //                                         .collect(),
+    //                                 }),
+    //                                 m.signature.span.clone(),
+    //                             ))
+    //                         }
+    //                     })
+    //                     .transpose()
+    //             } else {
+    //                 Ok(None)
+    //             }
+    //         }
+    //         TyKind::Int | TyKind::Float | TyKind::Bool => {
+    //             if let Some(ty_impl) = self.special_ty_impls.get(ty)
+    //                 && let Some(val) = ty_impl.vals.get(&method.id)
+    //             {
+    //                 match val {
+    //                     ImplValDefContentKind::Fn(_) => {
+    //                         Err(HirError::ImplementedValueIsNotMethod {
+    //                             ty: Box::new(ty.clone()),
+    //                             method: Box::new(method.clone()),
+    //                             val_content: Box::new(val.clone()),
+    //                         })
+    //                     }
+    //                     ImplValDefContentKind::NativeFn(_) => {
+    //                         Err(HirError::ImplementedValueIsNotMethod {
+    //                             ty: Box::new(ty.clone()),
+    //                             method: Box::new(method.clone()),
+    //                             val_content: Box::new(val.clone()),
+    //                         })
+    //                     }
+    //                     ImplValDefContentKind::Method(m) => Ok(Some(Ty::new(
+    //                         TyKind::Fn(FnTy {
+    //                             args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+    //                             rty: Box::new(m.signature.rty.clone()),
+    //                             genargs: m
+    //                                 .signature
+    //                                 .genargs
+    //                                 .iter()
+    //                                 .map(|(_, lgid)| *lgid)
+    //                                 .collect(),
+    //                         }),
+    //                         m.signature.span.clone(),
+    //                     ))),
+    //                     ImplValDefContentKind::NativeMethod(m) => Ok(Some(Ty::new(
+    //                         TyKind::Fn(FnTy {
+    //                             args: m.signature.args.iter().map(|(_, ty)| ty).cloned().collect(),
+    //                             rty: Box::new(m.signature.rty.clone()),
+    //                             genargs: m
+    //                                 .signature
+    //                                 .genargs
+    //                                 .iter()
+    //                                 .map(|(_, lgid)| *lgid)
+    //                                 .collect(),
+    //                         }),
+    //                         m.signature.span.clone(),
+    //                     ))),
+    //                 }
+    //             } else {
+    //                 Ok(None)
+    //             }
+    //         }
+    //         _ => Ok(None),
+    //     }
+    // }
+    //
+    // // ある型に対する関連関数のシグニチャ(FnTy)を取得する
+    // pub fn get_assoc_of_type(&self, assoc_callee: &AssocCallee, span: &Span) -> HirResult<Ty> {
+    //     match &assoc_callee.ty.kind {
+    //         TyKind::Defined(defined_ty) => {
+    //             let defined_ty_impl = self
+    //                 .tys
+    //                 .get(&defined_ty.def_id)
+    //                 .expect("compiler bug: type not found");
+    //
+    //             // alias なら解決先の型について探索する
+    //             if let Some(ty) =
+    //                 resolve_ty_alias(defined_ty, defined_ty_impl.ty_content.expect_completed())?
+    //             {
+    //                 let assoc_callee = AssocCallee {
+    //                     ty,
+    //                     assoc: assoc_callee.assoc.clone(),
+    //                     impl_vid: assoc_callee.impl_vid,
+    //                 };
+    //
+    //                 self.get_assoc_of_type(&assoc_callee, span)
+    //             } else {
+    //                 let impl_list = defined_ty_impl
+    //                     .vals
+    //                     .get(&assoc_callee.assoc.id)
+    //                     .expect("compiler bug: implemented value not found for this name");
+    //                 let impl_ = impl_list
+    //                     .vals
+    //                     .get(&assoc_callee.impl_vid)
+    //                     .expect("compiler bug: implemented value not found");
+    //
+    //                 match &impl_.val_content {
+    //                     ImplValDefContentKind::Fn(f) => {
+    //                         Ok(f.signature.as_ty())
+    //
+    //                         // WARN: really?
+    //                         //
+    //                         // // LocGenTyId -> Ty の割り当てがあれば具体化する
+    //                         // let mut assigns = HashMap::new();
+    //                         // for (t1, t2) in impl_.genargs.iter().zip(defined_ty.genargs.iter()) {
+    //                         //     if let Ty::LocGen(lgid) = t1 {
+    //                         //         assigns.insert(*lgid, t2.clone());
+    //                         //     }
+    //                         // }
+    //                         //
+    //                         // Ok(FnTy {
+    //                         //     args: f
+    //                         //         .signature
+    //                         //         .args
+    //                         //         .iter()
+    //                         //         .map(|(_, ty)| ty.clone().embody_by_loc_gen_ty_id(&assigns))
+    //                         //         .collect(),
+    //                         //     rty: Box::new(
+    //                         //         f.signature.rty.clone().embody_by_loc_gen_ty_id(&assigns),
+    //                         //     ),
+    //                         //     genargs: f
+    //                         //         .signature
+    //                         //         .genargs
+    //                         //         .iter()
+    //                         //         .map(|(_, lgid)| *lgid)
+    //                         //         .collect(),
+    //                         // })
+    //                     }
+    //                     ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
+    //                     ImplValDefContentKind::Method(_)
+    //                     | ImplValDefContentKind::NativeMethod(_) => {
+    //                         Err(HirError::ImplementedValueIsNotAssoc {
+    //                             assoc_callee: Box::new(assoc_callee.clone()),
+    //                             caller_span: Box::new(span.clone().into()),
+    //                             val_content: Box::new(impl_.val_content.clone()),
+    //                         })
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //         TyKind::Int | TyKind::Float | TyKind::Bool => {
+    //             let val_content = self
+    //                 .special_ty_impls
+    //                 .get(&assoc_callee.ty.kind)
+    //                 .expect("compiler bug: ty impl not found")
+    //                 .vals
+    //                 .get(&assoc_callee.assoc.id)
+    //                 .expect("compiler bug: ty imple value not found");
+    //
+    //             match &val_content {
+    //                 ImplValDefContentKind::Fn(f) => Ok(f.signature.as_ty()),
+    //                 ImplValDefContentKind::NativeFn(f) => Ok(f.signature.as_ty()),
+    //                 ImplValDefContentKind::Method(_) | ImplValDefContentKind::NativeMethod(_) => {
+    //                     Err(HirError::ImplementedValueIsNotAssoc {
+    //                         assoc_callee: Box::new(assoc_callee.clone()),
+    //                         caller_span: Box::new(span.clone().into()),
+    //                         val_content: Box::new(val_content.clone()),
+    //                     })
+    //                 }
+    //             }
+    //         }
+    //         TyKind::Void
+    //         | TyKind::Gen(_)
+    //         | TyKind::LocGen(_)
+    //         | TyKind::Infer(_)
+    //         | TyKind::Fn(_) => {
+    //             // error
+    //             todo!()
+    //         }
+    //     }
+    // }
+    //
+    // // 型の実体を取得する
+    // pub fn get_type_definition(&self, tid: &TyDefId) -> Option<&TyDefContentKind> {
+    //     match &self.tys.get(tid)?.ty_content {
+    //         Progressive::NotYet(_) => panic!("compiler bug: type definition not registered yet"),
+    //         Progressive::Completed(ty_content) => Some(ty_content),
+    //     }
+    // }
+    //
+    // pub fn register_module_native_code(
+    //     &mut self,
+    //     modpath: ModPath,
+    //     native: &biwac_ast::NativeCode,
+    // ) {
+    //     if let Some(e) = self.module_global_natives.get_mut(&modpath) {
+    //         e.push(NativeCode::from(native));
+    //     } else {
+    //         self.module_global_natives
+    //             .insert(modpath, vec![NativeCode::from(native)]);
+    //     }
+    // }
+    //
+    // pub fn get_fn_sign(&self, vid: &ValDefId) -> Option<&FnDefContentSignature> {
+    //     // 依存関係を記録
+    //     self.deps_recorder.borrow_mut().depends_on_val(vid);
+    //
+    //     self.vals.get(vid).map(|val| match &val {
+    //         ValDefContentKind::Fn(f) => &f.signature,
+    //         ValDefContentKind::Native(f) => &f.signature,
+    //         ValDefContentKind::NovelScene(n) => &n.signature,
+    //         ValDefContentKind::ExternalFn(f) => f,
+    //     })
+    // }
 }
 
-impl<Y, C> Progressive<Y, C> {
-    pub fn expect_completed(&self) -> &C {
-        match self {
-            Self::NotYet(_) => {
-                panic!("compiler bug: progressive registration not yet")
-            }
-            Self::Completed(c) => c,
-        }
-    }
-}
-
-// alias なら解決先の型を返す
-fn resolve_ty_alias(
-    defined_ty: &DefinedTy,
-    ty_content: &TyDefContentKind,
-) -> HirResult<Option<Ty>> {
-    if let TyDefContentKind::TypeAlias(alias) = ty_content {
-        if alias.genargs.len() == defined_ty.genargs.len() {
-            let assigns = alias
-                .genargs
-                .iter()
-                .cloned()
-                .zip(defined_ty.genargs.iter().map(|ty| ty.kind.clone()))
-                .collect::<HashMap<_, _>>();
-
-            Ok(Some(alias.right.clone().embody_by_gen_ty_id(&assigns)))
-        } else {
-            Err(HirError::GenericArgLengthMismatched {
-                defined_ty: Box::new(defined_ty.clone()),
-                ty_existence: Box::new(TyExistence {
-                    ty_name_span: alias.alias_name_span.clone(),
-                    genarg_len: alias.genargs.len(),
-                }),
-            })
-        }
-    } else {
-        Ok(None)
-    }
-}
-
-impl Progressive<TyExistence, TyDefContentKind> {
-    fn as_type_existence(&self) -> Option<TyExistence> {
-        match &self {
-            Progressive::NotYet(ty_existence) => Some(ty_existence.clone()),
-            Progressive::Completed(ty_content) => match ty_content {
-                TyDefContentKind::Struct(struct_) => Some(TyExistence {
-                    ty_name_span: struct_.struct_name_span.clone(),
-                    genarg_len: struct_.genargs.len(),
-                }),
-                TyDefContentKind::TypeAlias(alias) => Some(TyExistence {
-                    ty_name_span: alias.alias_name_span.clone(),
-                    genarg_len: alias.genargs.len(),
-                }),
-                TyDefContentKind::NativeTypeAlias(native) => Some(TyExistence {
-                    ty_name_span: native.alias_name_span.clone(),
-                    genarg_len: native.genargs.len(),
-                }),
-            },
-        }
-    }
-}
+// // alias なら解決先の型を返す
+// fn resolve_ty_alias(
+//     defined_ty: &DefinedTy,
+//     ty_content: &TyDefContentKind,
+// ) -> HirResult<Option<Ty>> {
+//     if let TyDefContentKind::TypeAlias(alias) = ty_content {
+//         if alias.genargs.len() == defined_ty.genargs.len() {
+//             let assigns = alias
+//                 .genargs
+//                 .iter()
+//                 .cloned()
+//                 .zip(defined_ty.genargs.iter().map(|ty| ty.kind.clone()))
+//                 .collect::<HashMap<_, _>>();
+//
+//             Ok(Some(alias.right.clone().embody_by_gen_ty_id(&assigns)))
+//         } else {
+//             Err(HirError::GenericArgLengthMismatched {
+//                 defined_ty: Box::new(defined_ty.clone()),
+//                 ty_existence: Box::new(TyExistence {
+//                     ty_name_span: alias.alias_name_span.clone(),
+//                     genarg_len: alias.genargs.len(),
+//                 }),
+//             })
+//         }
+//     } else {
+//         Ok(None)
+//     }
+// }
 
 #[derive(Debug, Clone)]
 pub struct DepsRecorder {
@@ -1127,12 +1059,12 @@ impl DepsRecorder {
         }
     }
 
-    fn register_from_fn_sign(&mut self, fsign: &FnDefContentSignature) {
-        for (_, aty) in &fsign.args {
-            self.depends_on_ty(aty);
-        }
-        self.depends_on_ty(&fsign.rty);
-    }
+    // fn register_from_fn_sign(&mut self, fsign: &FnDefContentSignature) {
+    //     for (_, aty) in &fsign.args {
+    //         self.depends_on_ty(aty);
+    //     }
+    //     self.depends_on_ty(&fsign.rty);
+    // }
 
     pub fn depends_on_val(&mut self, vid: &ValDefId) {
         if vid.pkg().is_self() {
@@ -1146,15 +1078,5 @@ impl DepsRecorder {
 
     pub fn depended_vals(&self) -> &HashSet<ValDefId> {
         &self.depended_vals
-    }
-}
-
-impl PkgId {
-    pub fn new(name: PackageName) -> Self {
-        Self { name }
-    }
-
-    pub fn name(&self) -> &PackageName {
-        &self.name
     }
 }
