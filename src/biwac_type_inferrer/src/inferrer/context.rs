@@ -1,11 +1,21 @@
 use std::collections::HashMap;
 
-use biwac_hir::{ExprId, Hir, InferTy, Ty, TyKind, TyVar};
-use biwac_span::VarId;
+use biwac_hir::{ExprId, Hir, InferTy, Ty, TyDefKind, TyKind, TyVar, ValDefKind};
+use biwac_span::{TyDefId, ValDefId, VarId};
 
 #[derive(Debug, Clone)]
 pub struct TyCtx {
     pub(super) hir: Hir,
+}
+
+impl TyCtx {
+    pub(super) fn get_type_definition(&self, def_id: &TyDefId) -> Option<&TyDefKind> {
+        self.hir.tys.get(def_id).map(|ty_impl| &ty_impl.ty_content)
+    }
+
+    pub(super) fn get_value_definition(&self, def_id: &ValDefId) -> Option<&ValDefKind> {
+        self.hir.vals.get(def_id)
+    }
 }
 
 #[derive(Debug, Clone)]

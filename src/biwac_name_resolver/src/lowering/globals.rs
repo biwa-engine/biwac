@@ -4,15 +4,16 @@ use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef};
 use biwac_base::{InternedIdent, ModPath};
 use biwac_hir::{
     AssocValDefKind, DefinedTy, DefinedTyImpl, FnArgDecl, FnBody, FnDef, FnSignature, Hir, Ident,
-    ImplValId, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
+    NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
     TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
 };
-use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, ValDefId, VarId};
 
 use crate::ResolveError;
 
 use super::{
-    ExprLowerCtx, alias_expansion, expressions::lower_expr, statements::lower_stmt, ty_from_typ_repr,
+    ExprLowerCtx, alias_expansion, expressions::lower_expr, statements::lower_stmt,
+    ty_from_typ_repr,
 };
 
 pub(super) fn build_fn_signature(
@@ -412,6 +413,7 @@ pub(super) fn lower_impl_block(
         );
         register_impl_val(
             hir,
+            *fn_def.def_id.get().unwrap(),
             &self_ty_kind,
             fn_def.id.id,
             impl_block_genargs_map.clone(),
@@ -449,6 +451,7 @@ pub(super) fn lower_impl_block(
         );
         register_impl_val(
             hir,
+            *method_def.def_id.get().unwrap(),
             &self_ty_kind,
             method_def.id.id,
             impl_block_genargs_map.clone(),
@@ -475,6 +478,7 @@ pub(super) fn lower_impl_block(
         );
         register_impl_val(
             hir,
+            *fn_def.def_id.get().unwrap(),
             &self_ty_kind,
             fn_def.id.id,
             impl_block_genargs_map.clone(),
@@ -505,6 +509,7 @@ pub(super) fn lower_impl_block(
         );
         register_impl_val(
             hir,
+            *method_def.def_id.get().unwrap(),
             &self_ty_kind,
             method_def.id.id,
             impl_block_genargs_map.clone(),
@@ -516,6 +521,7 @@ pub(super) fn lower_impl_block(
 
 fn register_impl_val(
     hir: &mut Hir,
+    def_id: ValDefId,
     self_ty_kind: &TyKind,
     name: InternedIdent,
     impl_block_genargs: HashMap<InternedIdent, (LocalGenDefId, Span)>,
@@ -528,9 +534,8 @@ fn register_impl_val(
             let impl_list = entry.vals.entry(name).or_insert_with(|| TyValImplList {
                 vals: HashMap::new(),
             });
-            let next_id = ImplValId::new(impl_list.vals.len());
             impl_list.vals.insert(
-                next_id,
+                def_id,
                 TyValImplGenargsContentPair {
                     impl_block_genargs,
                     genargs,

@@ -1,7 +1,7 @@
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
 use biwac_span::{Span, TyDefId, ValDefId, VarId};
 
-use crate::{Ident, ImplValId, Stmt, Ty};
+use crate::{Ident, Stmt, Ty};
 
 // ExprId
 // function local expression id
@@ -155,7 +155,6 @@ pub enum Callee {
 pub struct AssocCallee {
     pub ty: Ty,
     pub assoc: Ident,
-    pub impl_vid: ImplValId,
 }
 
 #[derive(Debug, Clone)]

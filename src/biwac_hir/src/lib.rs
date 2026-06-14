@@ -2,8 +2,7 @@ mod error;
 pub mod hir;
 
 pub use crate::hir::{
-    DefinedTyImpl, Hir, ImplValId, SpecialTyImpl, TyExistence, TyValImplGenargsContentPair,
-    TyValImplList,
+    DefinedTyImpl, Hir, SpecialTyImpl, TyExistence, TyValImplGenargsContentPair, TyValImplList,
     symbols::{
         Ident,
         expressions::{

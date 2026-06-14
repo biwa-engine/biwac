@@ -84,25 +84,7 @@ pub struct SpecialTyImpl {
 // ジェネリック引数列と、実体の組のリスト
 #[derive(Debug, Clone)]
 pub struct TyValImplList {
-    pub vals: HashMap<ImplValId, TyValImplGenargsContentPair>,
-}
-
-// 型に対する実装の値(関連値)のシンボル
-// - 関連関数
-// - メソッド
-// - 関連定数(const)
-// のうち同一の名前内で一意なid
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ImplValId(usize);
-
-impl ImplValId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    pub fn value(&self) -> usize {
-        self.0
-    }
+    pub vals: HashMap<ValDefId, TyValImplGenargsContentPair>,
 }
 
 // ジェネリック引数列と、実体の組

@@ -572,7 +572,7 @@ impl<'tctx> FnTyCtx<'tctx> {
         def_id: &TyDefId,
         struct_literal: &StructLiteral,
     ) -> TyResult<Ty> {
-        match self.tctx.hir.get_type_definition(def_id).unwrap() {
+        match self.tctx.get_type_definition(def_id).unwrap() {
             TyDefKind::Struct(struct_) => {
                 let mut members = HashMap::<InternedIdent, (&Ident, &Expr)>::new();
                 for (ident, expr) in &struct_literal.members {
@@ -592,7 +592,8 @@ impl<'tctx> FnTyCtx<'tctx> {
                 // 構造体に定義されているメンバ名の集合
                 let mut member_ids = struct_
                     .members
-                    .into_keys()
+                    .keys()
+                    .cloned()
                     .collect::<HashSet<InternedIdent>>();
 
                 let mut dtctx = DefinedTyCtx::default();
@@ -641,29 +642,6 @@ impl<'tctx> FnTyCtx<'tctx> {
                     })
                 }
             }
-            TyDefKind::TypeAlias(alias) => match &alias.right.kind {
-                TyKind::Int | TyKind::Float | TyKind::Bool | TyKind::Fn(_) | TyKind::Void => {
-                    Err(TyError::InvalidStructLiteralOnAliasType {
-                        ty: Box::new(alias.right.clone()),
-                        sliteral: Box::new(struct_literal.clone()),
-                    })
-                }
-                TyKind::Infer(_) => panic!("compiler bug: type alias on unknown type"),
-                TyKind::Gen(_) => {
-                    // TyKind::Gen(GenDefId) は型定義にしか現れないため、
-                    // メンバアクセスの左辺地に現れる場合はバグ
-                    panic!("compiler bug: generic type not resolved")
-                }
-                TyKind::LocGen(_) => {
-                    // impl block や 関数 でローカルに宣言されたジェネリック型
-                    // これがグローバルな type alias で現れることはないのでバグ
-                    panic!("compiler bug: type alias on generic type")
-                }
-                TyKind::Defined(defined_ty) => {
-                    // alias された TyDefId で再試行
-                    self.infer_struct_literal(&defined_ty.def_id, struct_literal)
-                }
-            },
             TyDefKind::NativeTypeAlias(alias) => {
                 // native type alias を構造体のように初期化することは出来ない
                 Err(TyError::InvalidStructLiteralOnAliasType {
@@ -719,8 +697,14 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             Primary::FnCall(c) => match &c.callee {
-                Callee::Fn(vid) => {
-                    let callee_ty = self.tctx.hir.get_fn_sign(vid).unwrap().as_ty();
+                Callee::Fn(def_id) => {
+                    // let callee_ty = self.tctx.hir.get_fn_sign(vid).unwrap().as_ty();
+                    let callee_ty = match self.tctx.get_value_definition(def_id).unwrap() {
+                        ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),
+                        ValDefKind::Native(fn_def) => fn_def.signature.as_ty(),
+                        ValDefKind::NovelScene(scene_def) => scene_def.signature.as_ty(),
+                        ValDefKind::ExternalFn(fn_signature) => fn_signature.as_ty(),
+                    };
 
                     let args = c
                         .args
@@ -964,12 +948,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             }
             TyKind::Infer(_) => Err(TyError::InsufficientContext),
             TyKind::Defined(defined_ty) => {
-                match self
-                    .tctx
-                    .hir
-                    .get_type_definition(&defined_ty.def_id)
-                    .unwrap()
-                {
+                match self.tctx.get_type_definition(&defined_ty.def_id).unwrap() {
                     TyDefKind::Struct(struct_) => {
                         let ty = struct_
                             .members
@@ -995,10 +974,6 @@ impl<'tctx> FnTyCtx<'tctx> {
                         } else {
                             Ok(ty)
                         }
-                    }
-                    TyDefKind::TypeAlias(alias) => {
-                        // alias の右辺の型で再度試行
-                        self.infer_member_access(alias.right.clone(), member_access)
                     }
                     TyDefKind::NativeTypeAlias(_) => {
                         // native type alias にはメンバアクセスできない
