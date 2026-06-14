@@ -12,7 +12,7 @@ mod tests;
 
 use std::collections::HashMap;
 
-use biwac_ast::{Ident, ImportDecl, Path};
+use biwac_ast::{Ident, ImportDecl, Path, PathSegment};
 use biwac_base::{InternedIdent, ModId, ModPath, PackageId, PackageName, PackageNameError};
 
 use biwac_hir::{Hir, HirError, Ty};
@@ -64,6 +64,11 @@ pub enum ResolveError {
         name: InternedIdent,
         span1: Span,
         span2: Span,
+    },
+
+    DuplicatedAssociatedItemForGenArgs {
+        assoc1: AssocNameTreeItem,
+        assoc2: AssocNameTreeItem,
     },
 
     UnexpectedSelfType {
@@ -179,6 +184,13 @@ pub enum ResolveError {
     },
     DuplicatedDepsPackageName {
         pkg: PackageName,
+    },
+
+    AssocItemNotFoundForGenArgs {
+        segment: PathSegment,
+    },
+    AmbiguousAssocItem {
+        segment: PathSegment,
     },
     PackageNameError(PackageNameError), // CanNotBeImplementedForType {
                                         //     typ: Typ,

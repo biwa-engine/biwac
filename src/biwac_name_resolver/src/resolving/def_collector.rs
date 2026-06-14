@@ -11,7 +11,8 @@ use biwac_span::{DefId, DefIdKind, PackageLocalDefId, Span, TyDefId, ValDefId};
 
 use crate::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, ResolveError,
-    TyNameTree,
+    ResolveErrorHandler, TyNameTree,
+    name_tree::{AssocNameTree, AssocNameTreeItemKind},
     resolving::context::{ResolveCtx, impl_level::ImplResolveCtx, module_level::ModuleResolveCtx},
 };
 
@@ -410,76 +411,146 @@ impl DefCollector {
                     }
                 };
 
-                let mut borrow = ty_tree.children.borrow_mut();
-
                 for f in &impl_block.assoc_fns {
                     let def_id = ValDefId::new(self.alloc_def_id());
-                    match borrow.entry(f.id.id) {
-                        Entry::Vacant(e) => {
-                            e.insert(AssocNameTreeItem::Val { def_id });
-                            let _ = f.def_id.set(def_id);
+                    match ty_tree.children.borrow_mut().get_mut(&f.id.id) {
+                        Some(assocs) => {
+                            assocs
+                                .register_assoc(
+                                    match &self_ty {
+                                        TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                                        _ => Vec::new(),
+                                    },
+                                    AssocNameTreeItemKind::Val(def_id),
+                                )
+                                .handle(&mut errors);
+
+                            f.def_id.set(def_id).unwrap();
                         }
-                        Entry::Occupied(_) => {
-                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
-                                name: f.id.id,
-                                span: f.id.span.clone(),
-                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
-                            });
-                            let _ = f.def_id.set(def_id);
+                        None => {
+                            ty_tree.children.borrow_mut().insert(
+                                f.id.id,
+                                AssocNameTree {
+                                    assocs: vec![AssocNameTreeItem {
+                                        impl_block_genargs: match &self_ty {
+                                            TyKind::Defined(defined_ty) => {
+                                                defined_ty.genargs.clone()
+                                            }
+                                            _ => Vec::new(),
+                                        },
+                                        kind: AssocNameTreeItemKind::Val(def_id),
+                                    }],
+                                },
+                            );
+                            f.def_id.set(def_id).unwrap();
                         }
                     }
                 }
 
                 for m in &impl_block.methods {
                     let def_id = ValDefId::new(self.alloc_def_id());
-                    match borrow.entry(m.id.id) {
-                        Entry::Vacant(e) => {
-                            e.insert(AssocNameTreeItem::Val { def_id });
-                            let _ = m.def_id.set(def_id);
+                    match ty_tree.children.borrow_mut().get_mut(&m.id.id) {
+                        Some(assocs) => {
+                            assocs
+                                .register_assoc(
+                                    match &self_ty {
+                                        TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                                        _ => Vec::new(),
+                                    },
+                                    AssocNameTreeItemKind::Val(def_id),
+                                )
+                                .handle(&mut errors);
+
+                            m.def_id.set(def_id).unwrap();
                         }
-                        Entry::Occupied(_) => {
-                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
-                                name: m.id.id,
-                                span: m.id.span.clone(),
-                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
-                            });
-                            let _ = m.def_id.set(def_id);
+                        None => {
+                            ty_tree.children.borrow_mut().insert(
+                                m.id.id,
+                                AssocNameTree {
+                                    assocs: vec![AssocNameTreeItem {
+                                        impl_block_genargs: match &self_ty {
+                                            TyKind::Defined(defined_ty) => {
+                                                defined_ty.genargs.clone()
+                                            }
+                                            _ => Vec::new(),
+                                        },
+                                        kind: AssocNameTreeItemKind::Val(def_id),
+                                    }],
+                                },
+                            );
+                            m.def_id.set(def_id).unwrap();
                         }
                     }
                 }
 
                 for f in &impl_block.native_assoc_fns {
                     let def_id = ValDefId::new(self.alloc_def_id());
-                    match borrow.entry(f.id.id) {
-                        Entry::Vacant(e) => {
-                            e.insert(AssocNameTreeItem::Val { def_id });
-                            let _ = f.def_id.set(def_id);
+                    match ty_tree.children.borrow_mut().get_mut(&f.id.id) {
+                        Some(assocs) => {
+                            assocs
+                                .register_assoc(
+                                    match &self_ty {
+                                        TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                                        _ => Vec::new(),
+                                    },
+                                    AssocNameTreeItemKind::Val(def_id),
+                                )
+                                .handle(&mut errors);
+
+                            f.def_id.set(def_id).unwrap();
                         }
-                        Entry::Occupied(_) => {
-                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
-                                name: f.id.id,
-                                span: f.id.span.clone(),
-                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
-                            });
-                            let _ = f.def_id.set(def_id);
+                        None => {
+                            ty_tree.children.borrow_mut().insert(
+                                f.id.id,
+                                AssocNameTree {
+                                    assocs: vec![AssocNameTreeItem {
+                                        impl_block_genargs: match &self_ty {
+                                            TyKind::Defined(defined_ty) => {
+                                                defined_ty.genargs.clone()
+                                            }
+                                            _ => Vec::new(),
+                                        },
+                                        kind: AssocNameTreeItemKind::Val(def_id),
+                                    }],
+                                },
+                            );
+                            f.def_id.set(def_id).unwrap();
                         }
                     }
                 }
 
                 for m in &impl_block.native_methods {
                     let def_id = ValDefId::new(self.alloc_def_id());
-                    match borrow.entry(m.id.id) {
-                        Entry::Vacant(e) => {
-                            e.insert(AssocNameTreeItem::Val { def_id });
-                            let _ = m.def_id.set(def_id);
+                    match ty_tree.children.borrow_mut().get_mut(&m.id.id) {
+                        Some(assocs) => {
+                            assocs
+                                .register_assoc(
+                                    match &self_ty {
+                                        TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                                        _ => Vec::new(),
+                                    },
+                                    AssocNameTreeItemKind::Val(def_id),
+                                )
+                                .handle(&mut errors);
+
+                            m.def_id.set(def_id).unwrap();
                         }
-                        Entry::Occupied(_) => {
-                            errors.push(ResolveError::DuplicatedSymbolAndDefIdName {
-                                name: m.id.id,
-                                span: m.id.span.clone(),
-                                def_id_kind: biwac_span::DefIdKind::Val(def_id),
-                            });
-                            let _ = m.def_id.set(def_id);
+                        None => {
+                            ty_tree.children.borrow_mut().insert(
+                                m.id.id,
+                                AssocNameTree {
+                                    assocs: vec![AssocNameTreeItem {
+                                        impl_block_genargs: match &self_ty {
+                                            TyKind::Defined(defined_ty) => {
+                                                defined_ty.genargs.clone()
+                                            }
+                                            _ => Vec::new(),
+                                        },
+                                        kind: AssocNameTreeItemKind::Val(def_id),
+                                    }],
+                                },
+                            );
+                            m.def_id.set(def_id).unwrap();
                         }
                     }
                 }

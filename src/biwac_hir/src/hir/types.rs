@@ -201,7 +201,7 @@ impl TyKind {
     //         ^^^ 重複なし
     //  }
     //  ```
-    pub(crate) fn is_duplicated_for_impl_genarg(&self, other: &Self) -> bool {
+    pub fn is_duplicated_for_impl_genarg(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Int, Self::Int) => true,
             (Self::Float, Self::Float) => true,

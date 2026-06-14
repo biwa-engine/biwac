@@ -5,8 +5,8 @@ use biwac_base::InternedIdent;
 use biwac_span::{DefIdKind, TyDefId};
 
 use crate::{
-    AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, TyNameTree,
-    resolving::context::ResolveCtx,
+    ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, TyNameTree,
+    name_tree::AssocNameTreeItemKind, resolving::context::ResolveCtx,
 };
 
 #[derive(Debug)]
@@ -213,32 +213,18 @@ fn resolve_path_in_ty(
     let segment = &path.segments[depth];
     let children = canonical_tree.children.borrow();
     match children.get(&segment.ident.id) {
-        Some(AssocNameTreeItem::Val { def_id }) => {
+        Some(assoc_tree) => {
+            // TODO: segment に genargs: Option<Vec<TypRepr>> を持たせて解決
+            let def_id_kind = match assoc_tree.find_matched(None, segment)? {
+                AssocNameTreeItemKind::Val(def_id) => DefIdKind::Val(*def_id),
+            };
             segment
                 .resolved_id
-                .set(PathSegmentResolution::Ok(DefIdKind::Val(*def_id)))
+                .set(PathSegmentResolution::Ok(def_id_kind))
                 .unwrap();
+
             if path.segments.len() == depth + 1 {
                 Ok(())
-            } else {
-                path.segments[depth + 1]
-                    .resolved_id
-                    .set(PathSegmentResolution::Err)
-                    .unwrap();
-                Err(ResolveError::PathResolutionFailed {
-                    path: Box::new(path.clone()),
-                })
-            }
-        }
-        Some(AssocNameTreeItem::Ty { def_id }) => {
-            segment
-                .resolved_id
-                .set(PathSegmentResolution::Ok(DefIdKind::Ty(*def_id)))
-                .unwrap();
-            if path.segments.len() == depth + 1 {
-                Ok(())
-            } else if let Some(child_ty_tree) = ty_index.get(def_id) {
-                resolve_path_in_ty(path, depth + 1, child_ty_tree, ty_index)
             } else {
                 path.segments[depth + 1]
                     .resolved_id
