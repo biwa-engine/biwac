@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use biwac_base::InternedIdent;
 use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
 
 use crate::{DecledVar, Expr, ExprId, Ident, Stmt, Ty};
@@ -47,9 +48,11 @@ pub struct FnDef {
 // ```
 #[derive(Debug, Clone)]
 pub struct FnSignature {
-    // NOTE:
-    // contains `self`
+    // explicit arguments (does NOT include `self`)
     pub args: Vec<(Ident, Ty)>,
+
+    // Some if this is a method (first arg is self receiver)
+    pub self_ty: Option<Ty>,
 
     // if the function does not return value ( = void function),
     // Ty::Void
@@ -63,10 +66,14 @@ pub struct FnSignature {
 pub struct FnBody {
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
+
+    // VarId for explicit arguments (excludes self)
     pub arg_var_ids: Vec<VarId>,
 
-    // 関数内で宣言された変数のマップ
-    // 一意なid: VarIdを割り当てる
+    // VarId for the self receiver (Some for methods, None otherwise)
+    pub self_var_id: Option<VarId>,
+
+    // 関数内で宣言された変数のマップ (includes args and self)
     pub vars: HashMap<VarId, DecledVar>,
 }
 
@@ -108,7 +115,7 @@ pub enum TyDefKind {
 
 #[derive(Debug, Clone)]
 pub struct StructDefContent {
-    pub members: HashMap<String, Ty>,
+    pub members: HashMap<InternedIdent, Ty>,
     pub genargs: Vec<GenDefId>,
     // TODO: その他各種情報
     pub struct_name_span: Span,
@@ -157,13 +164,13 @@ pub struct NovelSceneDef {
 
 impl FnDef {
     pub fn new(
-        fn_ident: &biwac_ast::Ident,
+        fn_name_span: Span,
         signature: FnSignature,
         body: FnBody,
         impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
-            fn_name_span: fn_ident.span.clone(),
+            fn_name_span,
             signature,
             body,
             expr_tys: HashMap::new(),
@@ -175,16 +182,19 @@ impl FnDef {
 
 impl NativeFnDef {
     pub fn new(
+        fn_name_span: Span,
+        native_span: Span,
+        span: Span,
+        native_body: String,
         signature: FnSignature,
-        fn_def: biwac_ast::NativeFnDef,
         impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
             signature,
-            native_body: fn_def.native,
-            fn_name_span: fn_def.id.span,
-            native_span: fn_def.native_span,
-            span: fn_def.span,
+            native_body,
+            fn_name_span,
+            native_span,
+            span,
             impl_genargs,
         }
     }
@@ -200,9 +210,9 @@ impl From<&biwac_ast::NativeCode> for NativeCode {
 }
 
 impl NovelSceneDef {
-    pub fn new(scene_ident: &biwac_ast::Ident, signature: FnSignature, body: FnBody) -> Self {
+    pub fn new(scene_name_span: Span, signature: FnSignature, body: FnBody) -> Self {
         Self {
-            scene_name_span: scene_ident.span.clone(),
+            scene_name_span,
             signature,
             body,
             expr_tys: HashMap::new(),

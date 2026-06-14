@@ -16,6 +16,13 @@ pub struct IdentInterner {
     idents: HashMap<String, InternedIdent>,
 }
 
+impl InternedIdent {
+    /// Sentinel for the `self` receiver parameter.
+    /// The actual string "self" cannot be retrieved without an IdentInterner,
+    /// so this reserved value is used wherever the name is only needed as an identity.
+    pub const SELF: InternedIdent = InternedIdent(u32::MAX);
+}
+
 impl IdentInterner {
     pub fn new() -> Self {
         Self {

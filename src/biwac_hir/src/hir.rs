@@ -92,7 +92,7 @@ pub struct TyValImplList {
 pub struct ImplValId(usize);
 
 impl ImplValId {
-    fn new(id: usize) -> Self {
+    pub fn new(id: usize) -> Self {
         Self(id)
     }
 
@@ -104,7 +104,7 @@ impl ImplValId {
 // ジェネリック引数列と、実体の組
 #[derive(Debug, Clone)]
 pub struct TyValImplGenargsContentPair {
-    pub impl_block_genargs: HashMap<String, (LocalGenDefId, Span)>,
+    pub impl_block_genargs: HashMap<InternedIdent, (LocalGenDefId, Span)>,
     pub genargs: Vec<Ty>,
     pub val_content: AssocValDefKind,
 }

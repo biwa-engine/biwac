@@ -8,7 +8,7 @@ use biwac_span::{DefIdKind, LocalGenDefId};
 use crate::{
     DefCollector, ResolveError,
     context::{ResolveCtx, module_level::ModuleResolveCtx},
-    lowering::ty_kind_unwrap_from_typ_repr,
+    lowering,
 };
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl<'mctx> ImplResolveCtx<'mctx> {
         def_collector: &mut DefCollector,
     ) -> Result<Self, Vec<ResolveError>> {
         mctx.resolve_typ(&impl_block.self_typ)?;
-        let self_ty = ty_kind_unwrap_from_typ_repr(&impl_block.self_typ, None);
+        let self_ty = lowering::ty_kind_from_typ_repr(&impl_block.self_typ, None);
 
         let genargs = match &impl_block.genargs_decl {
             Some(genargs) => genargs

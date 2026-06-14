@@ -2,7 +2,8 @@ mod error;
 pub mod hir;
 
 pub use crate::hir::{
-    Hir, ImplValId, TyExistence,
+    DefinedTyImpl, Hir, ImplValId, SpecialTyImpl, TyExistence, TyValImplGenargsContentPair,
+    TyValImplList,
     symbols::{
         Ident,
         expressions::{
@@ -16,8 +17,8 @@ pub use crate::hir::{
             TypeAliasDefContent, ValDefKind,
         },
         statements::{
-            AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, ReturnStmt, Stmt, VarDecl,
-            WhileStmt,
+            AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, NovelWaitStmt, NovelWriteStmt,
+            ReturnStmt, Stmt, VarDecl, WhileStmt,
         },
     },
     types::{DefinedTy, FnTy, InferTy, Ty, TyKind, TyVar},

@@ -57,7 +57,7 @@ impl PackageLocalDefId {
 /// 32 bit local variable id (simple increment).
 /// Unless its parent (function, associated function, or method) is not changed,
 /// it is consistent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId(u32);
 
 impl VarId {

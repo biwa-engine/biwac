@@ -14,16 +14,12 @@ pub use name_tree::{
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use biwac_ast::{DefTyp, Ident, ImportDecl, Path, TypeDef};
+use biwac_ast::{Ident, ImportDecl, Path};
 use biwac_base::{InternedIdent, ModId, ModPath, PackageId, PackageName, PackageNameError};
 
-use biwac_dependency_loader::DepsSymbolKind;
-use biwac_hir::{
-    Hir, HirError, ImplValDefContentKind, NativeTypeAliasDefContent, PkgId, StructDefContent, Ty,
-    TyDefContentKind, TyExistence, ValDefContentKind,
-};
+use biwac_hir::{Hir, HirError, Ty};
 use biwac_package_loader::Pkg;
 
 use crate::symbols::resolve_in_self_package;
@@ -222,6 +218,7 @@ impl<T> ResolveErrorHandler for Result<T, ResolveError> {
 pub struct NameResolver {
     pkg: Pkg,
     pkg_name: InternedIdent,
+    pkg_package_name: PackageName,
 }
 
 impl NameResolver {
@@ -231,7 +228,17 @@ impl NameResolver {
         pkg_name: InternedIdent,
         pkg: Pkg,
     ) -> Result<Self, ResolveError> {
-        Ok(Self { pkg, pkg_name })
+        let pkg_package_name = metadata
+            .metadata
+            .as_ref()
+            .expect("metadata must be loaded before name resolution")
+            .name
+            .clone();
+        Ok(Self {
+            pkg,
+            pkg_name,
+            pkg_package_name,
+        })
     }
 
     pub fn try_resolve(self) -> Result<Hir, Vec<ResolveError>> {
@@ -255,7 +262,7 @@ impl NameResolver {
         // symbol signature
 
         // lowering to HIR
-        lowering::lower(self.pkg.root_module.ast)
+        lowering::lower(self.pkg_package_name, self.pkg)
     }
 
     // pub fn new(

@@ -52,6 +52,19 @@ pub struct AssignStmt {
     pub span: Span,
 }
 
+// novel-specific statements
+
+#[derive(Debug, Clone)]
+pub struct NovelWriteStmt {
+    pub msg: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct NovelWaitStmt {
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Block(BlockStmt),
@@ -61,4 +74,6 @@ pub enum Stmt {
     While(WhileStmt),
     VarDecl(VarDecl),
     Assign(AssignStmt),
+    NovelWrite(NovelWriteStmt),
+    NovelWait(NovelWaitStmt),
 }

@@ -1,10 +1,10 @@
-use biwac_hir::{DefinedTy, FnDefContentSignature, Ident, PkgId, StructDefContent, Ty, TyKind};
+use biwac_hir::{FnSignature, StructDefContent, Ty};
 use biwac_span::Span;
 
 use crate::{DepsFunction, DepsStruct, DepsTy};
 
 impl DepsFunction {
-    pub fn as_fn_signature(&self, span: Span) -> FnDefContentSignature {
+    pub fn as_fn_signature(&self, span: Span) -> FnSignature {
         todo!()
         // FnDefContentSignature {
         //     args: self
