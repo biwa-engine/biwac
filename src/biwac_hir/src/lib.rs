@@ -13,8 +13,8 @@ pub use crate::hir::{
         },
         globals::{
             AssocValDefKind, DecledArg, FnBody, FnDef, FnSignature, NativeCode, NativeFnArgDecl,
-            NativeFnDef, NativeTypeAliasDefContent, NovelSceneDef, StructDefContent, TyDefKind,
-            TypeAliasDefContent, ValDefKind,
+            NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef, TyDefKind, TypeAliasDef,
+            ValDefKind,
         },
         statements::{
             AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, NovelWaitStmt, NovelWriteStmt,

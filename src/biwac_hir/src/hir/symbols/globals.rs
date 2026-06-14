@@ -107,14 +107,14 @@ pub struct DecledArg {
 // e.g.) struct, enum
 #[derive(Debug, Clone)]
 pub enum TyDefKind {
-    Struct(Box<StructDefContent>),
+    Struct(Box<StructDef>),
     // Enum(EnumDefContent),
-    TypeAlias(Box<TypeAliasDefContent>),
-    NativeTypeAlias(Box<NativeTypeAliasDefContent>),
+    TypeAlias(Box<TypeAliasDef>),
+    NativeTypeAlias(Box<NativeTypeAliasDef>),
 }
 
 #[derive(Debug, Clone)]
-pub struct StructDefContent {
+pub struct StructDef {
     pub members: HashMap<InternedIdent, Ty>,
     pub genargs: Vec<GenDefId>,
     // TODO: その他各種情報
@@ -122,14 +122,14 @@ pub struct StructDefContent {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypeAliasDefContent {
+pub struct TypeAliasDef {
     pub genargs: Vec<GenDefId>,
     pub right: Ty,
     pub alias_name_span: Span,
 }
 
 #[derive(Debug, Clone)]
-pub struct NativeTypeAliasDefContent {
+pub struct NativeTypeAliasDef {
     pub alias_name_span: Span,
     pub genargs: Vec<Ident>,
     pub native: String,

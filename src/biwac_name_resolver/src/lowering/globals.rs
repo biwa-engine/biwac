@@ -4,8 +4,8 @@ use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef};
 use biwac_base::{InternedIdent, ModPath};
 use biwac_hir::{
     AssocValDefKind, DefinedTy, DefinedTyImpl, FnBody, FnDef, FnSignature, Hir, Ident, ImplValId,
-    NativeCode, NativeFnDef, NativeTypeAliasDefContent, StructDefContent, Ty, TyDefKind, TyKind,
-    TyValImplGenargsContentPair, TyValImplList, TypeAliasDefContent, ValDefKind,
+    NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
+    TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
 };
 use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
 
@@ -292,7 +292,7 @@ fn lower_struct_def(
         .map(|(ident, typ)| (ident.id, ty_from_typ_repr(typ, None)))
         .collect();
 
-    let ty_content = TyDefKind::Struct(Box::new(StructDefContent {
+    let ty_content = TyDefKind::Struct(Box::new(StructDef {
         members,
         genargs,
         struct_name_span: struct_def.id.span.clone(),
@@ -335,7 +335,7 @@ fn lower_type_alias(
 
     let right = ty_from_typ_repr(&alias_def.right, None);
 
-    let ty_content = TyDefKind::TypeAlias(Box::new(TypeAliasDefContent {
+    let ty_content = TyDefKind::TypeAlias(Box::new(TypeAliasDef {
         genargs,
         right,
         alias_name_span: alias_def.ident.span.clone(),
@@ -367,7 +367,7 @@ fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlia
         })
         .unwrap_or_default();
 
-    let ty_content = TyDefKind::NativeTypeAlias(Box::new(NativeTypeAliasDefContent {
+    let ty_content = TyDefKind::NativeTypeAlias(Box::new(NativeTypeAliasDef {
         alias_name_span: native_def.ident.span.clone(),
         genargs,
         native: native_def.native.clone(),
