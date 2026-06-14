@@ -1,7 +1,7 @@
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
 use biwac_span::{Span, TyDefId, ValDefId, VarId};
 
-use crate::{Ident, Stmt, Ty};
+use crate::{Ident, Stmt};
 
 // ExprId
 // function local expression id
@@ -128,33 +128,6 @@ pub struct FnCall {
 pub enum Callee {
     Var(VarId),
     Fn(ValDefId),
-    Assoc(AssocCallee),
-}
-
-// AssocCallee は関連関数の呼び出しにおいて、
-// callerからみたcalleeの各種情報を保持する
-//
-// 関連関数の対象の型は、
-// ユーザ定義型に限らず、プリミティブ型も対象になるため、
-// TyIdでなくTyで持たせている
-// Tyの種類によっては実装の対象でないため、calleeの対象でもないこともある
-// ```
-//  foo::Bar::baz(x, y)
-//  ^^^^^^^   ^^^
-//  ty        assoc
-//
-//  foo::Bar::[T, Int]::baz(x, y)
-//  ^^^^^^^^  ^^^^^^^^  ^^^
-//  ty        genargs   assoc
-//
-//  Int::qux(x, y)
-//  ^^^  ^^^
-//  ty   assoc
-// ```
-#[derive(Debug, Clone)]
-pub struct AssocCallee {
-    pub ty: Ty,
-    pub assoc: Ident,
 }
 
 #[derive(Debug, Clone)]

@@ -1,10 +1,8 @@
 use std::cell::Cell;
 
 use biwac_ast::{BinOperator, UnOperator};
-use biwac_hir::{
-    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, Primary, TyKind, VarIdKind,
-};
-use biwac_span::{TyDefId, VarId};
+use biwac_hir::{BlockExpr, Callee, Expr, ExprVal, Hir, Literal, Primary, TyKind, VarIdKind};
+use biwac_span::VarId;
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
@@ -24,46 +22,46 @@ impl Mangled for VarId {
     }
 }
 
-impl Mangled for (&TyDefId, &str, &ImplValId) {
-    fn mangled(&self) -> String {
-        let mut result = String::from("_ZN");
-
-        let pkg_name_str = self.0.pkg().name().value();
-        result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
-
-        for q in self.0.quals() {
-            result.push_str(&format!("{}{}", q.len(), q));
-        }
-
-        result.push_str(&format!("{}{}", self.0.id().len(), self.0.id()));
-
-        result.push_str(&format!("{}{}", self.1.len(), self.1));
-
-        result.push_str(&format!(
-            "{}G{}",
-            self.2.value().to_string().len() + 1,
-            self.2.value()
-        ));
-
-        result.push('E');
-
-        result
-    }
-}
-
-impl Mangled for (&TyKind, &str, &ImplValId) {
-    fn mangled(&self) -> String {
-        match self.0 {
-            TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
-            TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
-            TyKind::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
-            TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
-            TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-            TyKind::Int | TyKind::Float | TyKind::Bool => (self.0, self.1).mangled(),
-            TyKind::Defined(defined_ty) => (&defined_ty.def_id, self.1, self.2).mangled(),
-        }
-    }
-}
+// impl Mangled for (&TyDefId, &str, &ImplValId) {
+//     fn mangled(&self) -> String {
+//         let mut result = String::from("_ZN");
+//
+//         let pkg_name_str = self.0.pkg().name().value();
+//         result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
+//
+//         for q in self.0.quals() {
+//             result.push_str(&format!("{}{}", q.len(), q));
+//         }
+//
+//         result.push_str(&format!("{}{}", self.0.id().len(), self.0.id()));
+//
+//         result.push_str(&format!("{}{}", self.1.len(), self.1));
+//
+//         result.push_str(&format!(
+//             "{}G{}",
+//             self.2.value().to_string().len() + 1,
+//             self.2.value()
+//         ));
+//
+//         result.push('E');
+//
+//         result
+//     }
+// }
+//
+// impl Mangled for (&TyKind, &str, &ImplValId) {
+//     fn mangled(&self) -> String {
+//         match self.0 {
+//             TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
+//             TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
+//             TyKind::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
+//             TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
+//             TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
+//             TyKind::Int | TyKind::Float | TyKind::Bool => (self.0, self.1).mangled(),
+//             TyKind::Defined(defined_ty) => (&defined_ty.def_id, self.1, self.2).mangled(),
+//         }
+//     }
+// }
 
 impl<'a> AsOxc<'a, oxc_span::Ident<'a>> for Callee {
     fn as_oxc(

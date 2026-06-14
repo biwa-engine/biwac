@@ -18,7 +18,6 @@ pub fn generate(hir: &Hir) -> String {
         .iter()
         .flat_map(|(tid, ty_impl)| match &ty_impl.ty_content {
             TyDefKind::Struct(_) => None,
-            TyDefKind::TypeAlias(_) => None,
             TyDefKind::NativeTypeAlias(native) => Some((
                 tid.clone(),
                 // 型単体をパースできないため、文にする
@@ -149,14 +148,13 @@ pub fn generate(hir: &Hir) -> String {
             .iter()
             .flat_map(|(tid, ty_impl)| match &ty_impl.ty_content {
                 TyDefKind::Struct(struct_) => {
-                    if tid.pkg().name() == &hir.pkg_name {
+                    if tid.pkg().is_self() {
                         Some(struct_.as_oxc_global(tid, &allocator, hir))
                     } else {
                         // 外部パッケージの型定義は生成しないガード
                         None
                     }
                 }
-                TyDefKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
                 TyDefKind::NativeTypeAlias(_) => Some(
                     native_tys
                         .get(tid)

@@ -6,9 +6,8 @@ pub use crate::hir::{
     symbols::{
         Ident,
         expressions::{
-            AssocCallee, BinaryExpr, BlockExpr, Callee, Expr, ExprId, ExprVal, FnCall, IfExpr,
-            Literal, MemberAccess, MethodCall, Primary, StructLiteral, UnaryExpr, VarIdKind,
-            Variable,
+            BinaryExpr, BlockExpr, Callee, Expr, ExprId, ExprVal, FnCall, IfExpr, Literal,
+            MemberAccess, MethodCall, Primary, StructLiteral, UnaryExpr, VarIdKind, Variable,
         },
         globals::{
             AssocValDefKind, DecledArg, FnArgDecl, FnBody, FnDef, FnSignature, NativeCode,

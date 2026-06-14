@@ -12,7 +12,6 @@ impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Primary {
                     ctx.resolve_path(path).map(|_| ()).map_err(|e| vec![e])
                 }
                 biwac_ast::Variable::SelfVar(span) => {
-                    // TODO: store resolved id
                     ctx.resolve_self_var(span).map(|_| ()).map_err(|e| vec![e])
                 }
             },

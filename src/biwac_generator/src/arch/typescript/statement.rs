@@ -147,6 +147,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                     allocator,
                 ))
             }
+            Self::NovelWrite(_) |Self::NovelWait(_) => todo!()
         }
     }
 }
