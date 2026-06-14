@@ -1,12 +1,8 @@
-pub(crate) mod context;
-mod def_collector;
 mod lowering;
 mod name_tree;
-mod symbols;
-mod types;
+mod resolving;
 
 use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
-pub use def_collector::DefCollector;
 pub use name_tree::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, TyNameTree,
 };
@@ -22,7 +18,7 @@ use biwac_base::{InternedIdent, ModId, ModPath, PackageId, PackageName, PackageN
 use biwac_hir::{Hir, HirError, Ty};
 use biwac_package_loader::Pkg;
 
-use crate::symbols::resolve_in_self_package;
+use crate::resolving::resolve_in_self_package;
 
 // このcrate biwac_name_resolver は、
 // package内のあらゆる名前の解決をすることを目指す。
@@ -245,7 +241,7 @@ impl NameResolver {
         let external_package_trees = HashMap::new();
 
         // definition collection (package internal)
-        let mut def_collector = DefCollector::new();
+        let mut def_collector = resolving::def_collector::DefCollector::new();
         let name_tree = def_collector.collect(self.pkg_name, &self.pkg, external_package_trees)?;
 
         // TODO: cache on disk

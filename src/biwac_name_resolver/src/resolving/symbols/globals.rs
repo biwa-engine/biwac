@@ -3,12 +3,15 @@ use std::collections::{HashMap, hash_map::Entry};
 use biwac_ast::{ArgDecl, RetTypRepr};
 
 use crate::{
-    DefCollector, ResolveError, ResolveErrorHandler,
-    context::{
-        LocalResolveCtx, ResolveCtx, fn_level::FnResolveCtx, impl_level::ImplResolveCtx,
-        module_level::ModuleResolveCtx, ty_def_level::TyDefResolveCtx,
+    ResolveError, ResolveErrorHandler,
+    resolving::{
+        LocalNameResolve, NameResolve,
+        context::{
+            LocalResolveCtx, ResolveCtx, fn_level::FnResolveCtx, impl_level::ImplResolveCtx,
+            module_level::ModuleResolveCtx, ty_def_level::TyDefResolveCtx,
+        },
+        def_collector::DefCollector,
     },
-    symbols::{LocalNameResolve, NameResolve},
 };
 
 fn fn_signature_resolve<C: LocalResolveCtx>(

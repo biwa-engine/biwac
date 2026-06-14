@@ -1,4 +1,7 @@
-use crate::{ResolveErrorHandler, context::LocalResolveCtx, symbols::LocalNameResolve};
+use crate::{
+    ResolveErrorHandler,
+    resolving::{LocalNameResolve, context::LocalResolveCtx},
+};
 
 impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Primary {
     fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {

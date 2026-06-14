@@ -4,7 +4,10 @@ use biwac_ast::symbols::globals::GenArgsDecl;
 use biwac_base::InternedIdent;
 use biwac_span::{DefIdKind, GenDefId};
 
-use crate::{DefCollector, ResolveError, context::ResolveCtx};
+use crate::{
+    ResolveError,
+    resolving::{context::ResolveCtx, def_collector::DefCollector},
+};
 
 #[derive(Debug)]
 pub struct TyDefResolveCtx<'ctx, C: ResolveCtx> {

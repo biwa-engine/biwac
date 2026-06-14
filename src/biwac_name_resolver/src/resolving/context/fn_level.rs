@@ -5,8 +5,12 @@ use biwac_base::InternedIdent;
 use biwac_span::{DefIdKind, LocalGenDefId, Span, VarId};
 
 use crate::{
-    DefCollector, ResolveError, ResolveErrorHandler,
-    context::{LocalResolveCtx, ResolveCtx},
+    ResolveErrorHandler,
+    resolving::{
+        ResolveError,
+        context::{LocalResolveCtx, ResolveCtx},
+        def_collector::DefCollector,
+    },
 };
 
 #[derive(Debug)]

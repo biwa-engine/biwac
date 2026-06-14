@@ -4,7 +4,9 @@ use biwac_ast::{AbsolutePathHeader, Globals, ModAst, Path, PathSegmentResolution
 use biwac_base::InternedIdent;
 use biwac_span::DefIdKind;
 
-use crate::{ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, context::ResolveCtx};
+use crate::{
+    ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, resolving::context::ResolveCtx,
+};
 
 #[derive(Debug)]
 pub struct ModuleResolveCtx<'t> {

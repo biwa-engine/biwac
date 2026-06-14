@@ -6,9 +6,11 @@ use biwac_hir::TyKind;
 use biwac_span::{DefIdKind, LocalGenDefId};
 
 use crate::{
-    DefCollector, ResolveError,
-    context::{ResolveCtx, module_level::ModuleResolveCtx},
-    lowering,
+    ResolveError, lowering,
+    resolving::{
+        context::{ResolveCtx, module_level::ModuleResolveCtx},
+        def_collector::DefCollector,
+    },
 };
 
 #[derive(Debug)]

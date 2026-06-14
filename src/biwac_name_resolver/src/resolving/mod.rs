@@ -2,14 +2,16 @@ use biwac_base::InternedIdent;
 use biwac_package_loader::{LoadedModule, Pkg};
 
 use crate::{
-    DefCollector, ModuleNameTree, NameTree, ResolveError,
-    context::{LocalResolveCtx, ResolveCtx, module_level::ModuleResolveCtx},
+    ModuleNameTree, NameTree, ResolveError,
+    resolving::{
+        context::{LocalResolveCtx, ResolveCtx, module_level::ModuleResolveCtx},
+        def_collector::DefCollector,
+    },
 };
 
-mod expressions;
-mod globals;
-mod novel;
-mod statements;
+mod context;
+pub(crate) mod def_collector;
+mod symbols;
 
 trait NameResolve<C: ResolveCtx> {
     fn resolve(&self, ctx: &C, def_collector: &mut DefCollector) -> Result<(), Vec<ResolveError>>;

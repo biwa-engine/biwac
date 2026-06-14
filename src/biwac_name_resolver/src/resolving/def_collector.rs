@@ -11,7 +11,7 @@ use biwac_span::{DefId, PackageLocalDefId, Span, TyDefId, ValDefId};
 use crate::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, ResolveError,
     TyNameTree,
-    context::{ResolveCtx, impl_level::ImplResolveCtx, module_level::ModuleResolveCtx},
+    resolving::context::{ResolveCtx, impl_level::ImplResolveCtx, module_level::ModuleResolveCtx},
 };
 
 pub(crate) enum TyOrVal<T, V> {
