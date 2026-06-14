@@ -4,9 +4,9 @@ mod inferrer;
 mod tests;
 
 use biwac_ast::{BinOperator, UnOperator};
-use biwac_hir::{
-    AssignStmt, Expr, FnTy, HirError, Ident, MemberAccess, StructLiteral, Ty, TyId, TyVar,
-};
+use biwac_base::InternedIdent;
+use biwac_hir::{AssignStmt, Expr, FnTy, HirError, Ident, MemberAccess, StructLiteral, Ty, TyVar};
+use biwac_span::TyDefId;
 
 pub use crate::inferrer::context::TyCtx;
 
@@ -17,12 +17,12 @@ pub enum TyError {
         member2: Box<Ident>,
     },
     StructLiteralAssignToInexsistentMember {
-        tid: Box<TyId>,
+        def_id: Box<TyDefId>,
         member: Box<Ident>,
     },
     StructLiteralMemberInsufficient {
         sliteral: Box<StructLiteral>,
-        insufficient_members: Vec<String>,
+        insufficient_members: Vec<InternedIdent>,
     },
     InvalidStructLiteralOnAliasType {
         ty: Box<Ty>,
@@ -33,7 +33,7 @@ pub enum TyError {
         method: Box<Ident>,
     },
     StructNotHasMember {
-        tid: TyId,
+        def_id: TyDefId,
         access: Box<MemberAccess>,
     },
     ExprNotHasMember {

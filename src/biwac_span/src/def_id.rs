@@ -31,6 +31,11 @@ impl DefId {
     pub fn pkg(&self) -> PackageId {
         self.pkg
     }
+
+    #[inline]
+    fn as_u64(&self) -> u64 {
+        ((self.pkg.value() as u64) << 32) + self.local.0 as u64
+    }
 }
 
 impl Hash for DefId {
@@ -65,6 +70,14 @@ impl VarId {
     pub fn new(id: u32) -> Self {
         Self(id)
     }
+
+    pub fn value(&self) -> u32 {
+        self.0
+    }
+
+    /// Variable `self` always assigned VarId(0).
+    /// Normal arguments and variables must be 1 or bigger.
+    pub const SELF_VARIABLE: Self = Self(0);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +105,11 @@ macro_rules! impl_typed_def_id {
             #[inline]
             pub fn pkg(&self) -> PackageId {
                 self.0.pkg
+            }
+
+            #[inline]
+            pub fn value(&self) -> u64 {
+                self.0.as_u64()
             }
         }
     };

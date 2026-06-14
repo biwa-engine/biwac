@@ -1,18 +1,15 @@
-use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
-    str::FromStr,
-};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 pub(crate) mod context;
 
 use biwac_ast::{BinOperator, UnOperator};
-use biwac_base::PackageName;
+use biwac_base::InternedIdent;
 use biwac_hir::{
-    BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnDefContentBody,
-    FnDefContentSignature, FnTy, GenTyId, Hir, Ident, ImplValDefContentKind, InferTy, Literal,
-    LocGenTyId, MemberAccess, PkgId, Primary, Stmt, StructLiteral, Ty, TyDefContentKind, TyId,
-    TyKind, TyVar, ValDefContentKind, VarIdKind,
+    AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnBody, FnSignature,
+    FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Primary, Stmt, StructLiteral, Ty, TyDefKind,
+    TyKind, TyVar, ValDefKind, VarIdKind,
 };
+use biwac_span::{GenDefId, LocalGenDefId, TyDefId, VarId};
 
 use crate::{
     TyCtx, TyError, TyResult,
@@ -21,12 +18,12 @@ use crate::{
 
 #[derive(Debug, Default)]
 struct CallCtx {
-    gen_assigns: HashMap<LocGenTyId, Ty>,
+    gen_assigns: HashMap<LocalGenDefId, Ty>,
 }
 
 #[derive(Debug, Default)]
 struct DefinedTyCtx {
-    gen_assigns: HashMap<GenTyId, Ty>,
+    gen_assigns: HashMap<GenDefId, Ty>,
 }
 
 impl<'tctx> FnTyCtx<'tctx> {
@@ -123,7 +120,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             (TyKind::Defined(defined_ty1), TyKind::Defined(defined_ty2)) => {
-                if defined_ty1.tid == defined_ty2.tid {
+                if defined_ty1.def_id == defined_ty2.def_id {
                     if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
                         let genargs = defined_ty1
                             .genargs
@@ -136,7 +133,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                             .collect::<TyResult<_>>()?;
 
                         Ok(TyKind::Defined(DefinedTy {
-                            tid: defined_ty1.tid,
+                            def_id: defined_ty1.def_id,
                             genargs,
                         }))
                     } else {
@@ -151,7 +148,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             (TyKind::Gen(_), _) | (_, TyKind::Gen(_)) => {
-                // Ty::Gen(GenTyId) は型定義しにしか現れない
+                // Ty::Gen(GenDefId) は型定義しにしか現れない
                 panic!("compiler bug: unresolved generic type found")
             }
             (x, y) => {
@@ -178,7 +175,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             TyKind::Defined(defined_ty) => TyKind::Defined(DefinedTy {
-                tid: defined_ty.tid,
+                def_id: defined_ty.def_id,
                 genargs: defined_ty
                     .genargs
                     .into_iter()
@@ -227,16 +224,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             // NOTE:
-            // callee_fty.genargs は 関数定義側でのVec<LocGenTyId>が記録されており、
+            // callee_fty.genargs は 関数定義側でのVec<LocalGenDefId>が記録されており、
             // caller_fty.genargs は 空(vec![]) であるものとする
-            // また、caller に現れる LocGenTyId は impl block やその関数で宣言された
+            // また、caller に現れる LocalGenDefId は impl block やその関数で宣言された
             // ジェネリック型であり、
-            // callee に現れる LocGenTyId とは別であるので注意が必要
+            // callee に現れる LocalGenDefId とは別であるので注意が必要
             (TyKind::Fn(callee_fty), TyKind::Fn(caller_fty)) => {
                 if callee_fty.args.len() != caller_fty.args.len() {
                     Err(TyError::FnArgLenMismatched(callee_fty, caller_fty))
                 } else {
-                    // LocGenTyId -> Ty の割り当てが計算できるため、
+                    // LocalGenDefId -> Ty の割り当てが計算できるため、
                     // それによりできるだけ具体の型を計算して返す
                     let args = callee_fty
                         .args
@@ -252,8 +249,8 @@ impl<'tctx> FnTyCtx<'tctx> {
                         self.call_unify(*callee_fty.rty, *caller_fty.rty, ctx)?,
                         caller_ty.span,
                     );
-                    // genargs に登場する LocGenTyId が必ず引数または戻り値に現れるという前提のもと、
-                    // この時点で gen_assigns にはすべての LocGenTyId に対する Ty
+                    // genargs に登場する LocalGenDefId が必ず引数または戻り値に現れるという前提のもと、
+                    // この時点で gen_assigns にはすべての LocalGenDefId に対する Ty
                     // の割り当てが計算されている
                     //
                     // NOTE: FnTyに割り当てを記録しても良い
@@ -267,7 +264,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             (TyKind::Defined(defined_ty1), TyKind::Defined(defined_ty2)) => {
-                if defined_ty1.tid == defined_ty2.tid {
+                if defined_ty1.def_id == defined_ty2.def_id {
                     if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
                         let genargs = defined_ty1
                             .genargs
@@ -280,7 +277,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                             .collect::<TyResult<_>>()?;
 
                         Ok(TyKind::Defined(DefinedTy {
-                            tid: defined_ty1.tid,
+                            def_id: defined_ty1.def_id,
                             genargs,
                         }))
                     } else {
@@ -310,7 +307,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             },
             (TyKind::Gen(_), _) | (_, TyKind::Gen(_)) => {
-                // Ty::Gen(GenTyId) は型定義にしか現れない
+                // Ty::Gen(GenDefId) は型定義にしか現れない
                 panic!("compiler bug: unresolved generic type found")
             }
             (x, y) => {
@@ -394,7 +391,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             (TyKind::Defined(defined_ty1), TyKind::Defined(defined_ty2)) => {
-                if defined_ty1.tid == defined_ty2.tid {
+                if defined_ty1.def_id == defined_ty2.def_id {
                     if defined_ty1.genargs.len() == defined_ty2.genargs.len() {
                         let genargs = defined_ty1
                             .genargs
@@ -407,7 +404,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                             .collect::<TyResult<_>>()?;
 
                         Ok(TyKind::Defined(DefinedTy {
-                            tid: defined_ty1.tid,
+                            def_id: defined_ty1.def_id,
                             genargs,
                         }))
                     } else {
@@ -570,12 +567,16 @@ impl<'tctx> FnTyCtx<'tctx> {
         res
     }
 
-    fn infer_struct_literal(&mut self, tid: &TyId, struct_literal: &StructLiteral) -> TyResult<Ty> {
-        match self.tctx.hir.get_type_definition(tid).unwrap() {
-            TyDefContentKind::Struct(struct_) => {
-                let mut members = HashMap::<&str, (&Ident, &Expr)>::new();
+    fn infer_struct_literal(
+        &mut self,
+        def_id: &TyDefId,
+        struct_literal: &StructLiteral,
+    ) -> TyResult<Ty> {
+        match self.tctx.hir.get_type_definition(def_id).unwrap() {
+            TyDefKind::Struct(struct_) => {
+                let mut members = HashMap::<InternedIdent, (&Ident, &Expr)>::new();
                 for (ident, expr) in &struct_literal.members {
-                    match members.entry(&ident.id) {
+                    match members.entry(ident.id) {
                         Entry::Vacant(e) => {
                             e.insert((ident, expr));
                         }
@@ -591,13 +592,12 @@ impl<'tctx> FnTyCtx<'tctx> {
                 // 構造体に定義されているメンバ名の集合
                 let mut member_ids = struct_
                     .members
-                    .keys()
-                    .map(|m| m.as_str())
-                    .collect::<HashSet<&str>>();
+                    .into_keys()
+                    .collect::<HashSet<InternedIdent>>();
 
                 let mut dtctx = DefinedTyCtx::default();
                 for (id, (ident, expr)) in &members {
-                    if let Some(definition_ty) = struct_.members.get(*id).cloned() {
+                    if let Some(definition_ty) = struct_.members.get(id).cloned() {
                         let user_ty = self.infer_expr(expr)?;
                         self.defined_ty_unify(
                             Ty::new(definition_ty.kind, ident.span.clone()),
@@ -608,7 +608,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         member_ids.remove(id);
                     } else {
                         return Err(TyError::StructLiteralAssignToInexsistentMember {
-                            tid: Box::new(tid.clone()),
+                            def_id: Box::new(*def_id),
                             member: Box::new(ident.to_owned().clone()),
                         });
                     }
@@ -616,7 +616,7 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                 // 定義型のジェネリック引数宣言に登場するジェネリック型が
                 // そのメンバなどに必ず使用されることが保証されているなら、
-                // dtctx.gen_assigns にはこの時点で必ず GenTyId -> Ty の割り当てがある
+                // dtctx.gen_assigns にはこの時点で必ず GenDefId -> Ty の割り当てがある
                 // その割り当てを収集して返す
                 let genargs = struct_
                     .genargs
@@ -627,7 +627,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 if member_ids.is_empty() {
                     Ok(Ty::new(
                         TyKind::Defined(DefinedTy {
-                            tid: tid.clone(),
+                            def_id: def_id.clone(),
                             genargs,
                         }),
                         struct_literal.span.clone().into(),
@@ -637,14 +637,11 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // 初期化されていないメンバ
                     Err(TyError::StructLiteralMemberInsufficient {
                         sliteral: Box::new(struct_literal.clone()),
-                        insufficient_members: member_ids
-                            .into_iter()
-                            .map(|m| m.to_string())
-                            .collect(),
+                        insufficient_members: member_ids.into_iter().collect(),
                     })
                 }
             }
-            TyDefContentKind::TypeAlias(alias) => match &alias.right.kind {
+            TyDefKind::TypeAlias(alias) => match &alias.right.kind {
                 TyKind::Int | TyKind::Float | TyKind::Bool | TyKind::Fn(_) | TyKind::Void => {
                     Err(TyError::InvalidStructLiteralOnAliasType {
                         ty: Box::new(alias.right.clone()),
@@ -653,7 +650,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
                 TyKind::Infer(_) => panic!("compiler bug: type alias on unknown type"),
                 TyKind::Gen(_) => {
-                    // TyKind::Gen(GenTyId) は型定義にしか現れないため、
+                    // TyKind::Gen(GenDefId) は型定義にしか現れないため、
                     // メンバアクセスの左辺地に現れる場合はバグ
                     panic!("compiler bug: generic type not resolved")
                 }
@@ -663,16 +660,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                     panic!("compiler bug: type alias on generic type")
                 }
                 TyKind::Defined(defined_ty) => {
-                    // alias された TyId で再試行
-                    self.infer_struct_literal(&defined_ty.tid, struct_literal)
+                    // alias された TyDefId で再試行
+                    self.infer_struct_literal(&defined_ty.def_id, struct_literal)
                 }
             },
-            TyDefContentKind::NativeTypeAlias(alias) => {
+            TyDefKind::NativeTypeAlias(alias) => {
                 // native type alias を構造体のように初期化することは出来ない
                 Err(TyError::InvalidStructLiteralOnAliasType {
                     ty: Box::new(Ty::new(
                         TyKind::Defined(DefinedTy {
-                            tid: tid.clone(),
+                            def_id: def_id.clone(),
                             genargs: vec![
                                 Ty::new(
                                     TyKind::Infer(InferTy::Unknown),
@@ -697,11 +694,13 @@ impl<'tctx> FnTyCtx<'tctx> {
                 Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span().into())),
                 Literal::String(_) => Ok(Ty::new(
                     TyKind::Defined(DefinedTy {
-                        tid: TyId::new(
-                            PkgId::new(PackageName::from_str("std").unwrap()),
-                            vec!["types".into(), "string".into()],
-                            "String".into(),
-                        ),
+                        // def_id: TyDefId::new(
+                        //     PkgId::new(PackageName::from_str("std").unwrap()),
+                        //     vec!["types".into(), "string".into()],
+                        //     "String".into(),
+                        // ),
+                        // TODO:
+                        def_id: todo!(),
                         genargs: Vec::new(),
                     }),
                     primary.span().into(),
@@ -904,7 +903,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             ),
             TyKind::Defined(defined_ty) => Ty::new(
                 TyKind::Defined(DefinedTy {
-                    tid: defined_ty.tid,
+                    def_id: defined_ty.def_id,
                     genargs: defined_ty
                         .genargs
                         .into_iter()
@@ -942,7 +941,7 @@ impl<'tctx> FnTyCtx<'tctx> {
             ),
             TyKind::Defined(defined_ty) => Ty::new(
                 TyKind::Defined(DefinedTy {
-                    tid: defined_ty.tid,
+                    def_id: defined_ty.def_id,
                     genargs: defined_ty
                         .genargs
                         .into_iter()
@@ -965,19 +964,24 @@ impl<'tctx> FnTyCtx<'tctx> {
             }
             TyKind::Infer(_) => Err(TyError::InsufficientContext),
             TyKind::Defined(defined_ty) => {
-                match self.tctx.hir.get_type_definition(&defined_ty.tid).unwrap() {
-                    TyDefContentKind::Struct(struct_) => {
+                match self
+                    .tctx
+                    .hir
+                    .get_type_definition(&defined_ty.def_id)
+                    .unwrap()
+                {
+                    TyDefKind::Struct(struct_) => {
                         let ty = struct_
                             .members
                             .get(&member_access.member.id)
                             .ok_or(TyError::StructNotHasMember {
-                                tid: defined_ty.tid.clone(),
+                                def_id: defined_ty.def_id,
                                 access: Box::new(member_access.clone()),
                             })
                             .cloned()?;
 
-                        // NOTE: ジェネリック型 TyKind::Gen(GenTyId) の場合、
-                        // ジェネリック引数列の位置から GenTyId -> TyKind を割り当て
+                        // NOTE: ジェネリック型 TyKind::Gen(GenDefId) の場合、
+                        // ジェネリック引数列の位置から GenDefId -> TyKind を割り当て
                         if let TyKind::Gen(gid) = &ty.kind {
                             let idx = struct_.genargs.iter().position(|g| g == gid).expect(
                                 "compiler bug: undefined generic type found in struct member",
@@ -992,11 +996,11 @@ impl<'tctx> FnTyCtx<'tctx> {
                             Ok(ty)
                         }
                     }
-                    TyDefContentKind::TypeAlias(alias) => {
+                    TyDefKind::TypeAlias(alias) => {
                         // alias の右辺の型で再度試行
                         self.infer_member_access(alias.right.clone(), member_access)
                     }
-                    TyDefContentKind::NativeTypeAlias(_) => {
+                    TyDefKind::NativeTypeAlias(_) => {
                         // native type alias にはメンバアクセスできない
                         Err(TyError::ExprNotHasMember {
                             ty: Box::new(Ty::new(TyKind::Defined(defined_ty), left_ty.span)),
@@ -1006,7 +1010,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                 }
             }
             TyKind::Gen(_) => {
-                // TyKind::Gen(GenTyId) は型定義にしか現れないため、
+                // TyKind::Gen(GenDefId) は型定義にしか現れないため、
                 // メンバアクセスの左辺地に現れる場合はバグ
                 panic!("compiler bug: generic type not resolved")
             }
@@ -1149,18 +1153,16 @@ fn min_of_ty(t1: &Option<Ty>, t2: &Option<Ty>) -> TyResult<Option<Ty>> {
 }
 
 impl TyCtx {
-    fn infer_fn_body(
-        &self,
-        fn_body: &FnDefContentBody,
-        fn_signature: &FnDefContentSignature,
-    ) -> TyResult<TyInfo> {
+    fn infer_fn_body(&self, fn_body: &FnBody, fn_signature: &FnSignature) -> TyResult<TyInfo> {
         let mut fctx = FnTyCtx::new(self, fn_signature.rty.clone());
 
+        if let Some(ty) = &fn_signature.self_ty {
+            fctx.vars.insert(VarId::SELF_VARIABLE, ty.clone());
+        }
         // 引数を決定済みの型として文脈に記録
         // arg_var_ids は第一引数がselfのときはそれも含む
-        for var_id in &fn_body.arg_var_ids {
-            fctx.vars
-                .insert(*var_id, fn_body.vars.get(var_id).unwrap().ty.clone());
+        for arg in &fn_signature.args {
+            fctx.vars.insert(arg.var_id, arg.ty.clone());
         }
 
         // 式で終わっている場合、その式の型が戻り値の型と一致することを検査すれば良い
@@ -1201,21 +1203,15 @@ impl TyCtx {
         let mut fn_ty_infos = vec![];
         for (vid, val) in &self.hir.vals {
             match &val {
-                ValDefContentKind::Fn(f) => {
+                ValDefKind::Fn(f) => {
                     // 計算した型を記録
-                    fn_ty_infos.push((
-                        vid.clone(),
-                        self.infer_fn_body(f.body.expect_completed(), &f.signature)?,
-                    ));
+                    fn_ty_infos.push((vid.clone(), self.infer_fn_body(&f.body, &f.signature)?));
                 }
-                ValDefContentKind::NovelScene(n) => {
+                ValDefKind::NovelScene(n) => {
                     // 計算した型を記録
-                    fn_ty_infos.push((
-                        vid.clone(),
-                        self.infer_fn_body(n.body.expect_completed(), &n.signature)?,
-                    ));
+                    fn_ty_infos.push((vid.clone(), self.infer_fn_body(&n.body, &n.signature)?));
                 }
-                ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
+                ValDefKind::Native(_) | ValDefKind::ExternalFn(_) => {
                     // nothing to do
                 }
             }
@@ -1229,15 +1225,15 @@ impl TyCtx {
                 .get_mut(&vid)
                 .expect("compiler bug: value not found");
             match val {
-                ValDefContentKind::Fn(f) => {
+                ValDefKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
                     f.var_tys = ty_info.var_tys;
                 }
-                ValDefContentKind::NovelScene(n) => {
+                ValDefKind::NovelScene(n) => {
                     n.expr_tys = ty_info.expr_tys;
                     n.var_tys = ty_info.var_tys;
                 }
-                ValDefContentKind::Native(_) | ValDefContentKind::ExternalFn(_) => {
+                ValDefKind::Native(_) | ValDefKind::ExternalFn(_) => {
                     // nothing to do
                 }
             }
@@ -1246,30 +1242,20 @@ impl TyCtx {
         // ユーザ定義型に対する実装(関連関数、メソッド)について
         // 型推論し、その結果を一時的に保持
         let mut impl_fn_ty_infos = vec![];
-        for (tid, ty_impl) in &self.hir.tys {
+        for (def_id, ty_impl) in &self.hir.tys {
             for (val_name, impl_list) in &ty_impl.vals {
                 for (impl_valid, impl_) in &impl_list.vals {
                     match &impl_.val_content {
-                        ImplValDefContentKind::Fn(f) => {
+                        AssocValDefKind::Fn(f) => {
                             // 計算した型を記録
                             impl_fn_ty_infos.push((
-                                tid.clone(),
+                                def_id.clone(),
                                 val_name.clone(),
                                 *impl_valid,
-                                self.infer_fn_body(f.body.expect_completed(), &f.signature)?,
+                                self.infer_fn_body(&f.body, &f.signature)?,
                             ));
                         }
-                        ImplValDefContentKind::Method(m) => {
-                            // 計算した型を記録
-                            impl_fn_ty_infos.push((
-                                tid.clone(),
-                                val_name.clone(),
-                                *impl_valid,
-                                self.infer_fn_body(m.body.expect_completed(), &m.signature)?,
-                            ));
-                        }
-                        ImplValDefContentKind::NativeFn(_)
-                        | ImplValDefContentKind::NativeMethod(_) => {
+                        AssocValDefKind::NativeFn(_) => {
                             // nothing to do
                         }
                     }
@@ -1278,11 +1264,11 @@ impl TyCtx {
         }
 
         // 推論結果を hir に記録
-        for (tid, val_name, impl_valid, ty_info) in impl_fn_ty_infos {
+        for (def_id, val_name, impl_valid, ty_info) in impl_fn_ty_infos {
             let ty_impl = self
                 .hir
                 .tys
-                .get_mut(&tid)
+                .get_mut(&def_id)
                 .expect("compiler bug: value not found");
             match &mut ty_impl
                 .vals
@@ -1293,15 +1279,11 @@ impl TyCtx {
                 .unwrap()
                 .val_content
             {
-                ImplValDefContentKind::Fn(f) => {
+                AssocValDefKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
                     f.var_tys = ty_info.var_tys;
                 }
-                ImplValDefContentKind::Method(m) => {
-                    m.expr_tys = ty_info.expr_tys;
-                    m.var_tys = ty_info.var_tys;
-                }
-                ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                AssocValDefKind::NativeFn(_) => {
                     // nothing to do
                 }
             }
@@ -1313,23 +1295,15 @@ impl TyCtx {
         for (ty, ty_impl) in &self.hir.special_ty_impls {
             for (val_name, val) in &ty_impl.vals {
                 match &val {
-                    ImplValDefContentKind::Fn(f) => {
+                    AssocValDefKind::Fn(f) => {
                         // 計算した型を記録
                         special_impl_fn_ty_infos.push((
                             ty.clone(),
                             val_name.clone(),
-                            self.infer_fn_body(f.body.expect_completed(), &f.signature)?,
+                            self.infer_fn_body(&f.body, &f.signature)?,
                         ));
                     }
-                    ImplValDefContentKind::Method(m) => {
-                        // 計算した型を記録
-                        special_impl_fn_ty_infos.push((
-                            ty.clone(),
-                            val_name.clone(),
-                            self.infer_fn_body(m.body.expect_completed(), &m.signature)?,
-                        ));
-                    }
-                    ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                    AssocValDefKind::NativeFn(_) => {
                         // nothing to do
                     }
                 }
@@ -1344,15 +1318,11 @@ impl TyCtx {
                 .get_mut(&ty)
                 .expect("compiler bug: value not found");
             match &mut ty_impl.vals.get_mut(&val_name).unwrap() {
-                ImplValDefContentKind::Fn(f) => {
+                AssocValDefKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
                     f.var_tys = ty_info.var_tys;
                 }
-                ImplValDefContentKind::Method(m) => {
-                    m.expr_tys = ty_info.expr_tys;
-                    m.var_tys = ty_info.var_tys;
-                }
-                ImplValDefContentKind::NativeFn(_) | ImplValDefContentKind::NativeMethod(_) => {
+                AssocValDefKind::NativeFn(_) => {
                     // nothing to do
                 }
             }

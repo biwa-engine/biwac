@@ -4,13 +4,10 @@ use biwac_ast::{ArgDecl, symbols::globals::GenArgsDecl};
 use biwac_base::InternedIdent;
 use biwac_span::{DefIdKind, LocalGenDefId, Span, VarId};
 
-use crate::{
-    ResolveErrorHandler,
-    resolving::{
-        ResolveError,
-        context::{LocalResolveCtx, ResolveCtx},
-        def_collector::DefCollector,
-    },
+use crate::resolving::{
+    ResolveError,
+    context::{LocalResolveCtx, ResolveCtx},
+    def_collector::DefCollector,
 };
 
 #[derive(Debug)]
@@ -96,7 +93,6 @@ impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
     ) -> Result<Self, Vec<ResolveError>> {
         let mut genargs = HashMap::new();
         let mut errors = Vec::new();
-        let mut next_var_id = 0;
 
         if let Some(genargs_decl) = genargs_decl {
             for item in &genargs_decl.genargs {
@@ -125,25 +121,31 @@ impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
         }
 
         let self_var = if has_self_var {
-            let self_var_id = VarId::new(next_var_id);
-            next_var_id += 1;
-            Some(self_var_id)
+            Some(VarId::SELF_VARIABLE)
         } else {
             None
         };
 
-        let mut base_scope = VariableScope::new(next_var_id);
+        // because 0 is reserved for `self`, normal variable must be 1 or bigger.
+        let mut base_scope = VariableScope::new(1);
 
         for arg in args {
-            base_scope.declare_variable(&arg.id).handle(&mut errors);
+            match base_scope.declare_variable(&arg.id) {
+                Ok(var_id) => {
+                    arg.var_id.set(var_id).unwrap();
+                }
+                Err(e) => {
+                    errors.push(e);
+                }
+            }
         }
 
         if errors.is_empty() {
             Ok(Self {
                 ctx,
                 genargs,
+                next_var_id: base_scope.next_var_id,
                 scopes: vec![base_scope],
-                next_var_id,
                 self_var,
             })
         } else {

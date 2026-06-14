@@ -1,4 +1,4 @@
-use biwac_hir::{FnSignature, StructDefContent, Ty};
+use biwac_hir::{FnSignature, StructDef, Ty};
 use biwac_span::Span;
 
 use crate::{DepsFunction, DepsStruct, DepsTy};
@@ -6,7 +6,7 @@ use crate::{DepsFunction, DepsStruct, DepsTy};
 impl DepsFunction {
     pub fn as_fn_signature(&self, span: Span) -> FnSignature {
         todo!()
-        // FnDefContentSignature {
+        // FnDefSignature {
         //     args: self
         //         .args
         //         .iter()
@@ -41,9 +41,9 @@ impl DepsFunction {
 }
 
 impl DepsStruct {
-    pub fn as_struct_def(&self, span: Span) -> StructDefContent {
+    pub fn as_struct_def(&self, span: Span) -> StructDef {
         todo!()
-        // StructDefContent {
+        // StructDef {
         //     // TODO: 重複チェック
         //     members: self
         //         .members

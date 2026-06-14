@@ -41,6 +41,13 @@ pub struct FnDef {
     pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FnArgDecl {
+    pub id: Ident,
+    pub ty: Ty,
+    pub var_id: VarId,
+}
+
 // ```
 //  fn foo[T](x: T, y: Int) -> Bar[T] { ... }
 //        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -49,7 +56,7 @@ pub struct FnDef {
 #[derive(Debug, Clone)]
 pub struct FnSignature {
     // explicit arguments (does NOT include `self`)
-    pub args: Vec<(Ident, Ty)>,
+    pub args: Vec<FnArgDecl>,
 
     // Some if this is a method (first arg is self receiver)
     pub self_ty: Option<Ty>,
@@ -66,9 +73,6 @@ pub struct FnSignature {
 pub struct FnBody {
     pub stmts: Vec<Stmt>,
     pub expr: Option<Expr>,
-
-    // VarId for explicit arguments (excludes self)
-    pub arg_var_ids: Vec<VarId>,
 
     // VarId for the self receiver (Some for methods, None otherwise)
     pub self_var_id: Option<VarId>,

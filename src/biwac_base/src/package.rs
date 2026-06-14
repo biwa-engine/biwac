@@ -61,6 +61,11 @@ impl PackageId {
     pub fn is_self(&self) -> bool {
         self == &Self::SELF_PACKAGE
     }
+
+    #[inline]
+    pub fn value(&self) -> u32 {
+        self.0
+    }
 }
 
 impl FromStr for PackageName {

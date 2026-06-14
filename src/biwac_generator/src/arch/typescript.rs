@@ -5,10 +5,8 @@ mod types;
 
 use std::{cell::Cell, collections::HashMap};
 
-use biwac_hir::{
-    ExprId, Hir, ImplValDefContentKind, LocVarId, Ty, TyDefContentKind, TyId, TyKind,
-    ValDefContentKind, ValId,
-};
+use biwac_hir::{AssocValDefKind, ExprId, Hir, Ty, TyDefKind, TyKind, ValDefKind};
+use biwac_span::{TyDefId, ValDefId, VarId};
 use oxc_allocator::FromIn;
 
 pub fn generate(hir: &Hir) -> String {
@@ -18,18 +16,16 @@ pub fn generate(hir: &Hir) -> String {
     let native_tys = hir
         .tys
         .iter()
-        .flat_map(
-            |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
-                TyDefContentKind::Struct(_) => None,
-                TyDefContentKind::TypeAlias(_) => None,
-                TyDefContentKind::NativeTypeAlias(native) => Some((
-                    tid.clone(),
-                    // 型単体をパースできないため、文にする
-                    (&**native, format!("type X = {};", &native.native)),
-                )),
-            },
-        )
-        .collect::<HashMap<TyId, (&_, String)>>();
+        .flat_map(|(tid, ty_impl)| match &ty_impl.ty_content {
+            TyDefKind::Struct(_) => None,
+            TyDefKind::TypeAlias(_) => None,
+            TyDefKind::NativeTypeAlias(native) => Some((
+                tid.clone(),
+                // 型単体をパースできないため、文にする
+                (&**native, format!("type X = {};", &native.native)),
+            )),
+        })
+        .collect::<HashMap<TyDefId, (&_, String)>>();
 
     // module global native code は、必ず先頭に展開される
     let mut body = oxc_allocator::Vec::new_in(&allocator);
@@ -151,47 +147,35 @@ pub fn generate(hir: &Hir) -> String {
     body.extend(oxc_allocator::Vec::from_iter_in(
         hir.tys
             .iter()
-            .flat_map(
-                |(tid, ty_impl)| match &ty_impl.ty_content.expect_completed() {
-                    TyDefContentKind::Struct(struct_) => {
-                        if tid.pkg().name() == &hir.pkg_name {
-                            Some(struct_.as_oxc_global(tid, &allocator, hir))
-                        } else {
-                            // 外部パッケージの型定義は生成しないガード
-                            None
-                        }
+            .flat_map(|(tid, ty_impl)| match &ty_impl.ty_content {
+                TyDefKind::Struct(struct_) => {
+                    if tid.pkg().name() == &hir.pkg_name {
+                        Some(struct_.as_oxc_global(tid, &allocator, hir))
+                    } else {
+                        // 外部パッケージの型定義は生成しないガード
+                        None
                     }
-                    TyDefContentKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
-                    TyDefContentKind::NativeTypeAlias(_) => Some(
-                        native_tys
-                            .get(tid)
-                            .unwrap()
-                            .as_oxc_global(tid, &allocator, hir),
-                    ),
-                },
-            )
+                }
+                TyDefKind::TypeAlias(_) => None, // 型のエイリアスを生成する必要はない
+                TyDefKind::NativeTypeAlias(_) => Some(
+                    native_tys
+                        .get(tid)
+                        .unwrap()
+                        .as_oxc_global(tid, &allocator, hir),
+                ),
+            })
             .chain(hir.tys.iter().flat_map(|(tid, ty_impl)| {
                 ty_impl.vals.iter().flat_map(|(val_name, impl_list)| {
                     impl_list
                         .vals
                         .iter()
                         .map(|(impl_valid, impl_)| match &impl_.val_content {
-                            ImplValDefContentKind::Fn(f) => f.as_oxc_global(
+                            AssocValDefKind::Fn(f) => f.as_oxc_global(
                                 &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
                                 hir,
                             ),
-                            ImplValDefContentKind::Method(m) => m.as_oxc_global(
-                                &(&tid.clone(), val_name.as_str(), impl_valid),
-                                &allocator,
-                                hir,
-                            ),
-                            ImplValDefContentKind::NativeFn(f) => f.as_oxc_global(
-                                &(&tid.clone(), val_name.as_str(), impl_valid),
-                                &allocator,
-                                hir,
-                            ),
-                            ImplValDefContentKind::NativeMethod(m) => m.as_oxc_global(
+                            AssocValDefKind::NativeFn(f) => f.as_oxc_global(
                                 &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
                                 hir,
@@ -201,25 +185,19 @@ pub fn generate(hir: &Hir) -> String {
             }))
             .chain(hir.special_ty_impls.iter().flat_map(|(ty, ty_impl)| {
                 ty_impl.vals.iter().map(|(val_name, val)| match val {
-                    ImplValDefContentKind::Fn(f) => {
+                    AssocValDefKind::Fn(f) => {
                         f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
                     }
-                    ImplValDefContentKind::Method(m) => {
-                        m.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
-                    }
-                    ImplValDefContentKind::NativeFn(f) => {
+                    AssocValDefKind::NativeFn(f) => {
                         f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
-                    }
-                    ImplValDefContentKind::NativeMethod(m) => {
-                        m.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
                     }
                 })
             }))
             .chain(hir.vals.iter().flat_map(|(vid, val)| match val {
-                ValDefContentKind::Fn(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
-                ValDefContentKind::Native(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
-                ValDefContentKind::NovelScene(n) => Some(n.as_oxc_global(vid, &allocator, hir)),
-                ValDefContentKind::ExternalFn(_) => None,
+                ValDefKind::Fn(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
+                ValDefKind::Native(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
+                ValDefKind::NovelScene(n) => Some(n.as_oxc_global(vid, &allocator, hir)),
+                ValDefKind::ExternalFn(_) => None,
             })),
         &allocator,
     ));
@@ -246,7 +224,7 @@ fn span() -> oxc_span::Span {
 
 struct FnAstBuildEnv<'a> {
     pub(super) expr_tys: &'a HashMap<ExprId, Ty>,
-    pub(super) var_tys: &'a HashMap<LocVarId, Ty>,
+    pub(super) var_tys: &'a HashMap<VarId, Ty>,
     pub(super) stmts: Vec<oxc_ast::ast::Statement<'a>>,
 }
 
@@ -275,7 +253,7 @@ trait Mangled {
     fn mangled(&self) -> String;
 }
 
-impl Mangled for TyId {
+impl Mangled for TyDefId {
     fn mangled(&self) -> String {
         let mut result = String::from("_Z");
 
@@ -296,7 +274,7 @@ impl Mangled for TyId {
     }
 }
 
-impl Mangled for ValId {
+impl Mangled for ValDefId {
     fn mangled(&self) -> String {
         let mut result = String::from("_Z");
 
@@ -329,7 +307,7 @@ impl Mangled for (&TyKind, &str) {
             TyKind::Float => format!("_ZN5Float{}{}E", self.1.len(), &self.1,),
             TyKind::Bool => format!("_ZN4Bool{}{}E", self.1.len(), &self.1,),
             TyKind::Defined(_) => {
-                panic!("compiler bug: must use (&TyId, &str, &ImplValId)")
+                panic!("compiler bug: must use (&TyDefId, &str, &ImplValId)")
             }
         }
     }

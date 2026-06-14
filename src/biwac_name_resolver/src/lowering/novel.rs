@@ -3,7 +3,6 @@ use biwac_hir::{
     AssignStmt, BlockStmt, DecledVar, ExprStmt, FnBody, Hir, Ident, NovelSceneDef, NovelWaitStmt,
     NovelWriteStmt, ReturnStmt, Stmt, Ty, TyKind, ValDefKind, VarDecl,
 };
-use biwac_span::VarId;
 
 use crate::ResolveError;
 
@@ -48,16 +47,13 @@ fn build_novel_body(
     signature: &biwac_hir::FnSignature,
     errors: &mut Vec<ResolveError>,
 ) -> FnBody {
-    let arg_var_ids: Vec<VarId> = (0..args.args.len()).map(|i| VarId::new(i as u32)).collect();
-
     let mut ctx = ExprLowerCtx::new();
 
-    for (i, arg) in args.args.iter().enumerate() {
-        let vid = VarId::new(i as u32);
-        let ty = signature.args[i].1.clone();
+    for (arg, sarg) in args.args.iter().zip(signature.args.iter()) {
+        let ty = sarg.ty.clone();
         ctx.declare_var(
-            vid,
-            DecledVar {
+            *arg.var_id.get().unwrap(),
+            biwac_hir::DecledVar {
                 id: Ident::from(arg.id.clone()),
                 ty,
             },
@@ -72,7 +68,6 @@ fn build_novel_body(
     FnBody {
         stmts: lowered_stmts,
         expr: None,
-        arg_var_ids,
         self_var_id: None,
         vars: ctx.into_vars(),
     }

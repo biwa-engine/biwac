@@ -1,6 +1,6 @@
 use std::cell::OnceCell;
 
-use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
 
 use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
@@ -103,6 +103,7 @@ pub struct ArgDecl {
     pub typ: TypRepr,
     pub id: Ident,
     pub span: Span,
+    pub var_id: OnceCell<VarId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

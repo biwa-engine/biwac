@@ -541,6 +541,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         id: *arg,
                         span: t.span.clone(),
                     },
+                    var_id: OnceCell::new(),
                 });
 
                 if let Some(t) = self.peek() {
@@ -641,6 +642,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         id: *arg,
                         span: t.span.clone(),
                     },
+                    var_id: OnceCell::new(),
                 });
 
                 if let Some(t) = self.peek() {

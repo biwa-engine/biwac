@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef};
 use biwac_base::{InternedIdent, ModPath};
 use biwac_hir::{
-    AssocValDefKind, DefinedTy, DefinedTyImpl, FnBody, FnDef, FnSignature, Hir, Ident, ImplValId,
-    NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
+    AssocValDefKind, DefinedTy, DefinedTyImpl, FnArgDecl, FnBody, FnDef, FnSignature, Hir, Ident,
+    ImplValId, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
     TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
 };
 use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
@@ -24,12 +24,16 @@ pub(super) fn build_fn_signature(
     span: Span,
 ) -> FnSignature {
     let self_ty_opt_kind = self_ty.clone();
-    let hir_args: Vec<(Ident, Ty)> = args
+    let hir_args: Vec<FnArgDecl> = args
         .args
         .iter()
         .map(|arg| {
             let ty = ty_from_typ_repr(&arg.typ, self_ty_opt_kind.as_ref());
-            (Ident::from(arg.id.clone()), ty)
+            FnArgDecl {
+                id: Ident::from(arg.id.clone()),
+                ty,
+                var_id: *arg.var_id.get().unwrap(),
+            }
         })
         .collect();
 
@@ -76,11 +80,7 @@ fn build_fn_body(
     signature: &FnSignature,
     errors: &mut Vec<ResolveError>,
 ) -> FnBody {
-    let self_var_id = has_self.then_some(VarId::new(0));
-    let arg_start: u32 = if has_self { 1 } else { 0 };
-    let arg_var_ids: Vec<VarId> = (0..args.args.len())
-        .map(|i| VarId::new(arg_start + i as u32))
-        .collect();
+    let self_var_id = has_self.then_some(VarId::SELF_VARIABLE);
 
     let mut ctx = ExprLowerCtx::new();
 
@@ -100,11 +100,10 @@ fn build_fn_body(
     }
 
     // explicit args
-    for (i, arg) in args.args.iter().enumerate() {
-        let vid = VarId::new(arg_start + i as u32);
-        let ty = signature.args[i].1.clone();
+    for (arg, sarg) in args.args.iter().zip(signature.args.iter()) {
+        let ty = sarg.ty.clone();
         ctx.declare_var(
-            vid,
+            *arg.var_id.get().unwrap(),
             biwac_hir::DecledVar {
                 id: Ident::from(arg.id.clone()),
                 ty,
@@ -121,7 +120,6 @@ fn build_fn_body(
     FnBody {
         stmts: lowered_stmts,
         expr: lowered_expr,
-        arg_var_ids,
         self_var_id,
         vars: ctx.into_vars(),
     }
@@ -174,8 +172,6 @@ fn collect_impl_block_genargs_map(
         .unwrap_or_default()
 }
 
-// ─────────────────────────── lower_fn_def ───────────────────────────────────
-
 pub(super) fn lower_fn_def(
     hir: &mut Hir,
     fn_def: &biwac_ast::FnDef,
@@ -216,8 +212,6 @@ pub(super) fn lower_fn_def(
     );
 }
 
-// ─────────────────────────── lower_native_fn_def ────────────────────────────
-
 pub(super) fn lower_native_fn_def(
     hir: &mut Hir,
     fn_def: &biwac_ast::NativeFnDef,
@@ -249,8 +243,6 @@ pub(super) fn lower_native_fn_def(
         ))),
     );
 }
-
-// ─────────────────────────── lower_type_def ─────────────────────────────────
 
 pub(crate) fn lower_type_def(hir: &mut Hir, type_def: &TypeDef, errors: &mut Vec<ResolveError>) {
     match type_def {
@@ -382,8 +374,6 @@ fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlia
         .or_insert_with(|| fallback)
         .ty_content = ty_content;
 }
-
-// ─────────────────────────── lower_impl_block ───────────────────────────────
 
 pub(super) fn lower_impl_block(
     hir: &mut Hir,
@@ -566,8 +556,6 @@ fn register_impl_val(
         }
     }
 }
-
-// ─────────────────────────── lower_native_code ──────────────────────────────
 
 pub(super) fn lower_native_code(hir: &mut Hir, modpath: &ModPath, native: &biwac_ast::NativeCode) {
     hir.module_global_natives

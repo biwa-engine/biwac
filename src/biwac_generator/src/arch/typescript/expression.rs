@@ -2,9 +2,9 @@ use std::cell::Cell;
 
 use biwac_ast::{BinOperator, UnOperator};
 use biwac_hir::{
-    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, LocVarId, Primary, TyId, TyKind,
-    VarIdKind,
+    BlockExpr, Callee, Expr, ExprVal, Hir, ImplValId, Literal, Primary, TyKind, VarIdKind,
 };
+use biwac_span::{TyDefId, VarId};
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
@@ -18,13 +18,13 @@ impl Mangled for VarIdKind {
     }
 }
 
-impl Mangled for LocVarId {
+impl Mangled for VarId {
     fn mangled(&self) -> String {
         format!("__lv{}", self.value())
     }
 }
 
-impl Mangled for (&TyId, &str, &ImplValId) {
+impl Mangled for (&TyDefId, &str, &ImplValId) {
     fn mangled(&self) -> String {
         let mut result = String::from("_ZN");
 
@@ -60,7 +60,7 @@ impl Mangled for (&TyKind, &str, &ImplValId) {
             TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
             TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
             TyKind::Int | TyKind::Float | TyKind::Bool => (self.0, self.1).mangled(),
-            TyKind::Defined(defined_ty) => (&defined_ty.tid, self.1, self.2).mangled(),
+            TyKind::Defined(defined_ty) => (&defined_ty.def_id, self.1, self.2).mangled(),
         }
     }
 }

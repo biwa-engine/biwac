@@ -12,9 +12,9 @@ pub use crate::hir::{
             Variable,
         },
         globals::{
-            AssocValDefKind, DecledArg, FnBody, FnDef, FnSignature, NativeCode, NativeFnArgDecl,
-            NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef, TyDefKind, TypeAliasDef,
-            ValDefKind,
+            AssocValDefKind, DecledArg, FnArgDecl, FnBody, FnDef, FnSignature, NativeCode,
+            NativeFnArgDecl, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef, TyDefKind,
+            TypeAliasDef, ValDefKind,
         },
         statements::{
             AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, NovelWaitStmt, NovelWriteStmt,

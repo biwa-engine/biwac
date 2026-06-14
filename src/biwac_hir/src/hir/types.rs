@@ -349,7 +349,7 @@ impl FnSignature {
     pub fn as_ty(&self) -> Ty {
         Ty::new(
             TyKind::Fn(FnTy {
-                args: self.args.iter().map(|(_, ty)| ty.clone()).collect(),
+                args: self.args.iter().map(|arg| arg.ty.clone()).collect(),
                 rty: Box::new(self.rty.clone()),
                 genargs: self.genargs.iter().map(|(_, lgid)| *lgid).collect(),
             }),

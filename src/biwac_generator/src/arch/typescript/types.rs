@@ -1,16 +1,17 @@
 use std::cell::Cell;
 
-use biwac_hir::{GenTyId, Hir, LocGenTyId, TyKind};
+use biwac_hir::{Hir, TyKind};
+use biwac_span::{GenDefId, LocalGenDefId};
 
 use crate::arch::typescript::{AsOxc, IntoOxc, Mangled, span};
 
-impl Mangled for GenTyId {
+impl Mangled for GenDefId {
     fn mangled(&self) -> String {
         format!("T{}", self.value())
     }
 }
 
-impl Mangled for LocGenTyId {
+impl Mangled for LocalGenDefId {
     fn mangled(&self) -> String {
         format!("T{}", self.value())
     }
@@ -50,7 +51,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&defined_ty.tid.mangled()),
+                                        allocator.alloc_str(&defined_ty.def_id.mangled()),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
@@ -156,7 +157,7 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&defined_ty.tid.mangled()),
+                                        allocator.alloc_str(&defined_ty.def_id.mangled()),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
