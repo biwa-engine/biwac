@@ -7,21 +7,18 @@ use biwac_hir::{
 use biwac_span::VarId;
 use oxc_allocator::CloneIn;
 
-use crate::arch::typescript::{AsOxc, AsOxcGlobal, FnAstBuildEnv, IntoOxc, Mangled, span};
+use crate::arch::typescript::{
+    AsOxc, AsOxcGlobal, AstBuildCtx, FnAstBuildEnv, IntoOxc, Mangled, span,
+};
 
-impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructDef {
-    fn as_oxc_global(
-        &'a self,
-        id: &I,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
-    ) -> oxc_ast::ast::Statement<'a> {
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
+    fn as_oxc_global(&'a self, id: String, ctx: &AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
         oxc_ast::ast::Statement::TSTypeAliasDeclaration(oxc_allocator::Box::new_in(
             oxc_ast::ast::TSTypeAliasDeclaration {
                 span: span(),
                 id: oxc_ast::ast::BindingIdentifier {
                     span: span(),
-                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    name: oxc_span::Ident::new_const(ctx.allocator.alloc_str(&id)),
                     symbol_id: Cell::new(None),
                 },
                 type_parameters: if !self.genargs.is_empty() {
@@ -36,7 +33,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructD
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&gid.mangled()),
+                                                ctx.allocator.alloc_str(&gid.mangled()),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -46,10 +43,10 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructD
                                         out: false,
                                         r#const: false,
                                     }),
-                                allocator,
+                                &ctx.allocator,
                             ),
                         },
-                        allocator,
+                        &ctx.allocator,
                     ))
                 } else {
                     None
@@ -71,10 +68,11 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructD
                                                     oxc_ast::ast::IdentifierName {
                                                         span: span(),
                                                         name: oxc_span::Ident::new_const(
-                                                            allocator.alloc_str(id),
+                                                            &ctx.allocator
+                                                                .alloc_str(ctx.str_of(id)),
                                                         ),
                                                     },
-                                                    allocator,
+                                                    &ctx.allocator,
                                                 ),
                                             ),
                                             type_annotation: Some(oxc_allocator::Box::new_in(
@@ -85,33 +83,28 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for StructD
                                                         .clone()
                                                         .into_oxc(allocator, hir),
                                                 },
-                                                allocator,
+                                                &ctx.allocator,
                                             )),
                                         },
-                                        allocator,
+                                        &ctx.allocator,
                                     ),
                                 )
                             }),
-                            allocator,
+                            &ctx.allocator,
                         ),
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
                 scope_id: Cell::new(None),
                 declare: false,
             },
-            allocator,
+            &ctx.allocator,
         ))
     }
 }
 
-impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for FnDef {
-    fn as_oxc_global(
-        &'a self,
-        id: &I,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
-    ) -> oxc_ast::ast::Statement<'a> {
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
+    fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
         let mut env = FnAstBuildEnv {
             expr_tys: &self.expr_tys,
             var_tys: &self.var_tys,

@@ -6,7 +6,7 @@ use std::{
 pub(crate) mod symbols;
 pub(crate) mod types;
 
-use biwac_base::{InternedIdent, ModPath, PackageName};
+use biwac_base::{InternedIdent, ModPath, PackageId, PackageName};
 use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId};
 
 use crate::{
@@ -27,6 +27,8 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub pkg_name: PackageName,
+
+    pub packages: HashMap<PackageId, InternedIdent>,
 
     // 値名前空間 value namespace 内の一意なシンボルの集合
     // - 関数
@@ -56,9 +58,6 @@ pub struct Hir {
     //  }
     // ```
     pub special_ty_impls: HashMap<TyKind, SpecialTyImpl>,
-
-    // パッケージ内に存在するモジュールの集合
-    pub modules: HashSet<ModPath>,
 
     pub module_global_natives: HashMap<ModPath, Vec<NativeCode>>,
 
@@ -163,11 +162,11 @@ impl Hir {
         Self {
             deps_recorder: RefCell::new(DepsRecorder::new(pkg_name.clone())),
             pkg_name,
+            packages: HashMap::new(),
             vals,
             tys,
             ty_aliases,
             special_ty_impls: HashMap::new(),
-            modules: HashSet::new(),
             module_global_natives: HashMap::new(),
         }
     }

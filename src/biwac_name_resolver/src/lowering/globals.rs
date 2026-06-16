@@ -204,7 +204,7 @@ pub(super) fn lower_fn_def(
     hir.vals.insert(
         val_def_id,
         ValDefKind::Fn(Box::new(FnDef::new(
-            fn_def.id.span.clone(),
+            fn_def.id.clone().into(),
             signature,
             body,
             impl_genargs,
@@ -234,7 +234,7 @@ pub(super) fn lower_native_fn_def(
     hir.vals.insert(
         val_def_id,
         ValDefKind::Native(Box::new(NativeFnDef::new(
-            fn_def.id.span.clone(),
+            fn_def.id.clone().into(),
             fn_def.native_span.clone(),
             fn_def.span.clone(),
             fn_def.native.clone(),
@@ -285,9 +285,9 @@ fn lower_struct_def(
         .collect();
 
     let ty_content = TyDefKind::Struct(Box::new(StructDef {
+        name: struct_def.id.clone().into(),
         members,
         genargs,
-        struct_name_span: struct_def.id.span.clone(),
     }));
     let fallback = DefinedTyImpl {
         ty_content: ty_content.clone(),
@@ -330,9 +330,9 @@ fn lower_type_alias(
     hir.ty_aliases.insert(
         ty_def_id,
         TypeAliasDef {
+            name: alias_def.ident.clone().into(),
             genargs,
             right,
-            alias_name_span: alias_def.ident.span.clone(),
         },
     );
 }
@@ -355,7 +355,7 @@ fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlia
         .unwrap_or_default();
 
     let ty_content = TyDefKind::NativeTypeAlias(Box::new(NativeTypeAliasDef {
-        alias_name_span: native_def.ident.span.clone(),
+        name: native_def.ident.clone().into(),
         genargs,
         native: native_def.native.clone(),
         native_span: native_def.native_span.clone(),
@@ -406,7 +406,7 @@ pub(super) fn lower_impl_block(
             errors,
         );
         let hir_fn = FnDef::new(
-            fn_def.id.span.clone(),
+            fn_def.id.clone().into(),
             signature,
             body,
             impl_genargs.clone(),
@@ -444,7 +444,7 @@ pub(super) fn lower_impl_block(
             errors,
         );
         let hir_fn = FnDef::new(
-            method_def.id.span.clone(),
+            method_def.id.clone().into(),
             signature,
             body,
             impl_genargs.clone(),
@@ -469,7 +469,7 @@ pub(super) fn lower_impl_block(
             fn_def.span.clone(),
         );
         let hir_fn = NativeFnDef::new(
-            fn_def.id.span.clone(),
+            fn_def.id.clone().into(),
             fn_def.native_span.clone(),
             fn_def.span.clone(),
             fn_def.native.clone(),
@@ -500,7 +500,7 @@ pub(super) fn lower_impl_block(
             method_def.span.clone(),
         );
         let hir_fn = NativeFnDef::new(
-            method_def.id.span.clone(),
+            method_def.id.clone().into(),
             method_def.native_span.clone(),
             method_def.span.clone(),
             method_def.native.clone(),

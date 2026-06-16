@@ -25,7 +25,7 @@ pub enum AssocValDefKind {
 /// function and method
 #[derive(Debug, Clone)]
 pub struct FnDef {
-    pub fn_name_span: Span,
+    pub name: Ident,
 
     // signature
     pub signature: FnSignature,
@@ -83,12 +83,13 @@ pub struct FnBody {
 
 #[derive(Debug, Clone)]
 pub struct NativeFnDef {
+    pub name: Ident,
+
     // signature
     pub signature: FnSignature,
 
     pub native_body: String,
 
-    pub fn_name_span: Span,
     pub native_span: Span,
     pub span: Span,
 
@@ -118,22 +119,24 @@ pub enum TyDefKind {
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
+    pub name: Ident,
+
     pub members: HashMap<InternedIdent, Ty>,
     pub genargs: Vec<GenDefId>,
     // TODO: その他各種情報
-    pub struct_name_span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct TypeAliasDef {
+    pub name: Ident,
+
     pub genargs: Vec<GenDefId>,
     pub right: Ty,
-    pub alias_name_span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct NativeTypeAliasDef {
-    pub alias_name_span: Span,
+    pub name: Ident,
     pub genargs: Vec<Ident>,
     pub native: String,
     pub native_span: Span,
@@ -147,7 +150,7 @@ pub struct NativeCode {
 
 #[derive(Debug, Clone)]
 pub struct NovelSceneDef {
-    pub scene_name_span: Span,
+    pub name: Ident,
 
     // signature
     // ただし、
@@ -167,13 +170,13 @@ pub struct NovelSceneDef {
 
 impl FnDef {
     pub fn new(
-        fn_name_span: Span,
+        name: Ident,
         signature: FnSignature,
         body: FnBody,
         impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
-            fn_name_span,
+            name,
             signature,
             body,
             expr_tys: HashMap::new(),
@@ -185,7 +188,7 @@ impl FnDef {
 
 impl NativeFnDef {
     pub fn new(
-        fn_name_span: Span,
+        name: Ident,
         native_span: Span,
         span: Span,
         native_body: String,
@@ -193,9 +196,9 @@ impl NativeFnDef {
         impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
+            name,
             signature,
             native_body,
-            fn_name_span,
             native_span,
             span,
             impl_genargs,
@@ -213,9 +216,9 @@ impl From<&biwac_ast::NativeCode> for NativeCode {
 }
 
 impl NovelSceneDef {
-    pub fn new(scene_name_span: Span, signature: FnSignature, body: FnBody) -> Self {
+    pub fn new(name: Ident, signature: FnSignature, body: FnBody) -> Self {
         Self {
-            scene_name_span,
+            name,
             signature,
             body,
             expr_tys: HashMap::new(),

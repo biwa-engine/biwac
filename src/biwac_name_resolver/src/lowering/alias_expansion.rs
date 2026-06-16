@@ -79,7 +79,7 @@ fn dfs_detect(
         if in_progress.contains(&next) {
             errors.push(ResolveError::CyclingTypeAlias {
                 def_id: Box::new(next),
-                detected_position: Box::new(aliases[&next].alias_name_span.clone()),
+                detected_position: Box::new(aliases[&next].name.span.clone()),
             });
         } else if !visited.contains(&next) {
             dfs_detect(next, aliases, visited, in_progress, errors);

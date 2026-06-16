@@ -34,7 +34,7 @@ pub(super) fn lower_novel_scene(
     hir.vals.insert(
         val_def_id,
         ValDefKind::NovelScene(Box::new(NovelSceneDef::new(
-            scene_def.id.span.clone(),
+            scene_def.id.clone().into(),
             signature,
             body,
         ))),

@@ -16,7 +16,7 @@ use biwac_ast::ModAst;
 use biwac_base::{
     BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME, BIWA_EXTENSION, BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME,
     ErrorContext, ErrorHolder, IdentInterner, InternedIdent, MetadataHolder, ModId, ModPath,
-    ModSource, SourceHolder,
+    ModSource, PackageId, SourceHolder,
 };
 
 #[derive(Debug)]
@@ -163,6 +163,7 @@ fn read_module_files(srcs: &mut SourceHolder, module_tree: &ModuleTree) {
         ModSource {
             modu: module_tree.mod_path.clone(),
             src,
+            pkg_id: PackageId::SELF_PACKAGE,
         },
     );
 }

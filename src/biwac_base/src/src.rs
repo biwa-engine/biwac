@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ModPath;
+use crate::{ModPath, PackageId};
 
 #[derive(Debug, Default)]
 pub struct SourceHolder {
@@ -21,6 +21,7 @@ pub struct ModId(usize);
 
 #[derive(Debug)]
 pub struct ModSource {
+    pub pkg_id: PackageId,
     pub modu: ModPath,
     pub src: String,
 }

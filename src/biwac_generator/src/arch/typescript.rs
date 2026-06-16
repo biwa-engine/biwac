@@ -1,3 +1,4 @@
+mod context;
 mod expression;
 mod globals;
 mod statement;
@@ -5,12 +6,16 @@ mod types;
 
 use std::{cell::Cell, collections::HashMap};
 
+use biwac_base::{IdentInterner, SourceHolder};
 use biwac_hir::{AssocValDefKind, ExprId, Hir, Ty, TyDefKind, TyKind, ValDefKind};
-use biwac_span::{TyDefId, ValDefId, VarId};
+use biwac_span::{TyDefId, VarId};
 use oxc_allocator::FromIn;
 
-pub fn generate(hir: &Hir) -> String {
+use crate::arch::typescript::context::{AstBuildCtx, FnAstBuildCtx};
+
+pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> String {
     let allocator = oxc_allocator::Allocator::default();
+    let ctx = AstBuildCtx::new(hir, interner, srcs, &allocator);
 
     // ライフタイムが長い必要がある
     let native_tys = hir
@@ -38,62 +43,11 @@ pub fn generate(hir: &Hir) -> String {
 
     // 依存する外部パッケージのシンボルをimportとして展開
     body.extend(oxc_allocator::Vec::from_iter_in(
-        hir.deps_recorder.borrow().depended_tys().iter().map(|tid| {
-            oxc_ast::ast::Statement::ImportDeclaration(oxc_allocator::Box::new_in(
-                oxc_ast::ast::ImportDeclaration {
-                    span: span(),
-                    specifiers: Some(oxc_allocator::Vec::from_iter_in(
-                        [oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(
-                            oxc_allocator::Box::new_in(
-                                oxc_ast::ast::ImportSpecifier {
-                                    span: span(),
-                                    imported: oxc_ast::ast::ModuleExportName::IdentifierName(
-                                        oxc_ast::ast::IdentifierName {
-                                            span: span(),
-                                            name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&tid.mangled()),
-                                            ),
-                                        },
-                                    ),
-                                    local: oxc_ast::ast::BindingIdentifier {
-                                        span: span(),
-                                        name: oxc_span::Ident::new_const(
-                                            allocator.alloc_str(&tid.mangled()),
-                                        ),
-                                        symbol_id: Cell::new(None),
-                                    },
-                                    import_kind: oxc_ast::ast::ImportOrExportKind::Value,
-                                },
-                                &allocator,
-                            ),
-                        )],
-                        &allocator,
-                    )),
-                    source: oxc_ast::ast::StringLiteral {
-                        span: span(),
-                        value: oxc_ast::ast::Atom::from_in(
-                            &format!("./{}.ts", tid.pkg().name().value()),
-                            &allocator,
-                        ),
-                        raw: None,
-                        lone_surrogates: false,
-                    },
-                    phase: None,
-                    with_clause: None,
-                    import_kind: oxc_ast::ast::ImportOrExportKind::Type,
-                },
-                &allocator,
-            ))
-        }),
-        &allocator,
-    ));
-
-    body.extend(oxc_allocator::Vec::from_iter_in(
         hir.deps_recorder
             .borrow()
-            .depended_vals()
+            .depended_tys()
             .iter()
-            .map(|vid| {
+            .map(|def_id| {
                 oxc_ast::ast::Statement::ImportDeclaration(oxc_allocator::Box::new_in(
                     oxc_ast::ast::ImportDeclaration {
                         span: span(),
@@ -106,14 +60,15 @@ pub fn generate(hir: &Hir) -> String {
                                             oxc_ast::ast::IdentifierName {
                                                 span: span(),
                                                 name: oxc_span::Ident::new_const(
-                                                    allocator.alloc_str(&vid.mangled()),
+                                                    allocator
+                                                        .alloc_str(&ctx.get_type_mangled(def_id)),
                                                 ),
                                             },
                                         ),
                                         local: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&vid.mangled()),
+                                                allocator.alloc_str(&ctx.get_type_mangled(def_id)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -127,7 +82,63 @@ pub fn generate(hir: &Hir) -> String {
                         source: oxc_ast::ast::StringLiteral {
                             span: span(),
                             value: oxc_ast::ast::Atom::from_in(
-                                &format!("./{}.ts", vid.pkg().name().value()),
+                                &format!("./{}.ts", ctx.get_package_name_of_type(def_id)),
+                                &allocator,
+                            ),
+                            raw: None,
+                            lone_surrogates: false,
+                        },
+                        phase: None,
+                        with_clause: None,
+                        import_kind: oxc_ast::ast::ImportOrExportKind::Type,
+                    },
+                    &allocator,
+                ))
+            }),
+        &allocator,
+    ));
+
+    body.extend(oxc_allocator::Vec::from_iter_in(
+        hir.deps_recorder
+            .borrow()
+            .depended_vals()
+            .iter()
+            .map(|def_id| {
+                oxc_ast::ast::Statement::ImportDeclaration(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::ImportDeclaration {
+                        span: span(),
+                        specifiers: Some(oxc_allocator::Vec::from_iter_in(
+                            [oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(
+                                oxc_allocator::Box::new_in(
+                                    oxc_ast::ast::ImportSpecifier {
+                                        span: span(),
+                                        imported: oxc_ast::ast::ModuleExportName::IdentifierName(
+                                            oxc_ast::ast::IdentifierName {
+                                                span: span(),
+                                                name: oxc_span::Ident::new_const(
+                                                    allocator
+                                                        .alloc_str(&ctx.get_value_mangled(def_id)),
+                                                ),
+                                            },
+                                        ),
+                                        local: oxc_ast::ast::BindingIdentifier {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                allocator.alloc_str(&ctx.get_value_mangled(def_id)),
+                                            ),
+                                            symbol_id: Cell::new(None),
+                                        },
+                                        import_kind: oxc_ast::ast::ImportOrExportKind::Value,
+                                    },
+                                    &allocator,
+                                ),
+                            )],
+                            &allocator,
+                        )),
+                        source: oxc_ast::ast::StringLiteral {
+                            span: span(),
+                            value: oxc_ast::ast::Atom::from_in(
+                                &format!("./{}.ts", ctx.get_package_name_of_value(def_id)),
                                 &allocator,
                             ),
                             raw: None,
@@ -167,12 +178,10 @@ pub fn generate(hir: &Hir) -> String {
                     impl_list
                         .vals
                         .iter()
-                        .map(|(impl_valid, impl_)| match &impl_.val_content {
-                            AssocValDefKind::Fn(f) => f.as_oxc_global(
-                                &(&tid.clone(), val_name.as_str(), impl_valid),
-                                &allocator,
-                                hir,
-                            ),
+                        .map(|(def_id, impl_)| match &impl_.val_content {
+                            AssocValDefKind::Fn(f) => {
+                                f.as_oxc_global(&ctx.get_value_mangled(def_id), &allocator, hir)
+                            }
                             AssocValDefKind::NativeFn(f) => f.as_oxc_global(
                                 &(&tid.clone(), val_name.as_str(), impl_valid),
                                 &allocator,
@@ -220,77 +229,20 @@ fn span() -> oxc_span::Span {
     oxc_span::Span::new(0, 0)
 }
 
-struct FnAstBuildEnv<'a> {
-    pub(super) expr_tys: &'a HashMap<ExprId, Ty>,
-    pub(super) var_tys: &'a HashMap<VarId, Ty>,
-    pub(super) stmts: Vec<oxc_ast::ast::Statement<'a>>,
-}
-
-// struct TyInfo {
-//     pub(super) expr_tys: HashMap<ExprId, Ty>,
-// }
-
-trait AsOxcGlobal<'a, O, I: Mangled> {
-    fn as_oxc_global(&'a self, id: &I, allocator: &'a oxc_allocator::Allocator, hir: &Hir) -> O;
+trait AsOxcGlobal<'a, O> {
+    fn as_oxc_global(&'a self, id: String, ctx: &AstBuildCtx) -> O;
 }
 
 trait AsOxc<'a, O> {
-    fn as_oxc(
-        &'a self,
-        env: &mut FnAstBuildEnv<'a>,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
-    ) -> O;
+    fn as_oxc(&'a self, ctx: &AstBuildCtx<'a>, fctx: &mut FnAstBuildCtx<'a>) -> O;
 }
 
 trait IntoOxc<'a, O> {
-    fn into_oxc(self, allocator: &'a oxc_allocator::Allocator, hir: &Hir) -> O;
+    fn into_oxc(self, ctx: &'a AstBuildCtx) -> O;
 }
 
 trait Mangled {
     fn mangled(&self) -> String;
-}
-
-impl Mangled for TyDefId {
-    fn mangled(&self) -> String {
-        let mut result = String::from("_Z");
-
-        // ネストがある場合は N ... E で囲む
-        result.push('N');
-
-        let pkg_name_str = self.pkg().name().value();
-        result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
-
-        for q in self.quals() {
-            result.push_str(&format!("{}{}", q.len(), q));
-        }
-
-        result.push_str(&format!("{}{}", self.id().len(), self.id()));
-        result.push('E');
-
-        result
-    }
-}
-
-impl Mangled for ValDefId {
-    fn mangled(&self) -> String {
-        let mut result = String::from("_Z");
-
-        // ネストがある場合は N ... E で囲む
-        result.push('N');
-
-        let pkg_name_str = self.pkg().name().value();
-        result.push_str(&format!("{}{}", pkg_name_str.len(), pkg_name_str));
-
-        for q in self.quals() {
-            result.push_str(&format!("{}{}", q.len(), q));
-        }
-
-        result.push_str(&format!("{}{}", self.id().len(), self.id()));
-        result.push('E');
-
-        result
-    }
 }
 
 impl Mangled for (&TyKind, &str) {
