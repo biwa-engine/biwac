@@ -768,39 +768,6 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                     Ok(rty)
                 }
-                Callee::Assoc(assoc_callee) => {
-                    let callee_ty = self.tctx.hir.get_assoc_of_type(assoc_callee, &c.span)?;
-
-                    let args = c
-                        .args
-                        .iter()
-                        .map(|a| self.infer_expr(a))
-                        .collect::<Result<_, _>>()?;
-                    let rty = Ty::new(self.fresh(), primary.span().into());
-
-                    // NOTE: caller は genargs は 空 vec![] でよい
-                    // unify で計算する
-                    let mut cctx = CallCtx::default();
-                    let unified_ty = self.call_unify(
-                        callee_ty,
-                        Ty::new(
-                            TyKind::Fn(FnTy {
-                                args,
-                                rty: Box::new(rty),
-                                genargs: vec![],
-                            }),
-                            primary.span().into(),
-                        ),
-                        &mut cctx,
-                    )?;
-                    let unified_fty = if let TyKind::Fn(fty) = unified_ty {
-                        fty
-                    } else {
-                        panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
-                    };
-
-                    Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
-                }
             },
             Primary::MemberAccess(m) => {
                 let left = self.infer_expr(&m.left)?;
@@ -822,41 +789,43 @@ impl<'tctx> FnTyCtx<'tctx> {
                 let left = self.infer_expr(&m.left)?;
 
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
-                if let Some(callee_ty) = self.tctx.hir.get_method_of_type(&left.kind, &m.method)? {
-                    let args = m
-                        .args
-                        .iter()
-                        .map(|a| self.infer_expr(a))
-                        .collect::<TyResult<_>>()?;
+                let def_id = self.tctx.get_method_def_id(&left, &m.method)?;
+                let callee_ty = match self.tctx.get_value_definition(&def_id).unwrap() {
+                    // TODO: check method form or not
+                    ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),
+                    ValDefKind::Native(fn_def) => fn_def.signature.as_ty(),
+                    ValDefKind::ExternalFn(fn_signature) => fn_signature.as_ty(),
+                    ValDefKind::NovelScene(_) => panic!("compiler bug: unexpected novel scene"),
+                };
 
-                    let rty = Ty::new(self.fresh(), primary.span().into());
+                let args = m
+                    .args
+                    .iter()
+                    .map(|a| self.infer_expr(a))
+                    .collect::<TyResult<_>>()?;
 
-                    // NOTE: caller は genargs は 空 vec![] でよい
-                    // unify で計算する
-                    let mut cctx = CallCtx::default();
-                    let caller_ty = Ty::new(
-                        TyKind::Fn(FnTy {
-                            args,
-                            rty: Box::new(rty.clone()),
-                            genargs: vec![],
-                        }),
-                        primary.span().into(),
-                    );
-                    let unified_ty = self.call_unify(callee_ty, caller_ty, &mut cctx)?;
+                let rty = Ty::new(self.fresh(), primary.span().into());
 
-                    let unified_fty = if let TyKind::Fn(fty) = unified_ty {
-                        fty
-                    } else {
-                        panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
-                    };
+                // NOTE: caller は genargs は 空 vec![] でよい
+                // unify で計算する
+                let mut cctx = CallCtx::default();
+                let caller_ty = Ty::new(
+                    TyKind::Fn(FnTy {
+                        args,
+                        rty: Box::new(rty.clone()),
+                        genargs: vec![],
+                    }),
+                    primary.span().into(),
+                );
+                let unified_ty = self.call_unify(callee_ty, caller_ty, &mut cctx)?;
 
-                    Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
+                let unified_fty = if let TyKind::Fn(fty) = unified_ty {
+                    fty
                 } else {
-                    Err(TyError::MethodNotImplemented {
-                        ty: Box::new(left),
-                        method: Box::new(m.method.clone()),
-                    })
-                }
+                    panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
+                };
+
+                Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
             }
         }
     }
@@ -1080,6 +1049,7 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                 Ok(None)
             }
+            Stmt::NovelWrite(_) | Stmt::NovelWait(_) => todo!(),
         }
     }
 

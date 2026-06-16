@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use biwac_hir::{ExprId, Hir, InferTy, Ty, TyDefKind, TyKind, TyVar, ValDefKind};
+use biwac_hir::{ExprId, Hir, Ident, InferTy, Ty, TyDefKind, TyKind, TyVar, ValDefKind};
 use biwac_span::{TyDefId, ValDefId, VarId};
+
+use crate::TyError;
 
 #[derive(Debug, Clone)]
 pub struct TyCtx {
@@ -15,6 +17,49 @@ impl TyCtx {
 
     pub(super) fn get_value_definition(&self, def_id: &ValDefId) -> Option<&ValDefKind> {
         self.hir.vals.get(def_id)
+    }
+
+    pub(super) fn get_method_def_id(&self, ty: &Ty, method: &Ident) -> Result<ValDefId, TyError> {
+        match &ty.kind {
+            TyKind::Defined(defined_ty) => {
+                let assoc_list = self
+                    .hir
+                    .tys
+                    .get(&defined_ty.def_id)
+                    .unwrap()
+                    .vals
+                    .get(&method.id)
+                    .ok_or(TyError::MethodNotFound {
+                        ty: Box::new(ty.clone()),
+                        method: Box::new(method.clone()),
+                    })?;
+
+                let mut matched = Vec::new();
+                for (def_id, assoc) in &assoc_list.vals {
+                    if assoc.genargs.len() == defined_ty.genargs.len()
+                        && assoc
+                            .genargs
+                            .iter()
+                            .zip(defined_ty.genargs.iter())
+                            .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+                    {
+                        matched.push(*def_id);
+                    }
+                }
+
+                if matched.len() == 1 {
+                    Ok(matched[0])
+                } else if matched.is_empty() {
+                    Err(TyError::MethodNotFound {
+                        ty: Box::new(ty.clone()),
+                        method: Box::new(method.clone()),
+                    })
+                } else {
+                    panic!("compiler bug: duplicated associated implementation registered")
+                }
+            }
+            _ => todo!(),
+        }
     }
 }
 

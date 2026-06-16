@@ -28,10 +28,6 @@ pub enum TyError {
         ty: Box<Ty>,
         sliteral: Box<StructLiteral>,
     },
-    MethodNotImplemented {
-        ty: Box<Ty>,
-        method: Box<Ident>,
-    },
     StructNotHasMember {
         def_id: TyDefId,
         access: Box<MemberAccess>,
@@ -69,6 +65,11 @@ pub enum TyError {
     InsufficientContext,
     ReturnTypeRequired {
         rty: Box<Ty>, // 関数が要求する戻り値
+    },
+
+    MethodNotFound {
+        ty: Box<Ty>,
+        method: Box<Ident>,
     },
 
     HirError(HirError),
