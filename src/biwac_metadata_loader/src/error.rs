@@ -1,4 +1,4 @@
-use biwac_base::{BiwacError, PackageNameError, PackageVersionError};
+use biwac_base::{PackageNameError, PackageVersionError};
 use colored::Colorize;
 
 #[derive(Debug)]
@@ -13,8 +13,8 @@ pub enum PkgMetadataLoadError {
     PackageVersionError(PackageVersionError),
 }
 
-impl BiwacError for PkgMetadataLoadError {
-    fn print_error_message(&self, ctx: &biwac_base::ErrorContext) {
+impl PkgMetadataLoadError {
+    pub fn print_error_message(&self) {
         match self {
             Self::MetadataFileNotFound => {
                 println!(
@@ -39,10 +39,10 @@ impl BiwacError for PkgMetadataLoadError {
                 )
             }
             Self::PackageNameError(e) => {
-                e.print_error_message(ctx);
+                e.print_error_message();
             }
             Self::PackageVersionError(e) => {
-                e.print_error_message(ctx);
+                e.print_error_message();
             }
         }
     }

@@ -8,13 +8,12 @@ fn test1() {
     // 以下にbiwaのパッケージのディレクトリがあることを前提とする
 
     let mut srcs = biwac_base::SourceHolder::default();
-    let mut metadata = biwac_base::MetadataHolder::default();
     let mut interner = biwac_base::IdentInterner::default();
     let pkg_root_path = Path::new("../../assets/tests/test1");
     let pkg_name = interner.get_or_insert("test1");
 
-    biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.to_path_buf())
-        .unwrap();
+    let metadata =
+        biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
 
     let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
 

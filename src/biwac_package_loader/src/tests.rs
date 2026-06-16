@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use biwac_base::{IdentInterner, MetadataHolder, SourceHolder};
+use biwac_base::{IdentInterner, SourceHolder};
 
 use crate::{PackageKind, Pkg};
 
@@ -9,13 +9,12 @@ fn test1() {
     // assets/tests/test1
     // 以下にbiwaのパッケージのディレクトリがあることを前提とする
 
-    let mut metadata = MetadataHolder::default();
     let mut srcs = SourceHolder::default();
     let mut interner = IdentInterner::default();
     let pkg_root_path = Path::new("../../assets/tests/test1");
 
-    biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.to_path_buf())
-        .unwrap();
+    let metadata =
+        biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
 
     let pkg = Pkg::try_load(
         &metadata,

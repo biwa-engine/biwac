@@ -236,12 +236,7 @@ impl NameResolver {
         pkg_name: InternedIdent,
         pkg: Pkg,
     ) -> Result<Self, ResolveError> {
-        let pkg_package_name = metadata
-            .metadata
-            .as_ref()
-            .expect("metadata must be loaded before name resolution")
-            .name
-            .clone();
+        let pkg_package_name = metadata.metadata.name.clone();
         Ok(Self {
             pkg,
             pkg_name,

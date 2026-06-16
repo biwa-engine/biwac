@@ -4,37 +4,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use biwac_base::{
-    BiwacError, ErrorContext, IdentInterner, MetadataHolder, PackageName, SourceHolder,
-};
+use biwac_base::{IdentInterner, PackageName, SourceHolder};
 
 pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     println!("{}", "Compiling...".green().bold(),);
 
-    // 空のメタデータを作成
-    let mut metadata = MetadataHolder::default();
     // 空のソースファイルリストを作成
     let mut srcs = SourceHolder::default();
     // 空のインターンプールを生成
     let mut interner = IdentInterner::new();
 
-    biwac_metadata_loader::try_load_package_metadata(&mut metadata, pkg_root_path.clone())
+    let metadata = biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone())
         .map_err(|e| {
-            e.print_error_message(&ErrorContext {
-                metadata: &metadata,
-                srcs: &srcs,
-                interner: &interner,
-            });
+            e.print_error_message();
             biwac_base::print_error_finish_message(1);
         })?;
+    let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
 
-    let meta = metadata.metadata.as_ref().unwrap();
     println!(
         "Package: {} v{}.{}.{}",
-        meta.name.value(),
-        meta.version.major(),
-        meta.version.minor(),
-        meta.version.patch()
+        metadata.metadata.name.value(),
+        metadata.metadata.version.major(),
+        metadata.metadata.version.minor(),
+        metadata.metadata.version.patch()
     );
 
     // build directory preparation
@@ -66,18 +58,18 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     let deps =
         biwac_dependency_loader::try_load_dependencies(build_dir_path.to_path_buf()).unwrap();
 
-    let hir = biwac_name_resolver::ResolveCtx::new(&metadata, &deps)
+    let hir = biwac_name_resolver::NameResolver::new(&metadata, &deps, package_name_interned, pkg)
         .unwrap()
-        .try_resolve(pkg)
+        .try_resolve()
         .unwrap();
     // println!("pkg: {pkg:#?}");
 
     let hir = biwac_type_inferrer::TyCtx::new(hir).infer().unwrap();
     // println!("pkg: {pkg:#?}");
 
-    let bin = biwac_generator::arch::typescript::generate(&hir);
+    let bin = biwac_generator::arch::typescript::generate(&hir, &interner, &srcs);
 
-    write_bin(build_dir_path.to_path_buf(), &meta.name, &bin).unwrap();
+    write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
 
     println!("{}", "Finished!".green().bold(),);
 

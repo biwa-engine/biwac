@@ -1,12 +1,10 @@
 use colored::Colorize;
 use std::{fmt::Display, str::FromStr};
 
-use crate::{BiwacError, ErrorContext};
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MetadataHolder {
-    pub metadata: Option<PackageMetadata>, // 未初期化ならNone (one shot)
-    pub src: String,                       // metadata file string content
+    pub metadata: PackageMetadata,
+    pub src: String, // metadata file string content
 }
 
 #[derive(Debug)]
@@ -87,8 +85,8 @@ impl PackageName {
     }
 }
 
-impl BiwacError for PackageNameError {
-    fn print_error_message(&self, _ctx: &ErrorContext) {
+impl PackageNameError {
+    pub fn print_error_message(&self) {
         match self {
             Self::InvalidPackageName(name) => {
                 println!(
@@ -156,8 +154,8 @@ impl PackageVersion {
     }
 }
 
-impl BiwacError for PackageVersionError {
-    fn print_error_message(&self, _ctx: &ErrorContext) {
+impl PackageVersionError {
+    pub fn print_error_message(&self) {
         match self {
             Self::InvalidPackageVersion(version) => {
                 println!(
