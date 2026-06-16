@@ -790,6 +790,7 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
                 let def_id = self.tctx.get_method_def_id(&left, &m.method)?;
+                m.def_id.set(def_id).unwrap();
                 let callee_ty = match self.tctx.get_value_definition(&def_id).unwrap() {
                     // TODO: check method form or not
                     ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),

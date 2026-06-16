@@ -7,8 +7,8 @@ mod types;
 use std::{cell::Cell, collections::HashMap};
 
 use biwac_base::{IdentInterner, SourceHolder};
-use biwac_hir::{AssocValDefKind, ExprId, Hir, Ty, TyDefKind, TyKind, ValDefKind};
-use biwac_span::{TyDefId, VarId};
+use biwac_hir::{AssocValDefKind, Hir, TyDefKind, TyKind, ValDefKind};
+use biwac_span::{TyDefId, ValDefId};
 use oxc_allocator::FromIn;
 
 use crate::arch::typescript::context::{AstBuildCtx, FnAstBuildCtx};
@@ -38,7 +38,7 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
         .iter()
         .flat_map(|(_modpath, natives)| natives.iter())
     {
-        body.extend(native.into_oxc(&allocator, hir));
+        body.extend(native.into_oxc(&ctx));
     }
 
     // 依存する外部パッケージのシンボルをimportとして展開
@@ -157,10 +157,10 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
     body.extend(oxc_allocator::Vec::from_iter_in(
         hir.tys
             .iter()
-            .flat_map(|(tid, ty_impl)| match &ty_impl.ty_content {
+            .flat_map(|(def_id, ty_impl)| match &ty_impl.ty_content {
                 TyDefKind::Struct(struct_) => {
-                    if tid.pkg().is_self() {
-                        Some(struct_.as_oxc_global(tid, &allocator, hir))
+                    if def_id.pkg().is_self() {
+                        Some(struct_.as_oxc_global(ctx.get_type_mangled(def_id), &ctx))
                     } else {
                         // 外部パッケージの型定義は生成しないガード
                         None
@@ -168,43 +168,45 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
                 }
                 TyDefKind::NativeTypeAlias(_) => Some(
                     native_tys
-                        .get(tid)
+                        .get(def_id)
                         .unwrap()
-                        .as_oxc_global(tid, &allocator, hir),
+                        .as_oxc_global(ctx.get_type_mangled(def_id), &ctx),
                 ),
             })
-            .chain(hir.tys.iter().flat_map(|(tid, ty_impl)| {
-                ty_impl.vals.iter().flat_map(|(val_name, impl_list)| {
+            .chain(hir.tys.values().flat_map(|ty_impl| {
+                ty_impl.vals.values().flat_map(|impl_list| {
                     impl_list
                         .vals
                         .iter()
                         .map(|(def_id, impl_)| match &impl_.val_content {
                             AssocValDefKind::Fn(f) => {
-                                f.as_oxc_global(&ctx.get_value_mangled(def_id), &allocator, hir)
+                                f.as_oxc_global(ctx.get_value_mangled(def_id), &ctx)
                             }
-                            AssocValDefKind::NativeFn(f) => f.as_oxc_global(
-                                &(&tid.clone(), val_name.as_str(), impl_valid),
-                                &allocator,
-                                hir,
-                            ),
+                            AssocValDefKind::NativeFn(f) => {
+                                f.as_oxc_global(ctx.get_value_mangled(def_id), &ctx)
+                            }
                         })
                 })
             }))
-            .chain(hir.special_ty_impls.iter().flat_map(|(ty, ty_impl)| {
-                ty_impl.vals.iter().map(|(val_name, val)| match val {
-                    AssocValDefKind::Fn(f) => {
-                        f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
-                    }
-                    AssocValDefKind::NativeFn(f) => {
-                        f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
-                    }
-                })
-            }))
-            .chain(hir.vals.iter().flat_map(|(vid, val)| match val {
-                ValDefKind::Fn(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
-                ValDefKind::Native(f) => Some(f.as_oxc_global(vid, &allocator, hir)),
-                ValDefKind::NovelScene(n) => Some(n.as_oxc_global(vid, &allocator, hir)),
-                ValDefKind::ExternalFn(_) => None,
+            // TODO:
+            // .chain(hir.special_ty_impls.iter().flat_map(|(ty, ty_impl)| {
+            //     ty_impl.vals.iter().map(|(val_name, val)| match val {
+            //         AssocValDefKind::Fn(f) => {
+            //             f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
+            //         }
+            //         AssocValDefKind::NativeFn(f) => {
+            //             f.as_oxc_global(&(&ty.clone(), val_name.as_str()), &allocator, hir)
+            //         }
+            //     })
+            // }))
+            .chain(hir.vals.iter().flat_map(|(def_id, val)| {
+                let id = ctx.get_value_mangled(def_id);
+                match val {
+                    ValDefKind::Fn(f) => Some(f.as_oxc_global(id, &ctx)),
+                    ValDefKind::Native(f) => Some(f.as_oxc_global(id, &ctx)),
+                    ValDefKind::NovelScene(n) => Some(n.as_oxc_global(id, &ctx)),
+                    ValDefKind::ExternalFn(_) => None,
+                }
             })),
         &allocator,
     ));
@@ -230,11 +232,11 @@ fn span() -> oxc_span::Span {
 }
 
 trait AsOxcGlobal<'a, O> {
-    fn as_oxc_global(&'a self, id: String, ctx: &AstBuildCtx) -> O;
+    fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> O;
 }
 
 trait AsOxc<'a, O> {
-    fn as_oxc(&'a self, ctx: &AstBuildCtx<'a>, fctx: &mut FnAstBuildCtx<'a>) -> O;
+    fn as_oxc(&'a self, ctx: &'a AstBuildCtx<'a>, fctx: &mut FnAstBuildCtx<'a>) -> O;
 }
 
 trait IntoOxc<'a, O> {
@@ -242,11 +244,23 @@ trait IntoOxc<'a, O> {
 }
 
 trait Mangled {
-    fn mangled(&self) -> String;
+    fn mangled(&self, ctx: &AstBuildCtx) -> String;
+}
+
+impl Mangled for ValDefId {
+    fn mangled(&self, ctx: &AstBuildCtx) -> String {
+        ctx.get_value_mangled(self)
+    }
+}
+
+impl Mangled for TyDefId {
+    fn mangled(&self, ctx: &AstBuildCtx) -> String {
+        ctx.get_type_mangled(self)
+    }
 }
 
 impl Mangled for (&TyKind, &str) {
-    fn mangled(&self) -> String {
+    fn mangled(&self, _ctx: &AstBuildCtx) -> String {
         match self.0 {
             TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
             TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),

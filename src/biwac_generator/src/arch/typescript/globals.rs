@@ -1,18 +1,16 @@
 use std::cell::Cell;
 
-use biwac_hir::{
-    FnDef, Hir, NativeCode, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef,
-};
+use biwac_hir::{FnDef, NativeCode, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef};
 
 use biwac_span::VarId;
 use oxc_allocator::CloneIn;
 
 use crate::arch::typescript::{
-    AsOxc, AsOxcGlobal, AstBuildCtx, FnAstBuildEnv, IntoOxc, Mangled, span,
+    AsOxc, AsOxcGlobal, AstBuildCtx, FnAstBuildCtx, IntoOxc, Mangled, span,
 };
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
-    fn as_oxc_global(&'a self, id: String, ctx: &AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
+    fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
         oxc_ast::ast::Statement::TSTypeAliasDeclaration(oxc_allocator::Box::new_in(
             oxc_ast::ast::TSTypeAliasDeclaration {
                 span: span(),
@@ -33,7 +31,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                ctx.allocator.alloc_str(&gid.mangled()),
+                                                ctx.allocator.alloc_str(&gid.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -78,10 +76,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
                                             type_annotation: Some(oxc_allocator::Box::new_in(
                                                 oxc_ast::ast::TSTypeAnnotation {
                                                     span: span(),
-                                                    type_annotation: ty
-                                                        .kind
-                                                        .clone()
-                                                        .into_oxc(allocator, hir),
+                                                    type_annotation: ty.kind.clone().into_oxc(ctx),
                                                 },
                                                 &ctx.allocator,
                                             )),
@@ -105,28 +100,24 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
     fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
-        let mut env = FnAstBuildEnv {
-            expr_tys: &self.expr_tys,
-            var_tys: &self.var_tys,
-            stmts: vec![],
-        };
+        let mut fctx = FnAstBuildCtx::new(&self.expr_tys, &self.var_tys);
 
         let fn_body = &self.body;
 
         for stmt in &fn_body.stmts {
-            let oxc_stmt = stmt.as_oxc(&mut env, allocator, hir);
-            env.stmts.push(oxc_stmt);
+            let oxc_stmt = stmt.as_oxc(ctx, &mut fctx);
+            fctx.stmts.push(oxc_stmt);
         }
 
         if let Some(expr) = &fn_body.expr {
             let oxc_return = oxc_ast::ast::Statement::ReturnStatement(oxc_allocator::Box::new_in(
                 oxc_ast::ast::ReturnStatement {
                     span: span(),
-                    argument: Some(expr.as_oxc(&mut env, allocator, hir)),
+                    argument: Some(expr.as_oxc(ctx, &mut fctx)),
                 },
-                allocator,
+                &ctx.allocator,
             ));
-            env.stmts.push(oxc_return);
+            fctx.stmts.push(oxc_return);
         }
 
         oxc_ast::ast::Statement::FunctionDeclaration(oxc_allocator::Box::new_in(
@@ -134,7 +125,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                 span: span(),
                 id: Some(oxc_ast::ast::BindingIdentifier {
                     span: span(),
-                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    name: oxc_span::Ident::new_const(ctx.allocator.alloc_str(&id)),
                     symbol_id: Cell::new(None),
                 }),
                 generator: false,
@@ -155,28 +146,27 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                 .iter()
                                 .map(|ty| oxc_ast::ast::FormalParameter {
                                     span: span(),
-                                    decorators: oxc_allocator::Vec::new_in(allocator),
+                                    decorators: oxc_allocator::Vec::new_in(&ctx.allocator),
                                     pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
                                         oxc_allocator::Box::new_in(
                                             oxc_ast::ast::BindingIdentifier {
                                                 span: span(),
                                                 name: oxc_span::Ident::new_const(
-                                                    allocator
-                                                        .alloc_str(&VarId::SELF_VARIABLE.mangled()),
+                                                    &ctx.allocator.alloc_str(
+                                                        &VarId::SELF_VARIABLE.mangled(ctx),
+                                                    ),
                                                 ),
                                                 symbol_id: Cell::new(None),
                                             },
-                                            allocator,
+                                            &ctx.allocator,
                                         ),
                                     ),
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: ty
-                                                .kind
-                                                .as_oxc(&mut env, allocator, hir),
+                                            type_annotation: ty.kind.as_oxc(ctx, &mut fctx),
                                         },
-                                        allocator,
+                                        &ctx.allocator,
                                     )),
                                     initializer: None,
                                     optional: false,
@@ -188,28 +178,26 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                 .chain(self.signature.args.iter().map(|arg| {
                                     oxc_ast::ast::FormalParameter {
                                         span: span(),
-                                        decorators: oxc_allocator::Vec::new_in(allocator),
+                                        decorators: oxc_allocator::Vec::new_in(&ctx.allocator),
                                         pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
                                             oxc_allocator::Box::new_in(
                                                 oxc_ast::ast::BindingIdentifier {
                                                     span: span(),
                                                     name: oxc_span::Ident::new_const(
-                                                        allocator.alloc_str(&arg.var_id.mangled()),
+                                                        &ctx.allocator
+                                                            .alloc_str(&arg.var_id.mangled(ctx)),
                                                     ),
                                                     symbol_id: Cell::new(None),
                                                 },
-                                                allocator,
+                                                &ctx.allocator,
                                             ),
                                         ),
                                         type_annotation: Some(oxc_allocator::Box::new_in(
                                             oxc_ast::ast::TSTypeAnnotation {
                                                 span: span(),
-                                                type_annotation: arg
-                                                    .ty
-                                                    .kind
-                                                    .as_oxc(&mut env, allocator, hir),
+                                                type_annotation: arg.ty.kind.as_oxc(ctx, &mut fctx),
                                             },
-                                            allocator,
+                                            &ctx.allocator,
                                         )),
                                         initializer: None,
                                         optional: false,
@@ -218,19 +206,19 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                         r#override: false,
                                     }
                                 })),
-                            allocator,
+                            &ctx.allocator,
                         ),
                         rest: None,
                     },
-                    allocator,
+                    &ctx.allocator,
                 ),
                 body: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::FunctionBody {
                         span: span(),
-                        directives: oxc_allocator::Vec::new_in(allocator),
-                        statements: oxc_allocator::Vec::from_iter_in(env.stmts, allocator),
+                        directives: oxc_allocator::Vec::new_in(&ctx.allocator),
+                        statements: oxc_allocator::Vec::from_iter_in(fctx.stmts, &ctx.allocator),
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
                 type_parameters: if !self.signature.genargs.is_empty()
                     || !self.impl_genargs.is_empty()
@@ -246,7 +234,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&lgid.mangled()),
+                                                &ctx.allocator.alloc_str(&lgid.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -262,7 +250,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                             name: oxc_ast::ast::BindingIdentifier {
                                                 span: span(),
                                                 name: oxc_span::Ident::new_const(
-                                                    allocator.alloc_str(&lgid.mangled()),
+                                                    &ctx.allocator.alloc_str(&lgid.mangled(ctx)),
                                                 ),
                                                 symbol_id: Cell::new(None),
                                             },
@@ -273,10 +261,10 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                             r#const: false,
                                         }
                                     })),
-                                allocator,
+                                &ctx.allocator,
                             ),
                         },
-                        allocator,
+                        &ctx.allocator,
                     ))
                 } else {
                     None
@@ -284,35 +272,34 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(ctx),
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
             },
-            allocator,
+            &ctx.allocator,
         ))
     }
 }
 
-impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeFnDef {
-    fn as_oxc_global(
-        &'a self,
-        id: &I,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
-    ) -> oxc_ast::ast::Statement<'a> {
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
+    fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
         // TODO: そもそもnativeのターゲットがTSかチェック
 
         // TSをパースして取り込む
-        let ts = oxc_parser::Parser::new(allocator, &self.native_body, oxc_span::SourceType::ts())
-            .parse();
+        let ts = oxc_parser::Parser::new(
+            &ctx.allocator,
+            &self.native_body,
+            oxc_span::SourceType::ts(),
+        )
+        .parse();
 
         oxc_ast::ast::Statement::FunctionDeclaration(oxc_allocator::Box::new_in(
             oxc_ast::ast::Function {
                 span: span(),
                 id: Some(oxc_ast::ast::BindingIdentifier {
                     span: span(),
-                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    name: oxc_span::Ident::new_const(&ctx.allocator.alloc_str(&id)),
                     symbol_id: Cell::new(None),
                 }),
                 generator: false,
@@ -333,29 +320,26 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                                 .iter()
                                 .map(|arg| oxc_ast::ast::FormalParameter {
                                     span: span(),
-                                    decorators: oxc_allocator::Vec::new_in(allocator),
+                                    decorators: oxc_allocator::Vec::new_in(&ctx.allocator),
                                     pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
                                         oxc_allocator::Box::new_in(
                                             oxc_ast::ast::BindingIdentifier {
                                                 span: span(),
                                                 name: oxc_span::Ident::new_const(
-                                                    allocator.alloc_str(&arg.id.id),
+                                                    &ctx.allocator
+                                                        .alloc_str(ctx.str_of(&arg.id.id)),
                                                 ),
                                                 symbol_id: Cell::new(None),
                                             },
-                                            allocator,
+                                            &ctx.allocator,
                                         ),
                                     ),
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: arg
-                                                .ty
-                                                .kind
-                                                .clone()
-                                                .into_oxc(allocator, hir),
+                                            type_annotation: arg.ty.kind.clone().into_oxc(ctx),
                                         },
-                                        allocator,
+                                        &ctx.allocator,
                                     )),
                                     initializer: None,
                                     optional: false,
@@ -363,19 +347,19 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                                     readonly: false,
                                     r#override: false,
                                 }),
-                            allocator,
+                            &ctx.allocator,
                         ),
                         rest: None,
                     },
-                    allocator,
+                    &ctx.allocator,
                 ),
                 body: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::FunctionBody {
                         span: span(),
-                        directives: oxc_allocator::Vec::new_in(allocator),
+                        directives: oxc_allocator::Vec::new_in(&ctx.allocator),
                         statements: ts.program.body,
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
                 type_parameters: if !self.signature.genargs.is_empty()
                     || !self.impl_genargs.is_empty()
@@ -391,7 +375,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&lgid.mangled()),
+                                                &ctx.allocator.alloc_str(&lgid.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -407,7 +391,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                                             name: oxc_ast::ast::BindingIdentifier {
                                                 span: span(),
                                                 name: oxc_span::Ident::new_const(
-                                                    allocator.alloc_str(&lgid.mangled()),
+                                                    &ctx.allocator.alloc_str(&lgid.mangled(ctx)),
                                                 ),
                                                 symbol_id: Cell::new(None),
                                             },
@@ -418,10 +402,10 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                                             r#const: false,
                                         }
                                     })),
-                                allocator,
+                                &ctx.allocator,
                             ),
                         },
-                        allocator,
+                        &ctx.allocator,
                     ))
                 } else {
                     None
@@ -429,35 +413,29 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NativeF
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(ctx),
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
             },
-            allocator,
+            &ctx.allocator,
         ))
     }
 }
 
-impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I>
-    for (&'a NativeTypeAliasDef, String)
-{
-    fn as_oxc_global(
-        &'a self,
-        id: &I,
-        allocator: &'a oxc_allocator::Allocator,
-        _hir: &Hir,
-    ) -> oxc_ast::ast::Statement<'a> {
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for (&'a NativeTypeAliasDef, String) {
+    fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
         // TODO: そもそもnativeのターゲットがTSかチェック
 
         // let src = format!("type X = {};", &self.native);
 
         // TSをパースして取り込む
-        let ts = oxc_parser::Parser::new(allocator, &self.1, oxc_span::SourceType::ts()).parse();
+        let ts =
+            oxc_parser::Parser::new(&ctx.allocator, &self.1, oxc_span::SourceType::ts()).parse();
 
         let type_annotation = match &ts.program.body[0] {
             oxc_ast::ast::Statement::TSTypeAliasDeclaration(decl) => {
-                decl.type_annotation.clone_in(allocator)
+                decl.type_annotation.clone_in(&ctx.allocator)
             }
             _ => panic!("unexpected AST"),
         };
@@ -467,7 +445,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I>
                 span: span(),
                 id: oxc_ast::ast::BindingIdentifier {
                     span: span(),
-                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    name: oxc_span::Ident::new_const(&ctx.allocator.alloc_str(&id)),
                     symbol_id: Cell::new(None),
                 },
                 type_parameters: if !self.0.genargs.is_empty() {
@@ -483,7 +461,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I>
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&ident.id),
+                                                &ctx.allocator.alloc_str(ctx.str_of(&ident.id)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -493,10 +471,10 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I>
                                         out: false,
                                         r#const: false,
                                     }),
-                                allocator,
+                                &ctx.allocator,
                             ),
                         },
-                        allocator,
+                        &ctx.allocator,
                     ))
                 } else {
                     None
@@ -505,46 +483,33 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I>
                 scope_id: Cell::new(None),
                 declare: false,
             },
-            allocator,
+            &ctx.allocator,
         ))
     }
 }
 
 impl<'a> IntoOxc<'a, oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>>> for &'a NativeCode {
-    fn into_oxc(
-        self,
-        allocator: &'a oxc_allocator::Allocator,
-        _hir: &Hir,
-    ) -> oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>> {
+    fn into_oxc(self, ctx: &'a AstBuildCtx) -> oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>> {
         // TODO: そもそもnativeのターゲットがTSかチェック
 
         // TSをパースして取り込む
-        let ts =
-            oxc_parser::Parser::new(allocator, &self.native, oxc_span::SourceType::ts()).parse();
+        let ts = oxc_parser::Parser::new(&ctx.allocator, &self.native, oxc_span::SourceType::ts())
+            .parse();
         // TODO: ts.errors をチェック
 
         ts.program.body
     }
 }
 
-impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NovelSceneDef {
-    fn as_oxc_global(
-        &'a self,
-        id: &I,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
-    ) -> oxc_ast::ast::Statement<'a> {
-        let mut env = FnAstBuildEnv {
-            expr_tys: &self.expr_tys,
-            var_tys: &self.var_tys,
-            stmts: vec![],
-        };
+impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
+    fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
+        let mut fctx = FnAstBuildCtx::new(&self.expr_tys, &self.var_tys);
 
         let fn_body = &self.body;
 
         for stmt in &fn_body.stmts {
-            let oxc_stmt = stmt.as_oxc(&mut env, allocator, hir);
-            env.stmts.push(oxc_stmt);
+            let oxc_stmt = stmt.as_oxc(ctx, &mut fctx);
+            fctx.stmts.push(oxc_stmt);
         }
 
         oxc_ast::ast::Statement::FunctionDeclaration(oxc_allocator::Box::new_in(
@@ -552,7 +517,7 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NovelSc
                 span: span(),
                 id: Some(oxc_ast::ast::BindingIdentifier {
                     span: span(),
-                    name: oxc_span::Ident::new_const(allocator.alloc_str(&id.mangled())),
+                    name: oxc_span::Ident::new_const(&ctx.allocator.alloc_str(&id)),
                     symbol_id: Cell::new(None),
                 }),
                 generator: false,
@@ -573,28 +538,26 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NovelSc
                                 .iter()
                                 .map(|arg| oxc_ast::ast::FormalParameter {
                                     span: span(),
-                                    decorators: oxc_allocator::Vec::new_in(allocator),
+                                    decorators: oxc_allocator::Vec::new_in(&ctx.allocator),
                                     pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
                                         oxc_allocator::Box::new_in(
                                             oxc_ast::ast::BindingIdentifier {
                                                 span: span(),
                                                 name: oxc_span::Ident::new_const(
-                                                    allocator.alloc_str(&arg.var_id.mangled()),
+                                                    &ctx.allocator
+                                                        .alloc_str(&arg.var_id.mangled(ctx)),
                                                 ),
                                                 symbol_id: Cell::new(None),
                                             },
-                                            allocator,
+                                            &ctx.allocator,
                                         ),
                                     ),
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: arg
-                                                .ty
-                                                .kind
-                                                .as_oxc(&mut env, allocator, hir),
+                                            type_annotation: arg.ty.kind.as_oxc(ctx, &mut fctx),
                                         },
-                                        allocator,
+                                        &ctx.allocator,
                                     )),
                                     initializer: None,
                                     optional: false,
@@ -602,30 +565,30 @@ impl<'a, I: Mangled> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>, I> for NovelSc
                                     readonly: false,
                                     r#override: false,
                                 }),
-                            allocator,
+                            &ctx.allocator,
                         ),
                         rest: None,
                     },
-                    allocator,
+                    &ctx.allocator,
                 ),
                 body: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::FunctionBody {
                         span: span(),
-                        directives: oxc_allocator::Vec::new_in(allocator),
-                        statements: oxc_allocator::Vec::from_iter_in(env.stmts, allocator),
+                        directives: oxc_allocator::Vec::new_in(&ctx.allocator),
+                        statements: oxc_allocator::Vec::from_iter_in(fctx.stmts, &ctx.allocator),
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
                 type_parameters: None, // scene にはジェネリック型引数列はない
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.clone().into_oxc(allocator, hir),
+                        type_annotation: self.signature.rty.kind.clone().into_oxc(ctx),
                     },
-                    allocator,
+                    &ctx.allocator,
                 )),
             },
-            allocator,
+            &ctx.allocator,
         ))
     }
 }

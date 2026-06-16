@@ -11,12 +11,6 @@ pub(super) struct AstBuildCtx<'a> {
     pub(super) allocator: &'a oxc_allocator::Allocator,
 }
 
-pub(super) struct FnAstBuildCtx<'a> {
-    pub(super) expr_tys: &'a HashMap<ExprId, Ty>,
-    pub(super) var_tys: &'a HashMap<VarId, Ty>,
-    pub(super) stmts: Vec<oxc_ast::ast::Statement<'a>>,
-}
-
 impl<'a> AstBuildCtx<'a> {
     pub(super) fn new(
         hir: &'a Hir,
@@ -104,5 +98,21 @@ impl<'a> AstBuildCtx<'a> {
         result.push('E');
 
         result
+    }
+}
+
+pub(super) struct FnAstBuildCtx<'a> {
+    pub(super) expr_tys: &'a HashMap<ExprId, Ty>,
+    pub(super) var_tys: &'a HashMap<VarId, Ty>,
+    pub(super) stmts: Vec<oxc_ast::ast::Statement<'a>>,
+}
+
+impl<'a> FnAstBuildCtx<'a> {
+    pub(super) fn new(expr_tys: &'a HashMap<ExprId, Ty>, var_tys: &'a HashMap<VarId, Ty>) -> Self {
+        Self {
+            expr_tys,
+            var_tys,
+            stmts: Vec::new(),
+        }
     }
 }

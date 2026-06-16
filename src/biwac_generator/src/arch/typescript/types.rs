@@ -1,18 +1,18 @@
 use std::cell::Cell;
 
-use biwac_hir::{Hir, TyKind};
+use biwac_hir::TyKind;
 use biwac_span::{GenDefId, LocalGenDefId};
 
 use crate::arch::typescript::{AsOxc, IntoOxc, Mangled, span};
 
 impl Mangled for GenDefId {
-    fn mangled(&self) -> String {
+    fn mangled(&self, _ctx: &super::AstBuildCtx) -> String {
         format!("T{}", self.value())
     }
 }
 
 impl Mangled for LocalGenDefId {
-    fn mangled(&self) -> String {
+    fn mangled(&self, _ctx: &super::AstBuildCtx) -> String {
         format!("T{}", self.value())
     }
 }
@@ -20,27 +20,26 @@ impl Mangled for LocalGenDefId {
 impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
     fn as_oxc(
         &'a self,
-        _env: &mut super::FnAstBuildEnv<'a>,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
+        ctx: &'a super::AstBuildCtx<'a>,
+        _fctx: &mut super::FnAstBuildCtx<'a>,
     ) -> oxc_ast::ast::TSType<'a> {
         match self {
             Self::Infer(_) => panic!("compiler bug, type inferrence failed for type variable"),
             Self::Int => oxc_ast::ast::TSType::TSNumberKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSNumberKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Float => oxc_ast::ast::TSType::TSNumberKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSNumberKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Bool => oxc_ast::ast::TSType::TSBooleanKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSBooleanKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Void => oxc_ast::ast::TSType::TSVoidKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSVoidKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Defined(defined_ty) => {
                 oxc_ast::ast::TSType::TSTypeReference(oxc_allocator::Box::new_in(
@@ -51,11 +50,12 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&defined_ty.def_id.mangled()),
+                                        &ctx.allocator
+                                            .alloc_str(&ctx.get_type_mangled(&defined_ty.def_id)),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
-                                allocator,
+                                &ctx.allocator,
                             ),
                         ),
                         type_arguments: if !defined_ty.genargs.is_empty() {
@@ -66,17 +66,17 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                         defined_ty
                                             .genargs
                                             .iter()
-                                            .map(|ty| ty.kind.clone().into_oxc(allocator, hir)),
-                                        allocator,
+                                            .map(|ty| ty.kind.clone().into_oxc(ctx)),
+                                        &ctx.allocator,
                                     ),
                                 },
-                                allocator,
+                                &ctx.allocator,
                             ))
                         } else {
                             None
                         },
                     },
-                    allocator,
+                    &ctx.allocator,
                 ))
             }
             Self::Fn(_) => todo!(),
@@ -88,16 +88,16 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                             oxc_ast::ast::IdentifierReference {
                                 span: span(),
                                 name: oxc_span::Ident::new_const(
-                                    allocator.alloc_str(&gid.mangled()),
+                                    &ctx.allocator.alloc_str(&gid.mangled(ctx)),
                                 ),
                                 reference_id: Cell::new(None),
                             },
-                            allocator,
+                            &ctx.allocator,
                         ),
                     ),
                     type_arguments: None,
                 },
-                allocator,
+                &ctx.allocator,
             )),
             Self::LocGen(lgid) => {
                 oxc_ast::ast::TSType::TSTypeReference(oxc_allocator::Box::new_in(
@@ -108,16 +108,16 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&lgid.mangled()),
+                                        &ctx.allocator.alloc_str(&lgid.mangled(ctx)),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
-                                allocator,
+                                &ctx.allocator,
                             ),
                         ),
                         type_arguments: None,
                     },
-                    allocator,
+                    &ctx.allocator,
                 ))
             }
         }
@@ -125,28 +125,24 @@ impl<'a> AsOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
 }
 
 impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
-    fn into_oxc(
-        self,
-        allocator: &'a oxc_allocator::Allocator,
-        _hir: &Hir,
-    ) -> oxc_ast::ast::TSType<'a> {
+    fn into_oxc(self, ctx: &'a super::AstBuildCtx) -> oxc_ast::ast::TSType<'a> {
         match self {
             Self::Infer(_) => panic!("compiler bug, type inferrence failed for type variable"),
             Self::Int => oxc_ast::ast::TSType::TSNumberKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSNumberKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Float => oxc_ast::ast::TSType::TSNumberKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSNumberKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Bool => oxc_ast::ast::TSType::TSBooleanKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSBooleanKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Void => oxc_ast::ast::TSType::TSVoidKeyword(oxc_allocator::Box::new_in(
                 oxc_ast::ast::TSVoidKeyword { span: span() },
-                allocator,
+                &ctx.allocator,
             )),
             Self::Defined(defined_ty) => {
                 oxc_ast::ast::TSType::TSTypeReference(oxc_allocator::Box::new_in(
@@ -157,11 +153,12 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&defined_ty.def_id.mangled()),
+                                        &ctx.allocator
+                                            .alloc_str(&ctx.get_type_mangled(&defined_ty.def_id)),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
-                                allocator,
+                                &ctx.allocator,
                             ),
                         ),
                         type_arguments: if !defined_ty.genargs.is_empty() {
@@ -172,17 +169,17 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                         defined_ty
                                             .genargs
                                             .into_iter()
-                                            .map(|ty| ty.kind.into_oxc(allocator, _hir)),
-                                        allocator,
+                                            .map(|ty| ty.kind.into_oxc(ctx)),
+                                        &ctx.allocator,
                                     ),
                                 },
-                                allocator,
+                                &ctx.allocator,
                             ))
                         } else {
                             None
                         },
                     },
-                    allocator,
+                    &ctx.allocator,
                 ))
             }
             Self::Fn(_) => todo!(),
@@ -193,17 +190,18 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                         oxc_allocator::Box::new_in(
                             oxc_ast::ast::IdentifierReference {
                                 span: span(),
+
                                 name: oxc_span::Ident::new_const(
-                                    allocator.alloc_str(&gid.mangled()),
+                                    &ctx.allocator.alloc_str(&gid.mangled(ctx)),
                                 ),
                                 reference_id: Cell::new(None),
                             },
-                            allocator,
+                            &ctx.allocator,
                         ),
                     ),
                     type_arguments: None,
                 },
-                allocator,
+                &ctx.allocator,
             )),
             Self::LocGen(lgid) => {
                 oxc_ast::ast::TSType::TSTypeReference(oxc_allocator::Box::new_in(
@@ -214,16 +212,16 @@ impl<'a> IntoOxc<'a, oxc_ast::ast::TSType<'a>> for TyKind {
                                 oxc_ast::ast::IdentifierReference {
                                     span: span(),
                                     name: oxc_span::Ident::new_const(
-                                        allocator.alloc_str(&lgid.mangled()),
+                                        &ctx.allocator.alloc_str(&lgid.mangled(ctx)),
                                     ),
                                     reference_id: Cell::new(None),
                                 },
-                                allocator,
+                                &ctx.allocator,
                             ),
                         ),
                         type_arguments: None,
                     },
-                    allocator,
+                    &ctx.allocator,
                 ))
             }
         }

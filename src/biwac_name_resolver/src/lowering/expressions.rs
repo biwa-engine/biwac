@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::OnceCell, collections::HashMap};
 
 use biwac_span::{DefIdKind, VarId};
 
@@ -160,6 +160,7 @@ pub(crate) fn lower_primary(
                 method: Ident::from(mc.method.clone()),
                 args,
                 span: mc.span.clone(),
+                def_id: OnceCell::new(),
             }))
         }
 

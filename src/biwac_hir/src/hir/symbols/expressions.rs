@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
 use biwac_span::{Span, TyDefId, ValDefId, VarId};
 
@@ -143,6 +145,7 @@ pub struct MethodCall {
     pub method: Ident,
     pub args: Vec<Expr>,
     pub span: Span,
+    pub def_id: OnceCell<ValDefId>,
 }
 
 #[derive(Debug, Clone)]

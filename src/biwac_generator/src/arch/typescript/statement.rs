@@ -1,15 +1,14 @@
 use std::cell::Cell;
 
-use biwac_hir::{Hir, Primary, Stmt};
+use biwac_hir::{Primary, Stmt};
 
 use crate::arch::typescript::{AsOxc, Mangled, span};
 
 impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
     fn as_oxc(
         &'a self,
-        env: &mut super::FnAstBuildEnv<'a>,
-        allocator: &'a oxc_allocator::Allocator,
-        hir: &Hir,
+        ctx: &'a super::AstBuildCtx<'a>,
+        fctx: &mut super::FnAstBuildCtx<'a>,
     ) -> oxc_ast::ast::Statement<'a> {
         match &self {
             Stmt::VarDecl(var) => {
@@ -26,72 +25,72 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                         oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                allocator.alloc_str(&v.id.mangled()),
+                                               &ctx.allocator.alloc_str(&v.id.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
-                                        allocator,
+                                       &ctx.allocator,
                                     ),
                                 ),
                                 type_annotation: Some(oxc_allocator::Box::new_in(
                                     oxc_ast::ast::TSTypeAnnotation {
                                         span: span(),
-                                        type_annotation: env
+                                        type_annotation: fctx
                                             .var_tys
                                             .get(&v.id)
                                             .unwrap()
                                             .kind
-                                            .as_oxc(env, allocator, hir),
+                                            .as_oxc(ctx, fctx),
                                     },
-                                    allocator,
+                                   &ctx.allocator,
                                 )),
-                                init: Some(v.init.as_oxc(env, allocator, hir)),
+                                init: Some(v.init.as_oxc(ctx, fctx)),
                                 definite: false,
                             }),
-                            allocator,
+                           &ctx.allocator,
                         ),
                         declare: false,
                     },
-                    allocator,
+                   &ctx.allocator,
                 ))
             }
             Stmt::Return(ret) => {
                 oxc_ast::ast::Statement::ReturnStatement(oxc_allocator::Box::new_in(
                     oxc_ast::ast::ReturnStatement {
                         span: span(),
-                        argument: Some(ret.expr.as_oxc(env, allocator, hir)),
+                        argument: Some(ret.expr.as_oxc(ctx, fctx)),
                     },
-                    allocator,
+                   &ctx.allocator,
                 ))
             }
             Stmt::Expr(expr) => {
                 oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
                     oxc_ast::ast::ExpressionStatement {
                         span: span(),
-                        expression: expr.expr.as_oxc(env, allocator, hir),
+                        expression: expr.expr.as_oxc(ctx, fctx),
                     },
-                    allocator,
+                   &ctx.allocator,
                 ))
             }
             Stmt::If(if_stmt) => oxc_ast::ast::Statement::IfStatement(oxc_allocator::Box::new_in(
                 oxc_ast::ast::IfStatement{
                     span: span(),
-                    test: if_stmt.cond.as_oxc(env, allocator, hir),
+                    test: if_stmt.cond.as_oxc(ctx, fctx),
                     consequent: oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
                         oxc_ast::ast::BlockStatement{
                             span: span(),
                             body: oxc_allocator::Vec::from_iter_in(
-                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc(env, allocator, hir)), allocator),
+                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc(ctx, fctx)),&ctx.allocator),
                             scope_id: Cell::new(None),
-                        }, allocator)),
+                        },&ctx.allocator)),
                     alternate: if_stmt.els.as_ref().map(|els| oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
                         oxc_ast::ast::BlockStatement{
                             span: span(),
                             body: oxc_allocator::Vec::from_iter_in(
-                                els.stmts.iter().map(|stmt| stmt.as_oxc(env, allocator, hir)), allocator),
+                                els.stmts.iter().map(|stmt| stmt.as_oxc(ctx, fctx)),&ctx.allocator),
                             scope_id: Cell::new(None),
-                        }, allocator))),
-                }, allocator)),
+                        },&ctx.allocator))),
+                },&ctx.allocator)),
             Stmt::Block(_) => todo!(),
             Stmt::While(_) => todo!(),
             Stmt::Assign(assign) => {
@@ -110,10 +109,10 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                     oxc_ast::ast::IdentifierReference{
                                                         span: span(),
                                                         name: oxc_span::Ident::new_const(
-                                                            allocator.alloc_str(&v.id.mangled())
+                                                           &ctx.allocator.alloc_str(&v.id.mangled(ctx))
                                                         ),
                                                         reference_id: Cell::new(None)
-                                                    }, allocator)
+                                                    }, &ctx.allocator)
                                             )
                                         },
                                         Primary::MemberAccess(m) => {
@@ -121,14 +120,14 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                 oxc_allocator::Box::new_in(
                                                     oxc_ast::ast::StaticMemberExpression {
                                                         span: span(),
-                                                        object: m.left.as_oxc(env, allocator, hir),
+                                                        object: m.left.as_oxc(ctx, fctx),
                                                         property: oxc_ast::ast::IdentifierName {
                                                             span: span(),
-                                                            name: oxc_span::Ident::new_const(allocator.alloc(&m.member.id)),
+                                                            name: oxc_span::Ident::new_const(ctx.allocator.alloc(ctx.str_of(&m.member.id))),
                                                         },
                                                         optional: false,
                                                     },
-                                                    allocator
+                                                   &ctx.allocator
                                                 )
                                             )
                                         }
@@ -138,13 +137,13 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                             )
                                         }
                                     },
-                                    right: assign.src.as_oxc(env, allocator, hir),
+                                    right: assign.src.as_oxc(ctx, fctx),
                                 },
-                                allocator,
+                               &ctx.allocator,
                             ),
                         ),
                     },
-                    allocator,
+                   &ctx.allocator,
                 ))
             }
             Self::NovelWrite(_) |Self::NovelWait(_) => todo!()
