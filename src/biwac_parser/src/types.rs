@@ -185,7 +185,6 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 if let Some(t) = self.next() {
                     if let TkKind::MarkRBracket = t.kind {
                         let end = t.span.clone();
-                        self.next();
 
                         return Ok(Some(GenArgsDecl {
                             genargs: genargs
