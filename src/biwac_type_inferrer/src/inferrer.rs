@@ -101,7 +101,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     let args = fty1
                         .args
                         .into_iter()
-                        .zip(fty2.args.into_iter())
+                        .zip(fty2.args)
                         .map(|(a1, a2)| {
                             let a1_span = a1.span.clone();
                             Ok(Ty::new(self.unify(a1, a2)?, a1_span))
@@ -125,7 +125,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         let genargs = defined_ty1
                             .genargs
                             .into_iter()
-                            .zip(defined_ty2.genargs.into_iter())
+                            .zip(defined_ty2.genargs)
                             .map(|(g1, g2)| {
                                 let g1_span = g1.span.clone();
                                 Ok(Ty::new(self.unify(g1, g2)?, g1_span))
@@ -238,7 +238,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     let args = callee_fty
                         .args
                         .into_iter()
-                        .zip(caller_fty.args.into_iter())
+                        .zip(caller_fty.args)
                         .map(|(a1, a2)| {
                             let a2_span = a2.span.clone();
                             Ok(Ty::new(self.call_unify(a1, a2, ctx)?, a2_span))
@@ -269,7 +269,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         let genargs = defined_ty1
                             .genargs
                             .into_iter()
-                            .zip(defined_ty2.genargs.into_iter())
+                            .zip(defined_ty2.genargs)
                             .map(|(g1, g2)| {
                                 let g2_span = g2.span.clone();
                                 Ok(Ty::new(self.call_unify(g1, g2, ctx)?, g2_span))
@@ -370,7 +370,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     let args = fty1
                         .args
                         .into_iter()
-                        .zip(fty2.args.into_iter())
+                        .zip(fty2.args)
                         .map(|(a1, a2)| {
                             let a2_span = a2.span.clone();
                             Ok(Ty::new(self.defined_ty_unify(a1, a2, ctx)?, a2_span))
@@ -396,7 +396,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         let genargs = defined_ty1
                             .genargs
                             .into_iter()
-                            .zip(defined_ty2.genargs.into_iter())
+                            .zip(defined_ty2.genargs)
                             .map(|(g1, g2)| {
                                 let g1_span = g1.span.clone();
                                 Ok(Ty::new(self.defined_ty_unify(g1, g2, ctx)?, g1_span))
@@ -480,7 +480,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         // このチェックは要らない
                         match ty.kind {
                             TyKind::Infer(_) | TyKind::Int | TyKind::Float => {
-                                Ok(Ty::new(ty.kind, expr.span().into()))
+                                Ok(Ty::new(ty.kind, expr.span()))
                             }
                             _ => Err(TyError::InvalidUnaryOperationForType {
                                 ty: Box::new(ty),
@@ -508,7 +508,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // このチェックは要らない
                     match tk {
                         TyKind::Infer(_) | TyKind::Int | TyKind::Float => {
-                            Ok(Ty::new(tk, expr.span().into()))
+                            Ok(Ty::new(tk, expr.span()))
                         }
                         _ => Err(TyError::InvalidBinaryOperationForType {
                             ty: Box::new(Ty::new(tk, left.span)),
@@ -529,7 +529,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // このチェックは要らない
                     match tk {
                         TyKind::Infer(_) | TyKind::Int | TyKind::Float => {
-                            Ok(Ty::new(TyKind::Bool, expr.span().into()))
+                            Ok(Ty::new(TyKind::Bool, expr.span()))
                         }
                         _ => Err(TyError::InvalidBinaryOperationForType {
                             ty: Box::new(Ty::new(tk, left.span)),
@@ -550,7 +550,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     // このチェックは要らない
                     match tk {
                         TyKind::Infer(_) | TyKind::Int | TyKind::Float | TyKind::Bool => {
-                            Ok(Ty::new(TyKind::Bool, expr.span().into()))
+                            Ok(Ty::new(TyKind::Bool, expr.span()))
                         }
                         _ => Err(TyError::InvalidBinaryOperationForType {
                             ty: Box::new(Ty::new(tk, left.span)),
@@ -628,10 +628,10 @@ impl<'tctx> FnTyCtx<'tctx> {
                 if member_ids.is_empty() {
                     Ok(Ty::new(
                         TyKind::Defined(DefinedTy {
-                            def_id: def_id.clone(),
+                            def_id: *def_id,
                             genargs,
                         }),
-                        struct_literal.span.clone().into(),
+                        struct_literal.span.clone(),
                     ))
                 } else {
                     // メンバ名の集合に残されているものが、
@@ -647,16 +647,16 @@ impl<'tctx> FnTyCtx<'tctx> {
                 Err(TyError::InvalidStructLiteralOnAliasType {
                     ty: Box::new(Ty::new(
                         TyKind::Defined(DefinedTy {
-                            def_id: def_id.clone(),
+                            def_id: *def_id,
                             genargs: vec![
                                 Ty::new(
                                     TyKind::Infer(InferTy::Unknown),
-                                    struct_literal.span.clone().into() // 正しくないが、エラー表示には使われないため、良しとする
+                                    struct_literal.span.clone() // 正しくないが、エラー表示には使われないため、良しとする
                                 );
                                 alias.genargs.len()
                             ],
                         }),
-                        struct_literal.span.clone().into(),
+                        struct_literal.span.clone(),
                     )),
                     sliteral: Box::new(struct_literal.clone()),
                 })
@@ -667,9 +667,9 @@ impl<'tctx> FnTyCtx<'tctx> {
     fn infer_primary_expr(&mut self, primary: &Primary) -> TyResult<Ty> {
         match primary {
             Primary::Literal(l) => match l {
-                Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span().into())),
+                Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span())),
                 // Literal::Float(_) => Ok(Ty::Float),
-                Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span().into())),
+                Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span())),
                 Literal::String(_) => Ok(Ty::new(
                     TyKind::Defined(DefinedTy {
                         // def_id: TyDefId::new(
@@ -681,7 +681,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         def_id: todo!(),
                         genargs: Vec::new(),
                     }),
-                    primary.span().into(),
+                    primary.span(),
                 )),
                 Literal::Struct(struct_literal) => {
                     self.infer_struct_literal(&struct_literal.tid, struct_literal)
@@ -721,10 +721,10 @@ impl<'tctx> FnTyCtx<'tctx> {
                         Ty::new(
                             TyKind::Fn(FnTy {
                                 args,
-                                rty: Box::new(Ty::new(rty, primary.span().into())),
+                                rty: Box::new(Ty::new(rty, primary.span())),
                                 genargs: vec![],
                             }),
-                            primary.span().into(),
+                            primary.span(),
                         ),
                         &mut cctx,
                     )?;
@@ -748,7 +748,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         .iter()
                         .map(|a| self.infer_expr(a))
                         .collect::<Result<_, _>>()?;
-                    let rty = Ty::new(self.fresh(), primary.span().into());
+                    let rty = Ty::new(self.fresh(), primary.span());
 
                     // NOTE: caller は genargs は 空 vec![] でよい
                     // unify で計算する
@@ -761,7 +761,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                                 rty: Box::new(rty.clone()),
                                 genargs: vec![],
                             }),
-                            primary.span().into(),
+                            primary.span(),
                         ),
                         &mut cctx,
                     )?;
@@ -776,13 +776,13 @@ impl<'tctx> FnTyCtx<'tctx> {
             }
             Primary::IfExpr(if_expr) => {
                 let cond = self.infer_expr(&if_expr.cond)?;
-                self.unify(cond, Ty::new(TyKind::Bool, primary.span().into()))?;
+                self.unify(cond, Ty::new(TyKind::Bool, primary.span()))?;
 
                 // TODO: else if に対応
                 let then_ty = self.infer_block_expr(&if_expr.then)?;
                 let els_ty = self.infer_block_expr(&if_expr.els)?;
 
-                Ok(Ty::new(self.unify(then_ty, els_ty)?, primary.span().into()))
+                Ok(Ty::new(self.unify(then_ty, els_ty)?, primary.span()))
             }
             Primary::Block(block) => self.infer_block_expr(block),
             Primary::MethodCall(m) => {
@@ -804,7 +804,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                     .map(|a| self.infer_expr(a))
                     .collect::<TyResult<_>>()?;
 
-                let rty = Ty::new(self.fresh(), primary.span().into());
+                let rty = Ty::new(self.fresh(), primary.span());
 
                 // NOTE: caller は genargs は 空 vec![] でよい
                 // unify で計算する
@@ -815,7 +815,7 @@ impl<'tctx> FnTyCtx<'tctx> {
                         rty: Box::new(rty.clone()),
                         genargs: vec![],
                     }),
-                    primary.span().into(),
+                    primary.span(),
                 );
                 let unified_ty = self.call_unify(callee_ty, caller_ty, &mut cctx)?;
 
@@ -1020,7 +1020,7 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                 Ok(Some(Ty::new(
                     self.unify(rty, self.rty.clone())?,
-                    ret.expr.span().into(),
+                    ret.expr.span(),
                 )))
             }
             Stmt::Assign(ass) => {
@@ -1146,15 +1146,15 @@ impl TyCtx {
         // 普通の関数について
         // 型推論し、その結果を一時的に保持
         let mut fn_ty_infos = vec![];
-        for (vid, val) in &self.hir.vals {
+        for (def_id, val) in &self.hir.vals {
             match &val {
                 ValDefKind::Fn(f) => {
                     // 計算した型を記録
-                    fn_ty_infos.push((vid.clone(), self.infer_fn_body(&f.body, &f.signature)?));
+                    fn_ty_infos.push((*def_id, self.infer_fn_body(&f.body, &f.signature)?));
                 }
                 ValDefKind::NovelScene(n) => {
                     // 計算した型を記録
-                    fn_ty_infos.push((vid.clone(), self.infer_fn_body(&n.body, &n.signature)?));
+                    fn_ty_infos.push((*def_id, self.infer_fn_body(&n.body, &n.signature)?));
                 }
                 ValDefKind::Native(_) | ValDefKind::ExternalFn(_) => {
                     // nothing to do
@@ -1194,8 +1194,8 @@ impl TyCtx {
                         AssocValDefKind::Fn(f) => {
                             // 計算した型を記録
                             impl_fn_ty_infos.push((
-                                def_id.clone(),
-                                val_name.clone(),
+                                *def_id,
+                                *val_name,
                                 *impl_valid,
                                 self.infer_fn_body(&f.body, &f.signature)?,
                             ));
@@ -1244,7 +1244,7 @@ impl TyCtx {
                         // 計算した型を記録
                         special_impl_fn_ty_infos.push((
                             ty.clone(),
-                            val_name.clone(),
+                            *val_name,
                             self.infer_fn_body(&f.body, &f.signature)?,
                         ));
                     }
