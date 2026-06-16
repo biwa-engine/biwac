@@ -1,4 +1,3 @@
-mod error;
 pub mod hir;
 
 pub use crate::hir::{
@@ -21,7 +20,3 @@ pub use crate::hir::{
     },
     types::{DefinedTy, FnTy, InferTy, Ty, TyKind, TyVar},
 };
-
-pub use error::HirError;
-
-pub type HirResult<T> = Result<T, HirError>;

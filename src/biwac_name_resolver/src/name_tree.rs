@@ -48,7 +48,7 @@ pub struct AssocNameTree {
 
 #[derive(Debug, Clone)]
 pub struct AssocNameTreeItem {
-    pub impl_block_genargs: Vec<Ty>,
+    pub genargs: Vec<Ty>,
     pub kind: AssocNameTreeItemKind,
 }
 
@@ -68,9 +68,9 @@ impl AssocNameTree {
         match genargs {
             Some(genargs) => {
                 for item in &self.assocs {
-                    if item.impl_block_genargs.len() == genargs.len()
+                    if item.genargs.len() == genargs.len()
                         && item
-                            .impl_block_genargs
+                            .genargs
                             .iter()
                             .zip(genargs)
                             .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
@@ -97,21 +97,21 @@ impl AssocNameTree {
 
     pub(crate) fn register_assoc(
         &mut self,
-        impl_block_genargs: Vec<Ty>,
+        genargs: Vec<Ty>,
         assoc: AssocNameTreeItemKind,
     ) -> Result<(), ResolveError> {
         for item in &self.assocs {
-            if item.impl_block_genargs.len() == impl_block_genargs.len()
+            if item.genargs.len() == genargs.len()
                 && item
-                    .impl_block_genargs
+                    .genargs
                     .iter()
-                    .zip(&impl_block_genargs)
+                    .zip(&genargs)
                     .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
             {
                 return Err(ResolveError::DuplicatedAssociatedItemForGenArgs {
                     assoc1: item.clone(),
                     assoc2: AssocNameTreeItem {
-                        impl_block_genargs,
+                        genargs,
                         kind: assoc,
                     },
                 });
@@ -119,7 +119,7 @@ impl AssocNameTree {
         }
 
         self.assocs.push(AssocNameTreeItem {
-            impl_block_genargs,
+            genargs,
             kind: assoc,
         });
 

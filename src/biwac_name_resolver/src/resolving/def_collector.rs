@@ -430,7 +430,7 @@ impl DefCollector {
                             f.id.id,
                             AssocNameTree {
                                 assocs: vec![AssocNameTreeItem {
-                                    impl_block_genargs: match &self_ty {
+                                    genargs: match &self_ty {
                                         TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                         _ => Vec::new(),
                                     },
@@ -461,7 +461,7 @@ impl DefCollector {
                             m.id.id,
                             AssocNameTree {
                                 assocs: vec![AssocNameTreeItem {
-                                    impl_block_genargs: match &self_ty {
+                                    genargs: match &self_ty {
                                         TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                         _ => Vec::new(),
                                     },
@@ -475,73 +475,63 @@ impl DefCollector {
 
                 for f in &impl_block.native_assoc_fns {
                     let def_id = ValDefId::new(self.alloc_def_id());
-                    match ty_tree.children.borrow_mut().get_mut(&f.id.id) {
-                        Some(assocs) => {
-                            assocs
-                                .register_assoc(
-                                    match &self_ty {
+                    if let Some(assocs) = ty_tree.children.borrow_mut().get_mut(&f.id.id) {
+                        assocs
+                            .register_assoc(
+                                match &self_ty {
+                                    TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                                    _ => Vec::new(),
+                                },
+                                AssocNameTreeItemKind::Val(def_id),
+                            )
+                            .handle(&mut errors);
+
+                        f.def_id.set(def_id).unwrap();
+                    } else {
+                        ty_tree.children.borrow_mut().insert(
+                            f.id.id,
+                            AssocNameTree {
+                                assocs: vec![AssocNameTreeItem {
+                                    genargs: match &self_ty {
                                         TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                         _ => Vec::new(),
                                     },
-                                    AssocNameTreeItemKind::Val(def_id),
-                                )
-                                .handle(&mut errors);
-
-                            f.def_id.set(def_id).unwrap();
-                        }
-                        None => {
-                            ty_tree.children.borrow_mut().insert(
-                                f.id.id,
-                                AssocNameTree {
-                                    assocs: vec![AssocNameTreeItem {
-                                        impl_block_genargs: match &self_ty {
-                                            TyKind::Defined(defined_ty) => {
-                                                defined_ty.genargs.clone()
-                                            }
-                                            _ => Vec::new(),
-                                        },
-                                        kind: AssocNameTreeItemKind::Val(def_id),
-                                    }],
-                                },
-                            );
-                            f.def_id.set(def_id).unwrap();
-                        }
+                                    kind: AssocNameTreeItemKind::Val(def_id),
+                                }],
+                            },
+                        );
+                        f.def_id.set(def_id).unwrap();
                     }
                 }
 
                 for m in &impl_block.native_methods {
                     let def_id = ValDefId::new(self.alloc_def_id());
-                    match ty_tree.children.borrow_mut().get_mut(&m.id.id) {
-                        Some(assocs) => {
-                            assocs
-                                .register_assoc(
-                                    match &self_ty {
+                    if let Some(assocs) = ty_tree.children.borrow_mut().get_mut(&m.id.id) {
+                        assocs
+                            .register_assoc(
+                                match &self_ty {
+                                    TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                                    _ => Vec::new(),
+                                },
+                                AssocNameTreeItemKind::Val(def_id),
+                            )
+                            .handle(&mut errors);
+
+                        m.def_id.set(def_id).unwrap();
+                    } else {
+                        ty_tree.children.borrow_mut().insert(
+                            m.id.id,
+                            AssocNameTree {
+                                assocs: vec![AssocNameTreeItem {
+                                    genargs: match &self_ty {
                                         TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                         _ => Vec::new(),
                                     },
-                                    AssocNameTreeItemKind::Val(def_id),
-                                )
-                                .handle(&mut errors);
-
-                            m.def_id.set(def_id).unwrap();
-                        }
-                        None => {
-                            ty_tree.children.borrow_mut().insert(
-                                m.id.id,
-                                AssocNameTree {
-                                    assocs: vec![AssocNameTreeItem {
-                                        impl_block_genargs: match &self_ty {
-                                            TyKind::Defined(defined_ty) => {
-                                                defined_ty.genargs.clone()
-                                            }
-                                            _ => Vec::new(),
-                                        },
-                                        kind: AssocNameTreeItemKind::Val(def_id),
-                                    }],
-                                },
-                            );
-                            m.def_id.set(def_id).unwrap();
-                        }
+                                    kind: AssocNameTreeItemKind::Val(def_id),
+                                }],
+                            },
+                        );
+                        m.def_id.set(def_id).unwrap();
                     }
                 }
             }

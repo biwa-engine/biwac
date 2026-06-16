@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use biwac_base::{BiwacError, ErrorContext};
+
 use crate::NameResolver;
 
 #[test]
@@ -31,5 +33,14 @@ fn test1() {
     let _hir = NameResolver::new(&metadata, &deps, pkg_name, pkg)
         .unwrap()
         .try_resolve()
+        .map_err(|errors| {
+            for e in errors {
+                e.print_error_message(&ErrorContext {
+                    metadata: &metadata,
+                    srcs: &srcs,
+                    interner: &interner,
+                });
+            }
+        })
         .unwrap();
 }

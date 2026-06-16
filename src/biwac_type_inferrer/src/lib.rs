@@ -5,7 +5,7 @@ mod tests;
 
 use biwac_ast::{BinOperator, UnOperator};
 use biwac_base::InternedIdent;
-use biwac_hir::{AssignStmt, Expr, FnTy, HirError, Ident, MemberAccess, StructLiteral, Ty, TyVar};
+use biwac_hir::{AssignStmt, Expr, FnTy, Ident, MemberAccess, StructLiteral, Ty, TyVar};
 use biwac_span::TyDefId;
 
 pub use crate::inferrer::context::TyCtx;
@@ -71,14 +71,6 @@ pub enum TyError {
         ty: Box<Ty>,
         method: Box<Ident>,
     },
-
-    HirError(HirError),
 }
 
 pub type TyResult<T> = Result<T, TyError>;
-
-impl From<HirError> for TyError {
-    fn from(value: HirError) -> Self {
-        Self::HirError(value)
-    }
-}

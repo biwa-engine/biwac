@@ -12,3 +12,4 @@ biwac_metadata_loader = { path = "../biwac_metadata_loader"}
 biwac_package_loader = { path = "../biwac_package_loader"}
 biwac_dependency_loader = { path = "../biwac_dependency_loader"}
 biwac_hir = { path = "../biwac_hir"}
+ariadne.workspace = true
