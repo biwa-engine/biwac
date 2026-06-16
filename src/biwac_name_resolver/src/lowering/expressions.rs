@@ -102,6 +102,7 @@ pub(crate) fn lower_primary(
                         span,
                     })),
                     Ok(_) => {
+                        todo!();
                         errors.push(ResolveError::IdentNotFound {
                             ident: path.segments.last().unwrap().ident.clone(),
                         });
@@ -213,6 +214,7 @@ fn lower_callee(path: &biwac_ast::Path, errors: &mut Vec<ResolveError>) -> Optio
             None
         }
         Ok(_) => {
+            todo!();
             errors.push(ResolveError::IdentNotFound {
                 ident: path.segments.last().unwrap().ident.clone(),
             });

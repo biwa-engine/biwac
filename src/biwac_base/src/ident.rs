@@ -37,6 +37,7 @@ impl IdentInterner {
             None => {
                 let interned = InternedIdent(self.next_ident_id);
                 self.idents.insert(ident.to_string(), interned);
+                self.next_ident_id += 1;
                 interned
             }
         }
