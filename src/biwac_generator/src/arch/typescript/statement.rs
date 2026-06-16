@@ -2,10 +2,10 @@ use std::cell::Cell;
 
 use biwac_hir::{Primary, Stmt};
 
-use crate::arch::typescript::{AsOxc, Mangled, span};
+use crate::arch::typescript::{AsOxc, AsOxcLocal, Mangled, span};
 
-impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
-    fn as_oxc(
+impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
+    fn as_oxc_local(
         &'a self,
         ctx: &'a super::AstBuildCtx<'a>,
         fctx: &mut super::FnAstBuildCtx<'a>,
@@ -39,12 +39,11 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                             .var_tys
                                             .get(&v.id)
                                             .unwrap()
-                                            .kind
-                                            .as_oxc(ctx, fctx),
+                                            .kind.as_oxc(ctx)
                                     },
                                    &ctx.allocator,
                                 )),
-                                init: Some(v.init.as_oxc(ctx, fctx)),
+                                init: Some(v.init.as_oxc_local(ctx, fctx)),
                                 definite: false,
                             }),
                            &ctx.allocator,
@@ -58,7 +57,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                 oxc_ast::ast::Statement::ReturnStatement(oxc_allocator::Box::new_in(
                     oxc_ast::ast::ReturnStatement {
                         span: span(),
-                        argument: Some(ret.expr.as_oxc(ctx, fctx)),
+                        argument: Some(ret.expr.as_oxc_local(ctx, fctx)),
                     },
                    &ctx.allocator,
                 ))
@@ -67,7 +66,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                 oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
                     oxc_ast::ast::ExpressionStatement {
                         span: span(),
-                        expression: expr.expr.as_oxc(ctx, fctx),
+                        expression: expr.expr.as_oxc_local(ctx, fctx),
                     },
                    &ctx.allocator,
                 ))
@@ -75,19 +74,19 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
             Stmt::If(if_stmt) => oxc_ast::ast::Statement::IfStatement(oxc_allocator::Box::new_in(
                 oxc_ast::ast::IfStatement{
                     span: span(),
-                    test: if_stmt.cond.as_oxc(ctx, fctx),
+                    test: if_stmt.cond.as_oxc_local(ctx, fctx),
                     consequent: oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
                         oxc_ast::ast::BlockStatement{
                             span: span(),
                             body: oxc_allocator::Vec::from_iter_in(
-                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc(ctx, fctx)),&ctx.allocator),
+                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc_local(ctx, fctx)),&ctx.allocator),
                             scope_id: Cell::new(None),
                         },&ctx.allocator)),
                     alternate: if_stmt.els.as_ref().map(|els| oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
                         oxc_ast::ast::BlockStatement{
                             span: span(),
                             body: oxc_allocator::Vec::from_iter_in(
-                                els.stmts.iter().map(|stmt| stmt.as_oxc(ctx, fctx)),&ctx.allocator),
+                                els.stmts.iter().map(|stmt| stmt.as_oxc_local(ctx, fctx)),&ctx.allocator),
                             scope_id: Cell::new(None),
                         },&ctx.allocator))),
                 },&ctx.allocator)),
@@ -120,7 +119,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                 oxc_allocator::Box::new_in(
                                                     oxc_ast::ast::StaticMemberExpression {
                                                         span: span(),
-                                                        object: m.left.as_oxc(ctx, fctx),
+                                                        object: m.left.as_oxc_local(ctx, fctx),
                                                         property: oxc_ast::ast::IdentifierName {
                                                             span: span(),
                                                             name: oxc_span::Ident::new_const(ctx.allocator.alloc(ctx.str_of(&m.member.id))),
@@ -137,7 +136,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                             )
                                         }
                                     },
-                                    right: assign.src.as_oxc(ctx, fctx),
+                                    right: assign.src.as_oxc_local(ctx, fctx),
                                 },
                                &ctx.allocator,
                             ),

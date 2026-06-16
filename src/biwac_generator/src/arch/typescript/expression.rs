@@ -5,7 +5,7 @@ use biwac_hir::{BlockExpr, Callee, Expr, ExprVal, Literal, Primary, VarIdKind};
 use biwac_span::VarId;
 use oxc_allocator::FromIn;
 
-use crate::arch::typescript::{AsOxc, Mangled, span};
+use crate::arch::typescript::{AsOxcLocal, Mangled, span};
 
 impl Mangled for VarIdKind {
     fn mangled(&self, ctx: &super::AstBuildCtx) -> String {
@@ -22,8 +22,8 @@ impl Mangled for VarId {
     }
 }
 
-impl<'a> AsOxc<'a, oxc_span::Ident<'a>> for Callee {
-    fn as_oxc(
+impl<'a> AsOxcLocal<'a, oxc_span::Ident<'a>> for Callee {
+    fn as_oxc_local(
         &'a self,
         ctx: &'a super::AstBuildCtx<'a>,
         _fctx: &mut super::FnAstBuildCtx<'a>,
@@ -39,8 +39,8 @@ impl<'a> AsOxc<'a, oxc_span::Ident<'a>> for Callee {
     }
 }
 
-impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for BlockExpr {
-    fn as_oxc(
+impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for BlockExpr {
+    fn as_oxc_local(
         &'a self,
         ctx: &'a super::AstBuildCtx<'a>,
         fctx: &mut super::FnAstBuildCtx<'a>,
@@ -48,17 +48,17 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for BlockExpr {
         let oxc_stmts = self
             .stmts
             .iter()
-            .map(|stmt| stmt.as_oxc(ctx, fctx))
+            .map(|stmt| stmt.as_oxc_local(ctx, fctx))
             .collect::<Vec<_>>();
 
         fctx.stmts.extend(oxc_stmts);
 
-        self.expr.as_oxc(ctx, fctx)
+        self.expr.as_oxc_local(ctx, fctx)
     }
 }
 
-impl<'a> AsOxc<'a, oxc_ast::ast::UnaryOperator> for UnOperator {
-    fn as_oxc(
+impl<'a> AsOxcLocal<'a, oxc_ast::ast::UnaryOperator> for UnOperator {
+    fn as_oxc_local(
         &'a self,
         _ctx: &'a super::AstBuildCtx<'a>,
         _fctx: &mut super::FnAstBuildCtx<'a>,
@@ -69,8 +69,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::UnaryOperator> for UnOperator {
     }
 }
 
-impl<'a> AsOxc<'a, oxc_ast::ast::BinaryOperator> for BinOperator {
-    fn as_oxc(
+impl<'a> AsOxcLocal<'a, oxc_ast::ast::BinaryOperator> for BinOperator {
+    fn as_oxc_local(
         &'a self,
         _ctx: &'a super::AstBuildCtx<'a>,
         _fctx: &mut super::FnAstBuildCtx<'a>,
@@ -91,8 +91,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::BinaryOperator> for BinOperator {
     }
 }
 
-impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
-    fn as_oxc(
+impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
+    fn as_oxc_local(
         &'a self,
         ctx: &'a super::AstBuildCtx<'a>,
         fctx: &mut super::FnAstBuildCtx<'a>,
@@ -159,7 +159,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                                                 &ctx.allocator,
                                                             ),
                                                         ),
-                                                    value: expr.as_oxc(ctx, fctx),
+                                                    value: expr.as_oxc_local(ctx, fctx),
                                                     method: false,
                                                     shorthand: false,
                                                     computed: false,
@@ -196,7 +196,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                     oxc_ast::ast::IdentifierReference {
                                         span: span(),
                                         name: oxc_span::Ident::new_const(
-                                            &ctx.allocator.alloc_str(&c.callee.as_oxc(ctx, fctx)),
+                                            &ctx.allocator
+                                                .alloc_str(&c.callee.as_oxc_local(ctx, fctx)),
                                         ),
                                         reference_id: Cell::new(None),
                                     },
@@ -205,9 +206,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                             ),
                             type_arguments: None,
                             arguments: oxc_allocator::Vec::from_iter_in(
-                                c.args
-                                    .iter()
-                                    .map(|a| oxc_ast::ast::Argument::from(a.as_oxc(ctx, fctx))),
+                                c.args.iter().map(|a| {
+                                    oxc_ast::ast::Argument::from(a.as_oxc_local(ctx, fctx))
+                                }),
                                 &ctx.allocator,
                             ),
                             optional: false,
@@ -223,9 +224,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         oxc_ast::ast::Expression::ConditionalExpression(oxc_allocator::Box::new_in(
                             oxc_ast::ast::ConditionalExpression {
                                 span: span(),
-                                test: if_expr.cond.as_oxc(ctx, fctx),
-                                consequent: if_expr.then.as_oxc(ctx, fctx),
-                                alternate: if_expr.els.as_oxc(ctx, fctx),
+                                test: if_expr.cond.as_oxc_local(ctx, fctx),
+                                consequent: if_expr.then.as_oxc_local(ctx, fctx),
+                                alternate: if_expr.els.as_oxc_local(ctx, fctx),
                             },
                             &ctx.allocator,
                         ))
@@ -251,7 +252,7 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                     oxc_ast::ast::Expression::StaticMemberExpression(oxc_allocator::Box::new_in(
                         oxc_ast::ast::StaticMemberExpression {
                             span: span(),
-                            object: m.left.as_oxc(ctx, fctx),
+                            object: m.left.as_oxc_local(ctx, fctx),
                             property: oxc_ast::ast::IdentifierName {
                                 span: span(),
                                 name: oxc_span::Ident::new_const(
@@ -263,16 +264,17 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         &ctx.allocator,
                     ))
                 }
-                Primary::Block(block) => block.as_oxc(ctx, fctx),
+                Primary::Block(block) => block.as_oxc_local(ctx, fctx),
                 Primary::MethodCall(m) => {
                     let callee_mangled_name = ctx.get_value_mangled(m.def_id.get().unwrap());
 
                     // selfは第一引数として与える
-                    let mut args = vec![oxc_ast::ast::Argument::from(m.left.as_oxc(ctx, fctx))];
+                    let mut args =
+                        vec![oxc_ast::ast::Argument::from(m.left.as_oxc_local(ctx, fctx))];
                     args.extend(
                         m.args
                             .iter()
-                            .map(|a| oxc_ast::ast::Argument::from(a.as_oxc(ctx, fctx))),
+                            .map(|a| oxc_ast::ast::Argument::from(a.as_oxc_local(ctx, fctx))),
                     );
 
                     oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
@@ -303,8 +305,8 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 oxc_ast::ast::Expression::UnaryExpression(oxc_allocator::Box::new_in(
                     oxc_ast::ast::UnaryExpression {
                         span: span(),
-                        operator: u.op.as_oxc(ctx, fctx),
-                        argument: u.right.as_oxc(ctx, fctx),
+                        operator: u.op.as_oxc_local(ctx, fctx),
+                        argument: u.right.as_oxc_local(ctx, fctx),
                     },
                     &ctx.allocator,
                 ))
@@ -313,9 +315,9 @@ impl<'a> AsOxc<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 oxc_ast::ast::Expression::BinaryExpression(oxc_allocator::Box::new_in(
                     oxc_ast::ast::BinaryExpression {
                         span: span(),
-                        operator: b.op.as_oxc(ctx, fctx),
-                        left: b.left.as_oxc(ctx, fctx),
-                        right: b.right.as_oxc(ctx, fctx),
+                        operator: b.op.as_oxc_local(ctx, fctx),
+                        left: b.left.as_oxc_local(ctx, fctx),
+                        right: b.right.as_oxc_local(ctx, fctx),
                     },
                     &ctx.allocator,
                 ))

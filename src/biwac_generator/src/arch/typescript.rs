@@ -11,7 +11,10 @@ use biwac_hir::{AssocValDefKind, Hir, TyDefKind, TyKind, ValDefKind};
 use biwac_span::{TyDefId, ValDefId};
 use oxc_allocator::FromIn;
 
-use crate::arch::typescript::context::{AstBuildCtx, FnAstBuildCtx};
+use crate::arch::typescript::{
+    context::{AstBuildCtx, FnAstBuildCtx},
+    globals::native_code_as_oxc,
+};
 
 pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> String {
     let allocator = oxc_allocator::Allocator::default();
@@ -21,10 +24,10 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
     let native_tys = hir
         .tys
         .iter()
-        .flat_map(|(tid, ty_impl)| match &ty_impl.ty_content {
+        .flat_map(|(def_id, ty_impl)| match &ty_impl.ty_content {
             TyDefKind::Struct(_) => None,
             TyDefKind::NativeTypeAlias(native) => Some((
-                tid.clone(),
+                *def_id,
                 // 型単体をパースできないため、文にする
                 (&**native, format!("type X = {};", &native.native)),
             )),
@@ -35,10 +38,10 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
     let mut body = oxc_allocator::Vec::new_in(&allocator);
     for native in hir
         .module_global_natives
-        .iter()
-        .flat_map(|(_modpath, natives)| natives.iter())
+        .values()
+        .flat_map(|natives| natives.iter())
     {
-        body.extend(native.into_oxc(&ctx));
+        body.extend(native_code_as_oxc(native, &ctx));
     }
 
     // 依存する外部パッケージのシンボルをimportとして展開
@@ -235,12 +238,12 @@ trait AsOxcGlobal<'a, O> {
     fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> O;
 }
 
-trait AsOxc<'a, O> {
-    fn as_oxc(&'a self, ctx: &'a AstBuildCtx<'a>, fctx: &mut FnAstBuildCtx<'a>) -> O;
+trait AsOxcLocal<'a, O> {
+    fn as_oxc_local(&'a self, ctx: &'a AstBuildCtx<'a>, fctx: &mut FnAstBuildCtx<'a>) -> O;
 }
 
-trait IntoOxc<'a, O> {
-    fn into_oxc(self, ctx: &'a AstBuildCtx) -> O;
+trait AsOxc<'a, O> {
+    fn as_oxc(&'a self, ctx: &'a AstBuildCtx<'a>) -> O;
 }
 
 trait Mangled {

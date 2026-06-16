@@ -6,7 +6,7 @@ use biwac_span::VarId;
 use oxc_allocator::CloneIn;
 
 use crate::arch::typescript::{
-    AsOxc, AsOxcGlobal, AstBuildCtx, FnAstBuildCtx, IntoOxc, Mangled, span,
+    AsOxc, AsOxcGlobal, AsOxcLocal, AstBuildCtx, FnAstBuildCtx, Mangled, span,
 };
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
@@ -76,7 +76,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
                                             type_annotation: Some(oxc_allocator::Box::new_in(
                                                 oxc_ast::ast::TSTypeAnnotation {
                                                     span: span(),
-                                                    type_annotation: ty.kind.clone().into_oxc(ctx),
+                                                    type_annotation: ty.kind.as_oxc(ctx),
                                                 },
                                                 &ctx.allocator,
                                             )),
@@ -105,7 +105,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
         let fn_body = &self.body;
 
         for stmt in &fn_body.stmts {
-            let oxc_stmt = stmt.as_oxc(ctx, &mut fctx);
+            let oxc_stmt = stmt.as_oxc_local(ctx, &mut fctx);
             fctx.stmts.push(oxc_stmt);
         }
 
@@ -113,7 +113,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
             let oxc_return = oxc_ast::ast::Statement::ReturnStatement(oxc_allocator::Box::new_in(
                 oxc_ast::ast::ReturnStatement {
                     span: span(),
-                    argument: Some(expr.as_oxc(ctx, &mut fctx)),
+                    argument: Some(expr.as_oxc_local(ctx, &mut fctx)),
                 },
                 &ctx.allocator,
             ));
@@ -164,7 +164,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: ty.kind.as_oxc(ctx, &mut fctx),
+                                            type_annotation: ty.kind.as_oxc(ctx),
                                         },
                                         &ctx.allocator,
                                     )),
@@ -195,7 +195,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                         type_annotation: Some(oxc_allocator::Box::new_in(
                                             oxc_ast::ast::TSTypeAnnotation {
                                                 span: span(),
-                                                type_annotation: arg.ty.kind.as_oxc(ctx, &mut fctx),
+                                                type_annotation: arg.ty.kind.as_oxc(ctx),
                                             },
                                             &ctx.allocator,
                                         )),
@@ -272,7 +272,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.clone().into_oxc(ctx),
+                        type_annotation: self.signature.rty.kind.as_oxc(ctx),
                     },
                     &ctx.allocator,
                 )),
@@ -337,7 +337,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: arg.ty.kind.clone().into_oxc(ctx),
+                                            type_annotation: arg.ty.kind.as_oxc(ctx),
                                         },
                                         &ctx.allocator,
                                     )),
@@ -413,7 +413,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.clone().into_oxc(ctx),
+                        type_annotation: self.signature.rty.kind.as_oxc(ctx),
                     },
                     &ctx.allocator,
                 )),
@@ -488,17 +488,22 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for (&'a NativeTypeAliasDe
     }
 }
 
-impl<'a> IntoOxc<'a, oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>>> for &'a NativeCode {
-    fn into_oxc(self, ctx: &'a AstBuildCtx) -> oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>> {
-        // TODO: そもそもnativeのターゲットがTSかチェック
+pub(super) fn native_code_as_oxc<'a>(
+    native_code: &'a NativeCode,
+    ctx: &'a AstBuildCtx,
+) -> oxc_allocator::Vec<'a, oxc_ast::ast::Statement<'a>> {
+    // TODO: そもそもnativeのターゲットがTSかチェック
 
-        // TSをパースして取り込む
-        let ts = oxc_parser::Parser::new(&ctx.allocator, &self.native, oxc_span::SourceType::ts())
-            .parse();
-        // TODO: ts.errors をチェック
+    // TSをパースして取り込む
+    let ts = oxc_parser::Parser::new(
+        &ctx.allocator,
+        &native_code.native,
+        oxc_span::SourceType::ts(),
+    )
+    .parse();
+    // TODO: ts.errors をチェック
 
-        ts.program.body
-    }
+    ts.program.body
 }
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
@@ -508,7 +513,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
         let fn_body = &self.body;
 
         for stmt in &fn_body.stmts {
-            let oxc_stmt = stmt.as_oxc(ctx, &mut fctx);
+            let oxc_stmt = stmt.as_oxc_local(ctx, &mut fctx);
             fctx.stmts.push(oxc_stmt);
         }
 
@@ -555,7 +560,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: arg.ty.kind.as_oxc(ctx, &mut fctx),
+                                            type_annotation: arg.ty.kind.as_oxc(ctx),
                                         },
                                         &ctx.allocator,
                                     )),
@@ -583,7 +588,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.clone().into_oxc(ctx),
+                        type_annotation: self.signature.rty.kind.as_oxc(ctx),
                     },
                     &ctx.allocator,
                 )),
