@@ -108,7 +108,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 raw: None,
                                 base: oxc_ast::ast::NumberBase::Decimal,
                             },
-                            &ctx.allocator,
+                            ctx.allocator,
                         ))
                     }
                     Literal::Bool(b) => {
@@ -117,18 +117,18 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 span: span(),
                                 value: b.val,
                             },
-                            &ctx.allocator,
+                            ctx.allocator,
                         ))
                     }
                     Literal::String(s) => {
                         oxc_ast::ast::Expression::StringLiteral(oxc_allocator::Box::new_in(
                             oxc_ast::ast::StringLiteral {
                                 span: span(),
-                                value: oxc_ast::ast::Atom::from_in(&s.val, &ctx.allocator),
+                                value: oxc_ast::ast::Atom::from_in(&s.val, ctx.allocator),
                                 raw: None,
                                 lone_surrogates: false,
                             },
-                            &ctx.allocator,
+                            ctx.allocator,
                         ))
                     }
                     Literal::Struct(s) => {
@@ -149,14 +149,14 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                                                     span: span(),
                                                                     name:
                                                                         oxc_span::Ident::new_const(
-                                                                            &ctx.allocator.alloc(
+                                                                            ctx.allocator.alloc(
                                                                                 ctx.str_of(
                                                                                     &ident.id,
                                                                                 ),
                                                                             ),
                                                                         ),
                                                                 },
-                                                                &ctx.allocator,
+                                                                ctx.allocator,
                                                             ),
                                                         ),
                                                     value: expr.as_oxc_local(ctx, fctx),
@@ -164,14 +164,14 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                                     shorthand: false,
                                                     computed: false,
                                                 },
-                                                &ctx.allocator,
+                                                ctx.allocator,
                                             ),
                                         )
                                     }),
-                                    &ctx.allocator,
+                                    ctx.allocator,
                                 ),
                             },
-                            &ctx.allocator,
+                            ctx.allocator,
                         ))
                     }
                 },
@@ -180,11 +180,11 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         oxc_ast::ast::IdentifierReference {
                             span: span(),
                             name: oxc_span::Ident::new_const(
-                                &ctx.allocator.alloc_str(&v.id.mangled(ctx)),
+                                ctx.allocator.alloc_str(&v.id.mangled(ctx)),
                             ),
                             reference_id: Cell::new(None),
                         },
-                        &ctx.allocator,
+                        ctx.allocator,
                     ))
                 }
                 Primary::FnCall(c) => {
@@ -196,12 +196,12 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                     oxc_ast::ast::IdentifierReference {
                                         span: span(),
                                         name: oxc_span::Ident::new_const(
-                                            &ctx.allocator
+                                            ctx.allocator
                                                 .alloc_str(&c.callee.as_oxc_local(ctx, fctx)),
                                         ),
                                         reference_id: Cell::new(None),
                                     },
-                                    &ctx.allocator,
+                                    ctx.allocator,
                                 ),
                             ),
                             type_arguments: None,
@@ -209,12 +209,12 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 c.args.iter().map(|a| {
                                     oxc_ast::ast::Argument::from(a.as_oxc_local(ctx, fctx))
                                 }),
-                                &ctx.allocator,
+                                ctx.allocator,
                             ),
                             optional: false,
                             pure: false,
                         },
-                        &ctx.allocator,
+                        ctx.allocator,
                     ))
                 }
                 Primary::IfExpr(if_expr) => {
@@ -228,7 +228,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                 consequent: if_expr.then.as_oxc_local(ctx, fctx),
                                 alternate: if_expr.els.as_oxc_local(ctx, fctx),
                             },
-                            &ctx.allocator,
+                            ctx.allocator,
                         ))
                     } else {
                         // そうでない場合、
@@ -256,12 +256,12 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                             property: oxc_ast::ast::IdentifierName {
                                 span: span(),
                                 name: oxc_span::Ident::new_const(
-                                    &ctx.allocator.alloc(ctx.str_of(&m.member.id)),
+                                    ctx.allocator.alloc(ctx.str_of(&m.member.id)),
                                 ),
                             },
                             optional: false,
                         },
-                        &ctx.allocator,
+                        ctx.allocator,
                     ))
                 }
                 Primary::Block(block) => block.as_oxc_local(ctx, fctx),
@@ -285,19 +285,19 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                                     oxc_ast::ast::IdentifierReference {
                                         span: span(),
                                         name: oxc_span::Ident::new_const(
-                                            &ctx.allocator.alloc_str(&callee_mangled_name),
+                                            ctx.allocator.alloc_str(&callee_mangled_name),
                                         ),
                                         reference_id: Cell::new(None),
                                     },
-                                    &ctx.allocator,
+                                    ctx.allocator,
                                 ),
                             ),
                             type_arguments: None,
-                            arguments: oxc_allocator::Vec::from_iter_in(args, &ctx.allocator),
+                            arguments: oxc_allocator::Vec::from_iter_in(args, ctx.allocator),
                             optional: false,
                             pure: false,
                         },
-                        &ctx.allocator,
+                        ctx.allocator,
                     ))
                 }
             },
@@ -308,7 +308,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         operator: u.op.as_oxc_local(ctx, fctx),
                         argument: u.right.as_oxc_local(ctx, fctx),
                     },
-                    &ctx.allocator,
+                    ctx.allocator,
                 ))
             }
             ExprVal::Binary(b) => {
@@ -319,7 +319,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         left: b.left.as_oxc_local(ctx, fctx),
                         right: b.right.as_oxc_local(ctx, fctx),
                     },
-                    &ctx.allocator,
+                    ctx.allocator,
                 ))
             }
         }

@@ -25,11 +25,11 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                         oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                               &ctx.allocator.alloc_str(&v.id.mangled(ctx)),
+                                               ctx.allocator.alloc_str(&v.id.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
-                                       &ctx.allocator,
+                                       ctx.allocator,
                                     ),
                                 ),
                                 type_annotation: Some(oxc_allocator::Box::new_in(
@@ -41,16 +41,16 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                             .unwrap()
                                             .kind.as_oxc(ctx)
                                     },
-                                   &ctx.allocator,
+                                   ctx.allocator,
                                 )),
                                 init: Some(v.init.as_oxc_local(ctx, fctx)),
                                 definite: false,
                             }),
-                           &ctx.allocator,
+                           ctx.allocator,
                         ),
                         declare: false,
                     },
-                   &ctx.allocator,
+                   ctx.allocator,
                 ))
             }
             Stmt::Return(ret) => {
@@ -59,7 +59,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                         span: span(),
                         argument: Some(ret.expr.as_oxc_local(ctx, fctx)),
                     },
-                   &ctx.allocator,
+                   ctx.allocator,
                 ))
             }
             Stmt::Expr(expr) => {
@@ -68,7 +68,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                         span: span(),
                         expression: expr.expr.as_oxc_local(ctx, fctx),
                     },
-                   &ctx.allocator,
+                   ctx.allocator,
                 ))
             }
             Stmt::If(if_stmt) => oxc_ast::ast::Statement::IfStatement(oxc_allocator::Box::new_in(
@@ -79,17 +79,17 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                         oxc_ast::ast::BlockStatement{
                             span: span(),
                             body: oxc_allocator::Vec::from_iter_in(
-                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc_local(ctx, fctx)),&ctx.allocator),
+                                if_stmt.then.stmts.iter().map(|stmt| stmt.as_oxc_local(ctx, fctx)),ctx.allocator),
                             scope_id: Cell::new(None),
-                        },&ctx.allocator)),
+                        },ctx.allocator)),
                     alternate: if_stmt.els.as_ref().map(|els| oxc_ast::ast::Statement::BlockStatement(oxc_allocator::Box::new_in(
                         oxc_ast::ast::BlockStatement{
                             span: span(),
                             body: oxc_allocator::Vec::from_iter_in(
-                                els.stmts.iter().map(|stmt| stmt.as_oxc_local(ctx, fctx)),&ctx.allocator),
+                                els.stmts.iter().map(|stmt| stmt.as_oxc_local(ctx, fctx)),ctx.allocator),
                             scope_id: Cell::new(None),
-                        },&ctx.allocator))),
-                },&ctx.allocator)),
+                        },ctx.allocator))),
+                },ctx.allocator)),
             Stmt::Block(_) => todo!(),
             Stmt::While(_) => todo!(),
             Stmt::Assign(assign) => {
@@ -108,10 +108,10 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                     oxc_ast::ast::IdentifierReference{
                                                         span: span(),
                                                         name: oxc_span::Ident::new_const(
-                                                           &ctx.allocator.alloc_str(&v.id.mangled(ctx))
+                                                           ctx.allocator.alloc_str(&v.id.mangled(ctx))
                                                         ),
                                                         reference_id: Cell::new(None)
-                                                    }, &ctx.allocator)
+                                                    }, ctx.allocator)
                                             )
                                         },
                                         Primary::MemberAccess(m) => {
@@ -126,7 +126,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                                         },
                                                         optional: false,
                                                     },
-                                                   &ctx.allocator
+                                                   ctx.allocator
                                                 )
                                             )
                                         }
@@ -138,11 +138,11 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                                     },
                                     right: assign.src.as_oxc_local(ctx, fctx),
                                 },
-                               &ctx.allocator,
+                               ctx.allocator,
                             ),
                         ),
                     },
-                   &ctx.allocator,
+                   ctx.allocator,
                 ))
             }
             Self::NovelWrite(_) |Self::NovelWait(_) => todo!()
