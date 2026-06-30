@@ -143,6 +143,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "biwac_dependency_metadata"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+]
+
+[[package]]
 name = "biwac_driver"
 version = "0.1.0"
 dependencies = [

@@ -7,6 +7,7 @@ members = [
   "src/biwac_ast",
   "src/biwac_parser",
   "src/biwac_novel_parser",
+  "src/biwac_dependency_metadata",
   "src/biwac_metadata_loader",
   "src/biwac_package_loader",
   "src/biwac_hir",
