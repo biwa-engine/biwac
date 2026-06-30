@@ -107,6 +107,11 @@ impl LazyDiskVec {
         Self { bytes, cache }
     }
 
+    /// HIR から構築する際に使用。bytes は encode_file() 呼び出しまで不要なため空でよい。
+    pub fn from_cache(bytes: Vec<u8>, cache: Vec<OnceLock<SymbolBody>>) -> Self {
+        Self { bytes, cache }
+    }
+
     /// sym_idx 番目のシンボルのボディを取得する。
     /// 初回呼び出し時のみデコードを行い、以降はキャッシュを返す。
     pub fn get(

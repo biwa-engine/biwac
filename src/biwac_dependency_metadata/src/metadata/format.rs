@@ -66,7 +66,9 @@ impl TryFrom<u32> for DiskSymbolKind {
 #[repr(u32)]
 pub enum DiskVisibility {
     Private = 0,
-    Public = 1,
+    SuperModulePublic = 1, // pub(super)
+    PackagePublic = 2,     // pub(package)
+    Public = 3,            // pub
 }
 
 impl TryFrom<u32> for DiskVisibility {
@@ -74,7 +76,9 @@ impl TryFrom<u32> for DiskVisibility {
     fn try_from(v: u32) -> Result<Self, Self::Error> {
         match v {
             0 => Ok(Self::Private),
-            1 => Ok(Self::Public),
+            1 => Ok(Self::SuperModulePublic),
+            2 => Ok(Self::PackagePublic),
+            3 => Ok(Self::Public),
             _ => Err(DepMetadataError::UnknownVisibility(v)),
         }
     }
