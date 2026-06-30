@@ -81,6 +81,10 @@ impl<'ctx, C: ResolveCtx> ResolveCtx for FnResolveCtx<'ctx, C> {
             self.ctx.resolve_path(path)
         }
     }
+
+    fn opt_self_ty(&self) -> Option<biwac_hir::TyKind> {
+        self.ctx.opt_self_ty()
+    }
 }
 
 impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
@@ -175,6 +179,6 @@ impl<'ctx, C: ResolveCtx> LocalResolveCtx for FnResolveCtx<'ctx, C> {
 
     fn resolve_self_var(&self, span: &Span) -> Result<biwac_span::VarId, ResolveError> {
         self.self_var
-            .ok_or(ResolveError::UnexpectedSelfType { span: span.clone() })
+            .ok_or(ResolveError::UnexpectedSelfVariable { span: span.clone() })
     }
 }

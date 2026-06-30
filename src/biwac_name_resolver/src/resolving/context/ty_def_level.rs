@@ -1,8 +1,9 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use biwac_ast::symbols::globals::GenArgsDecl;
+use biwac_ast::{AbsolutePathHeader, symbols::globals::GenArgsDecl};
 use biwac_base::InternedIdent;
-use biwac_span::{DefIdKind, GenDefId};
+use biwac_hir::{DefinedTy, Ty, TyKind};
+use biwac_span::{DefIdKind, GenDefId, Span, TyDefId};
 
 use crate::{
     ResolveError,
@@ -13,6 +14,8 @@ use crate::{
 pub struct TyDefResolveCtx<'ctx, C: ResolveCtx> {
     ctx: &'ctx C,
     genargs: HashMap<InternedIdent, GenDefId>,
+    genarg_list: Vec<(GenDefId, Span)>,
+    def_id: TyDefId,
 }
 
 impl<'ctx, C: ResolveCtx> ResolveCtx for TyDefResolveCtx<'ctx, C> {
@@ -27,9 +30,26 @@ impl<'ctx, C: ResolveCtx> ResolveCtx for TyDefResolveCtx<'ctx, C> {
                 .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
                 .unwrap();
             Ok(())
+        } else if let Some(AbsolutePathHeader::SelfTyp(self_typ)) = &path.abs_header {
+            if self_typ.resolved_id.get().is_none() {
+                self_typ.resolved_id.set(self.def_id).unwrap();
+            }
+
+            Ok(())
         } else {
             self.ctx.resolve_path(path)
         }
+    }
+
+    fn opt_self_ty(&self) -> Option<biwac_hir::TyKind> {
+        Some(TyKind::Defined(DefinedTy {
+            def_id: self.def_id,
+            genargs: self
+                .genarg_list
+                .iter()
+                .map(|(def_id, span)| Ty::new(TyKind::Gen(*def_id), span.clone()))
+                .collect(),
+        }))
     }
 }
 
@@ -38,8 +58,10 @@ impl<'ctx, C: ResolveCtx> TyDefResolveCtx<'ctx, C> {
         ctx: &'ctx C,
         genargs_decl: &Option<GenArgsDecl<GenDefId>>,
         def_collector: &mut DefCollector,
+        def_id: TyDefId,
     ) -> Result<Self, Vec<ResolveError>> {
         let mut genargs = HashMap::new();
+        let mut genarg_list = Vec::new();
         let mut errors = Vec::new();
 
         if let Some(genargs_decl) = genargs_decl {
@@ -56,6 +78,7 @@ impl<'ctx, C: ResolveCtx> TyDefResolveCtx<'ctx, C> {
                 match genargs.entry(item.id.id) {
                     Entry::Vacant(e) => {
                         e.insert(def_id);
+                        genarg_list.push((def_id, item.id.span.clone()));
                     }
                     Entry::Occupied(e) => {
                         errors.push(ResolveError::DuplicatedGenName {
@@ -69,7 +92,12 @@ impl<'ctx, C: ResolveCtx> TyDefResolveCtx<'ctx, C> {
         }
 
         if errors.is_empty() {
-            Ok(Self { ctx, genargs })
+            Ok(Self {
+                ctx,
+                genargs,
+                genarg_list,
+                def_id,
+            })
         } else {
             Err(errors)
         }

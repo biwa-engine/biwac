@@ -1,16 +1,39 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use biwac_ast::PathSegment;
 use biwac_base::{InternedIdent, ModId, PackageId};
+use biwac_dependency_metadata::{DepMetadata, PackageModuleView};
 use biwac_hir::Ty;
 use biwac_span::{TyDefId, ValDefId};
 
 use crate::ResolveError;
 
-#[derive(Debug)]
 pub struct NameTree {
     pub(crate) self_pkg_name: InternedIdent,
+    /// 自パッケージのみ保持 (型付きアクセス・ミューテーション用)。
+    /// 外部パッケージは ext_pkg_views に格納する。
     pub(crate) packages: HashMap<InternedIdent, PackageNameTree>,
+    /// 外部パッケージの lazy モジュール view (PackageModuleView トレイト経由)。
+    pub(crate) ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>>,
+    /// PackageId → DepMetadata (型情報の lazy アクセス用)。
+    pub(crate) ext_pkg_data: HashMap<PackageId, Arc<DepMetadata>>,
+}
+
+impl std::fmt::Debug for NameTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NameTree")
+            .field("self_pkg_name", &self.self_pkg_name)
+            .field("packages", &self.packages)
+            .field(
+                "ext_pkg_views",
+                &self.ext_pkg_views.keys().collect::<Vec<_>>(),
+            )
+            .field(
+                "ext_pkg_data",
+                &self.ext_pkg_data.keys().collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug)]

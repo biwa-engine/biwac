@@ -6,7 +6,8 @@ use biwac_span::{DefIdKind, TyDefId};
 
 use crate::{
     ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, TyNameTree,
-    name_tree::AssocNameTreeItemKind, resolving::context::ResolveCtx,
+    lowering::def_id_kind_from_path, name_tree::AssocNameTreeItemKind,
+    resolving::context::ResolveCtx,
 };
 
 #[derive(Debug)]
@@ -101,9 +102,9 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                 resolve_path_in_module(path, 0, &self_package.root_module_tree, self.ty_index)
             }
 
-            Some(AbsolutePathHeader::SelfTyp(span)) => {
-                Err(ResolveError::UnexpectedSelfType { span: span.clone() })
-            }
+            Some(AbsolutePathHeader::SelfTyp(self_typ)) => Err(ResolveError::UnexpectedSelfType {
+                span: self_typ.span.clone(),
+            }),
 
             None => {
                 let first_segment_ident = &path.segments[0].ident;
@@ -112,32 +113,61 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                     resolve_path_in_module(path, 0, self.module, self.ty_index)
                 } else {
                     match self.imports.get(&first_segment_ident.id) {
-                        Some(import_path) => self.resolve_path(import_path),
-                        None => {
-                            let package =
-                                match self.global_tree.packages.get(&first_segment_ident.id) {
-                                    Some(package) => package,
-                                    None => {
-                                        path.segments[0]
-                                            .resolved_id
-                                            .set(PathSegmentResolution::Err)
-                                            .unwrap();
-                                        return Err(ResolveError::IdentNotFound {
-                                            ident: first_segment_ident.clone(),
-                                        });
-                                    }
-                                };
+                        Some(import_path) => match self.resolve_path(import_path) {
+                            Ok(()) => {
+                                path.segments[0]
+                                    .resolved_id
+                                    .set(PathSegmentResolution::Ok(
+                                        def_id_kind_from_path(import_path).unwrap(),
+                                    ))
+                                    .unwrap();
 
-                            if path.segments.len() == 1 {
-                                // Returns Some(PackageId) — not yet supported.
-                                todo!()
-                            } else {
-                                resolve_path_in_module(
-                                    path,
-                                    1,
-                                    &package.root_module_tree,
-                                    self.ty_index,
+                                // TODO:
+                                // import されているシンボルの mod tree を取得し、
+                                // resolve_path_in_module(path, 1, ...)
+                                resolve_path_in_module(path, 1, module, self.ty_index)
+                            }
+                            Err(e) => {
+                                path.segments[0]
+                                    .resolved_id
+                                    .set(PathSegmentResolution::Err)
+                                    .unwrap();
+
+                                Err(e)
+                            }
+                        },
+                        None => {
+                            if let Some(package) =
+                                self.global_tree.packages.get(&first_segment_ident.id)
+                            {
+                                if path.segments.len() == 1 {
+                                    // Returns Some(PackageId) — not yet supported.
+                                    todo!()
+                                } else {
+                                    resolve_path_in_module(
+                                        path,
+                                        1,
+                                        &package.root_module_tree,
+                                        self.ty_index,
+                                    )
+                                }
+                            } else if self
+                                .global_tree
+                                .ext_pkg_views
+                                .contains_key(&first_segment_ident.id)
+                            {
+                                todo!(
+                                    "external package resolution via PackageModuleView \
+                                     is not yet implemented"
                                 )
+                            } else {
+                                path.segments[0]
+                                    .resolved_id
+                                    .set(PathSegmentResolution::Err)
+                                    .unwrap();
+                                Err(ResolveError::IdentNotFound {
+                                    ident: first_segment_ident.clone(),
+                                })
                             }
                         }
                     }
@@ -215,9 +245,14 @@ fn resolve_path_in_ty(
     match children.get(&segment.ident.id) {
         Some(assoc_tree) => {
             // TODO: segment に genargs: Option<Vec<TypRepr>> を持たせて解決
-            let def_id_kind = match assoc_tree.find_matched(None, segment)? {
-                AssocNameTreeItemKind::Val(def_id) => DefIdKind::Val(*def_id),
+            let def_id_kind = match assoc_tree.find_matched(None, segment) {
+                Ok(AssocNameTreeItemKind::Val(def_id)) => DefIdKind::Val(*def_id),
+                Err(e) => {
+                    segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
+                    return Err(e);
+                }
             };
+
             segment
                 .resolved_id
                 .set(PathSegmentResolution::Ok(def_id_kind))

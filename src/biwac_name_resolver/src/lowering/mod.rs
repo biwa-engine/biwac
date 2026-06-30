@@ -103,7 +103,7 @@ pub(crate) fn ty_kind_from_typ_repr(typ: &TypRepr, self_typ: Option<&TyKind>) ->
             Err(_) => TyKind::Infer(biwac_hir::InferTy::Unknown),
         },
         TypReprVal::SelfTyp => self_typ
-            .expect("compiler bug: SelfTyp outside impl context")
+            .unwrap_or_else(|| panic!("compiler bug: SelfTyp outside impl context: {typ:?}"))
             .clone(),
     }
 }
@@ -116,6 +116,24 @@ pub(crate) fn ty_from_typ_repr(typ: &TypRepr, self_typ: Option<&TyKind>) -> Ty {
 ///
 /// NOTE: panics if the path was not resolved — call only after successful name resolution.
 pub(crate) fn def_id_kind_from_path(path: &Path) -> Result<DefIdKind, ResolveError> {
+    if path.segments.is_empty() {
+        match path
+            .abs_header
+            .as_ref()
+            .expect("compiler bug: completely empty Path")
+        {
+            biwac_ast::AbsolutePathHeader::Package(_) => todo!(),
+            biwac_ast::AbsolutePathHeader::SelfTyp(self_typ) => {
+                return Ok(DefIdKind::Ty(
+                    *self_typ
+                        .resolved_id
+                        .get()
+                        .expect("compiler bug: path was not resolved before lowering"),
+                ));
+            }
+        }
+    }
+
     for (i, segment) in path.segments.iter().enumerate() {
         match segment.resolved_id.get() {
             Some(PathSegmentResolution::Ok(def_id_kind)) => {
@@ -132,7 +150,7 @@ pub(crate) fn def_id_kind_from_path(path: &Path) -> Result<DefIdKind, ResolveErr
             None => break,
         }
     }
-    panic!("compiler bug: path was not resolved before lowering")
+    panic!("compiler bug: path was not resolved before lowering: {path:?}")
 }
 
 pub(crate) enum TyDefIdKind {

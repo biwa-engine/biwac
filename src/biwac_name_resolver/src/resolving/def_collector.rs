@@ -1,10 +1,12 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, hash_map::Entry},
+    sync::Arc,
 };
 
 use biwac_ast::{PathSegmentResolution, TypReprVal};
 use biwac_base::{InternedIdent, PackageId};
+use biwac_dependency_metadata::{DepMetadata, DepMetadataModuleView, PackageModuleView};
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::{DefId, DefIdKind, PackageLocalDefId, Span, TyDefId, ValDefId};
@@ -52,7 +54,7 @@ impl DefCollector {
         &mut self,
         pkg_name: InternedIdent,
         pkg: &Pkg,
-        external_package_trees: HashMap<InternedIdent, PackageNameTree>,
+        external_packages: Vec<(InternedIdent, Arc<DepMetadata>)>,
     ) -> Result<NameTree, Vec<ResolveError>> {
         // Step 1: assign IDs to all non-impl symbols, build module-level NameTree.
         let root_module_tree = self.collect_in_module(&pkg.root_module)?;
@@ -60,11 +62,25 @@ impl DefCollector {
             pkg_id: PackageId::SELF_PACKAGE,
             root_module_tree,
         };
-        let mut packages = external_package_trees;
+
+        // Assign PackageId(1..N) to external packages and build lookup maps.
+        let mut ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>> =
+            HashMap::new();
+        let mut ext_pkg_data: HashMap<PackageId, Arc<DepMetadata>> = HashMap::new();
+        for (i, (pkg_ident, dep_arc)) in external_packages.into_iter().enumerate() {
+            let pkg_id = PackageId::new(i as u32 + 1); // 0 is SELF_PACKAGE
+            let view = DepMetadataModuleView::new_root(Arc::clone(&dep_arc), pkg_id);
+            ext_pkg_views.insert(pkg_ident, Arc::new(view) as Arc<dyn PackageModuleView>);
+            ext_pkg_data.insert(pkg_id, dep_arc);
+        }
+
+        let mut packages = HashMap::new();
         packages.insert(pkg_name, package_tree);
         let name_tree = NameTree {
             self_pkg_name: pkg_name,
             packages,
+            ext_pkg_views,
+            ext_pkg_data,
         };
 
         // Build TyDefId -> &TyNameTree index for the self package.

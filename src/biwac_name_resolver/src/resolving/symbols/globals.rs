@@ -117,7 +117,12 @@ impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::StructDef {
         ctx: &ModuleResolveCtx<'_>,
         def_collector: &mut DefCollector,
     ) -> Result<(), Vec<ResolveError>> {
-        let ctx = TyDefResolveCtx::new(ctx, &self.genargs, def_collector)?;
+        let ctx = TyDefResolveCtx::new(
+            ctx,
+            &self.genargs,
+            def_collector,
+            *self.def_id.get().unwrap(),
+        )?;
         let mut members = HashMap::new();
         let mut errors = Vec::new();
 
@@ -152,7 +157,13 @@ impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::TypeAlias {
         ctx: &ModuleResolveCtx<'_>,
         def_collector: &mut DefCollector,
     ) -> Result<(), Vec<ResolveError>> {
-        let ctx = TyDefResolveCtx::new(ctx, &self.genargs, def_collector)?;
+        // TODO: expand した右辺値のDefIdを登録する
+        let ctx = TyDefResolveCtx::new(
+            ctx,
+            &self.genargs,
+            def_collector,
+            *self.def_id.get().unwrap(),
+        )?;
         ctx.resolve_typ(&self.right)
     }
 }

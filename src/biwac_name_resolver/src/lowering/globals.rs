@@ -281,7 +281,7 @@ fn lower_struct_def(
     let members: HashMap<InternedIdent, Ty> = struct_def
         .members
         .iter()
-        .map(|(ident, typ)| (ident.id, ty_from_typ_repr(typ, None)))
+        .map(|(ident, typ)| (ident.id, ty_from_typ_repr(typ, None))) // TODO: Some(self_ty)
         .collect();
 
     let ty_content = TyDefKind::Struct(Box::new(StructDef {
@@ -392,7 +392,7 @@ pub(super) fn lower_impl_block(
         let signature = build_fn_signature(
             &fn_def.args,
             &fn_def.rtype,
-            None,
+            Some(self_ty_kind.clone()),
             &fn_def.genargs,
             fn_def.span.clone(),
         );
@@ -401,7 +401,7 @@ pub(super) fn lower_impl_block(
             &fn_def.stmts,
             fn_def.expr.as_ref(),
             false,
-            None,
+            Some(&self_ty_kind),
             &signature,
             errors,
         );
@@ -464,7 +464,7 @@ pub(super) fn lower_impl_block(
         let signature = build_fn_signature(
             &fn_def.args,
             &fn_def.rtype,
-            None,
+            Some(self_ty_kind.clone()),
             &fn_def.genargs,
             fn_def.span.clone(),
         );

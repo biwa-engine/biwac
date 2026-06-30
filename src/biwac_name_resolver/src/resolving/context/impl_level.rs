@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use biwac_ast::ImplBlock;
+use biwac_ast::{AbsolutePathHeader, ImplBlock};
 use biwac_base::InternedIdent;
 use biwac_hir::TyKind;
 use biwac_span::{DefIdKind, LocalGenDefId};
@@ -27,10 +27,23 @@ impl ResolveCtx for ImplResolveCtx<'_> {
             && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
         {
             let def_id_kind = DefIdKind::LocalGen(*def_id);
-            path.segments[0]
-                .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
-                .unwrap();
+            if path.segments[0].resolved_id.get().is_none() {
+                path.segments[0]
+                    .resolved_id
+                    .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
+                    .unwrap();
+            }
+
+            Ok(())
+        } else if let Some(AbsolutePathHeader::SelfTyp(self_typ)) = &path.abs_header {
+            if self_typ.resolved_id.get().is_none() {
+                if let TyKind::Defined(defined_ty) = &self.self_ty {
+                    self_typ.resolved_id.set(defined_ty.def_id).unwrap();
+                } else {
+                    todo!()
+                }
+            }
+
             Ok(())
         } else {
             self.mctx.resolve_path(path)
@@ -102,10 +115,13 @@ impl ResolveCtx for PreImplResolveCtx<'_> {
             && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
         {
             let def_id_kind = DefIdKind::LocalGen(*def_id);
-            path.segments[0]
-                .resolved_id
-                .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
-                .unwrap();
+            if path.segments[0].resolved_id.get().is_none() {
+                path.segments[0]
+                    .resolved_id
+                    .set(biwac_ast::PathSegmentResolution::Ok(def_id_kind))
+                    .unwrap();
+            }
+
             Ok(())
         } else {
             self.mctx.resolve_path(path)

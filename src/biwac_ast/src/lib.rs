@@ -4,7 +4,7 @@ pub mod types;
 
 pub use macros::{CompilerFlag, CompilerFlagArg, CompilerFlagLiteral};
 pub use symbols::{
-    AbsolutePathHeader, Ident, ModAst, Path, PathSegment, PathSegmentResolution,
+    AbsolutePathHeader, Ident, ModAst, Path, PathSegment, PathSegmentResolution, SelfTypHeader,
     expressions::{
         BinOperator, BinaryExpr, BlockExpr, BoolLiteral, Exprs, FnCall, IfExpr, IntegerLiteral,
         Literal, MemberAccess, MethodCall, Primary, StringLiteral, StructLiteral, UnOperator,

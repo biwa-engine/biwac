@@ -111,6 +111,11 @@ macro_rules! impl_typed_def_id {
             pub fn value(&self) -> u64 {
                 self.0.as_u64()
             }
+
+            #[inline]
+            pub fn local_idx(&self) -> u32 {
+                self.0.local.0
+            }
         }
     };
 }

@@ -3,7 +3,7 @@ use biwac_span::Span;
 
 use biwac_ast::{
     AbsolutePathHeader, BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Path, Primary,
-    StringLiteral, StructLiteral, Variable,
+    SelfTypHeader, StringLiteral, StructLiteral, Variable,
 };
 
 use crate::{ParseError, TokenStream};
@@ -106,7 +106,9 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
 
                             Ok(Exprs::Primary(Primary::FnCall(FnCall {
                                 path: Path::new(
-                                    Some(AbsolutePathHeader::SelfTyp(begin.clone())),
+                                    Some(AbsolutePathHeader::SelfTyp(SelfTypHeader::new(
+                                        begin.clone(),
+                                    ))),
                                     vec![ident.into()],
                                 ),
                                 args,
@@ -121,7 +123,9 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                     members,
                                     span: Span::merge(&begin, &span),
                                     path: Path::new(
-                                        Some(AbsolutePathHeader::SelfTyp(begin.clone())),
+                                        Some(AbsolutePathHeader::SelfTyp(SelfTypHeader::new(
+                                            begin.clone(),
+                                        ))),
                                         Vec::new(),
                                     ),
                                 },

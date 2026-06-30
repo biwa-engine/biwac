@@ -1,6 +1,7 @@
 mod body;
 mod codec;
 mod format;
+pub mod module_view;
 mod table;
 
 use std::collections::HashMap;

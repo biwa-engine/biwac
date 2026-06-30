@@ -6,7 +6,7 @@ pub mod statements;
 use std::cell::OnceCell;
 
 use biwac_base::{InternedIdent, ModPath};
-use biwac_span::{DefIdKind, Span};
+use biwac_span::{DefIdKind, Span, TyDefId};
 
 use crate::Globals;
 
@@ -28,8 +28,15 @@ pub struct Path {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AbsolutePathHeader {
     Package(Span),
-    SelfTyp(Span),
+    SelfTyp(SelfTypHeader),
     // Int, Float, Bool and other primitive types...
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfTypHeader {
+    pub span: Span,
+    pub resolved_id: OnceCell<TyDefId>,
+    zst: private::PrivateZeroSizeType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +104,7 @@ impl AbsolutePathHeader {
     pub fn span(&self) -> Span {
         match self {
             Self::Package(span) => span.clone(),
-            Self::SelfTyp(span) => span.clone(),
+            Self::SelfTyp(self_typ) => self_typ.span.clone(),
         }
     }
 }
@@ -189,6 +196,16 @@ mod private {
 //         }
 //     }
 // }
+
+impl SelfTypHeader {
+    pub fn new(span: Span) -> Self {
+        Self {
+            span,
+            resolved_id: OnceCell::new(),
+            zst: private::PrivateZeroSizeType,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {

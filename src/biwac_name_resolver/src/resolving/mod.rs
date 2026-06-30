@@ -5,7 +5,7 @@ use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::TyDefId;
 
 use crate::{
-    ModuleNameTree, NameTree, ResolveError, TyNameTree,
+    ModuleNameTree, NameTree, ResolveError, ResolveErrorHandler, TyNameTree,
     resolving::{
         context::{LocalResolveCtx, ResolveCtx, module_level::ModuleResolveCtx},
         def_collector::{DefCollector, collect_ty_trees},
@@ -90,6 +90,23 @@ fn resolve_in_module(
             }
         } {
             errors.extend(errs);
+        }
+    }
+
+    for (module_name, module) in &module.children {
+        match module_tree.children.get(module_name).unwrap() {
+            crate::ModuleNameTreeItem::Mod(module_tree) => {
+                resolve_in_module(
+                    name_tree,
+                    pkg_name,
+                    module_tree,
+                    module,
+                    def_collector,
+                    ty_index,
+                )
+                .handle(&mut errors);
+            }
+            _ => panic!("compiler bug: module name tree item expected module but another found"),
         }
     }
 

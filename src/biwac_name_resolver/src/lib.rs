@@ -10,7 +10,7 @@ pub use name_tree::{
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use biwac_base::{InternedIdent, PackageName};
 
@@ -59,12 +59,13 @@ pub struct NameResolver {
     pkg: Pkg,
     pkg_name: InternedIdent,
     pkg_package_name: PackageName,
+    external_packages: Vec<(InternedIdent, Arc<biwac_dependency_metadata::DepMetadata>)>,
 }
 
 impl NameResolver {
     pub fn new(
         metadata: &biwac_base::MetadataHolder,
-        deps: &biwac_dependency_loader::Deps,
+        external_packages: Vec<(InternedIdent, Arc<biwac_dependency_metadata::DepMetadata>)>,
         pkg_name: InternedIdent,
         pkg: Pkg,
     ) -> Result<Self, ResolveError> {
@@ -73,15 +74,14 @@ impl NameResolver {
             pkg,
             pkg_name,
             pkg_package_name,
+            external_packages,
         })
     }
 
     pub fn try_resolve(self) -> Result<Hir, Vec<ResolveError>> {
-        let external_package_trees = HashMap::new();
-
-        // definition collection (package internal)
+        // definition collection (package internal + external package ID assignment)
         let mut def_collector = resolving::def_collector::DefCollector::new();
-        let name_tree = def_collector.collect(self.pkg_name, &self.pkg, external_package_trees)?;
+        let name_tree = def_collector.collect(self.pkg_name, &self.pkg, self.external_packages)?;
 
         // TODO: cache on disk
         // def_collector
