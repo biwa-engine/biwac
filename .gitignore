@@ -3,6 +3,8 @@
 
 # rust
 **/target
+
+*.bak
 **/dst
 **/.biwa_build
 .env
