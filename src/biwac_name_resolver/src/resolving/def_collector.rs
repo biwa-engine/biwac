@@ -5,7 +5,7 @@ use std::{
 };
 
 use biwac_ast::{PathSegmentResolution, TypReprVal};
-use biwac_base::{InternedIdent, PackageId};
+use biwac_base::{InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{DepMetadata, DepMetadataModuleView, PackageModuleView};
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
@@ -64,8 +64,7 @@ impl DefCollector {
         };
 
         // Assign PackageId(1..N) to external packages and build lookup maps.
-        let mut ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>> =
-            HashMap::new();
+        let mut ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>> = HashMap::new();
         let mut ext_pkg_data: HashMap<PackageId, Arc<DepMetadata>> = HashMap::new();
         for (i, (pkg_ident, dep_arc)) in external_packages.into_iter().enumerate() {
             let pkg_id = PackageId::new(i as u32 + 1); // 0 is SELF_PACKAGE
@@ -83,18 +82,18 @@ impl DefCollector {
             ext_pkg_data,
         };
 
-        // Build TyDefId -> &TyNameTree index for the self package.
+        // Build TyDefId → &TyNameTree and ModId → &ModuleNameTree indexes.
+        let root = &name_tree.packages[&pkg_name].root_module_tree;
         let mut ty_index: HashMap<TyDefId, &TyNameTree> = HashMap::new();
-        collect_ty_trees(
-            &name_tree.packages[&pkg_name].root_module_tree,
-            &mut ty_index,
-        );
+        collect_ty_trees(root, &mut ty_index);
+        let mut mod_index: HashMap<ModId, &ModuleNameTree> = HashMap::new();
+        collect_mod_trees(root, &mut mod_index);
 
         // Step 2: resolve type alias RHS paths, detect cycles, populate alias_target.
-        self.resolve_alias_targets(pkg_name, pkg, &name_tree, &ty_index)?;
+        self.resolve_alias_targets(pkg_name, pkg, &name_tree, &ty_index, &mod_index)?;
 
         // Step 3: collect impl-block symbols under their canonical (non-alias) types.
-        self.collect_impls(pkg_name, &name_tree, pkg, &ty_index)?;
+        self.collect_impls(pkg_name, &name_tree, pkg, &ty_index, &mod_index)?;
 
         Ok(name_tree)
     }
@@ -223,6 +222,7 @@ impl DefCollector {
         pkg: &Pkg,
         name_tree: &NameTree,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
     ) -> Result<(), Vec<ResolveError>> {
         // direct_map[alias_id] = immediate_target_id
         let mut direct_map: HashMap<TyDefId, TyDefId> = HashMap::new();
@@ -234,6 +234,7 @@ impl DefCollector {
             pkg,
             name_tree,
             ty_index,
+            mod_index,
             &mut direct_map,
             &mut span_map,
         )?;
@@ -268,6 +269,7 @@ impl DefCollector {
         pkg: &Pkg,
         name_tree: &NameTree,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
         direct_map: &mut HashMap<TyDefId, TyDefId>,
         span_map: &mut HashMap<TyDefId, Span>,
     ) -> Result<(), Vec<ResolveError>> {
@@ -276,6 +278,7 @@ impl DefCollector {
             pkg_name,
             name_tree,
             ty_index,
+            mod_index,
             root_module_tree,
             &pkg.root_module,
             direct_map,
@@ -288,12 +291,20 @@ impl DefCollector {
         pkg_name: InternedIdent,
         name_tree: &NameTree,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
         module_tree: &ModuleNameTree,
         module: &LoadedModule,
         direct_map: &mut HashMap<TyDefId, TyDefId>,
         span_map: &mut HashMap<TyDefId, Span>,
     ) -> Result<(), Vec<ResolveError>> {
-        let mctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast, ty_index)?;
+        let mctx = ModuleResolveCtx::new(
+            name_tree,
+            pkg_name,
+            module_tree,
+            &module.ast,
+            ty_index,
+            mod_index,
+        )?;
         let mut errors = Vec::new();
 
         for g in &module.ast.globals {
@@ -337,6 +348,7 @@ impl DefCollector {
                 pkg_name,
                 name_tree,
                 ty_index,
+                mod_index,
                 child_tree,
                 child_module,
                 direct_map,
@@ -359,6 +371,7 @@ impl DefCollector {
         name_tree: &NameTree,
         pkg: &Pkg,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
     ) -> Result<(), Vec<ResolveError>> {
         let root_module_tree = &name_tree.packages[&pkg_name].root_module_tree;
         self.collect_impls_in_module(
@@ -367,6 +380,7 @@ impl DefCollector {
             root_module_tree,
             &pkg.root_module,
             ty_index,
+            mod_index,
         )
     }
 
@@ -377,8 +391,16 @@ impl DefCollector {
         module_tree: &ModuleNameTree,
         module: &LoadedModule,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
     ) -> Result<(), Vec<ResolveError>> {
-        let mctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast, ty_index)?;
+        let mctx = ModuleResolveCtx::new(
+            name_tree,
+            pkg_name,
+            module_tree,
+            &module.ast,
+            ty_index,
+            mod_index,
+        )?;
         let mut errors = Vec::new();
 
         for g in &module.ast.globals {
@@ -564,6 +586,7 @@ impl DefCollector {
                 child_tree,
                 child_module,
                 ty_index,
+                mod_index,
             ) {
                 errors.extend(errs);
             }
@@ -591,6 +614,20 @@ pub(super) fn collect_ty_trees<'a>(
                 collect_ty_trees(mod_tree, map);
             }
             ModuleNameTreeItem::Val(_) => {}
+        }
+    }
+}
+
+/// Builds a flat ModId → &ModuleNameTree index by walking the module tree.
+/// Used to navigate from a resolved module DefIdKind into its children during path resolution.
+pub(super) fn collect_mod_trees<'a>(
+    module: &'a ModuleNameTree,
+    map: &mut HashMap<ModId, &'a ModuleNameTree>,
+) {
+    map.insert(module.mod_id, module);
+    for item in module.children.values() {
+        if let ModuleNameTreeItem::Mod(mod_tree) = item {
+            collect_mod_trees(mod_tree, map);
         }
     }
 }

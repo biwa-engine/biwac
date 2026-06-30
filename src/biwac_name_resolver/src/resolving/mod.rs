@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use biwac_base::InternedIdent;
+use biwac_base::{InternedIdent, ModId};
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::TyDefId;
 
@@ -8,7 +8,7 @@ use crate::{
     ModuleNameTree, NameTree, ResolveError, ResolveErrorHandler, TyNameTree,
     resolving::{
         context::{LocalResolveCtx, ResolveCtx, module_level::ModuleResolveCtx},
-        def_collector::{DefCollector, collect_ty_trees},
+        def_collector::{DefCollector, collect_mod_trees, collect_ty_trees},
     },
 };
 
@@ -35,9 +35,11 @@ pub(crate) fn resolve_in_self_package(
         .unwrap()
         .root_module_tree;
 
-    // Build TyDefId -> &TyNameTree index (populated during collect() with impl children).
+    // Build TyDefId -> &TyNameTree and ModId -> &ModuleNameTree indexes.
     let mut ty_index: HashMap<TyDefId, &TyNameTree> = HashMap::new();
     collect_ty_trees(root_module_tree, &mut ty_index);
+    let mut mod_index: HashMap<ModId, &ModuleNameTree> = HashMap::new();
+    collect_mod_trees(root_module_tree, &mut mod_index);
 
     resolve_in_module(
         name_tree,
@@ -46,6 +48,7 @@ pub(crate) fn resolve_in_self_package(
         &pkg.root_module,
         def_collector,
         &ty_index,
+        &mod_index,
     )
 }
 
@@ -56,8 +59,16 @@ fn resolve_in_module(
     module: &LoadedModule,
     def_collector: &mut DefCollector,
     ty_index: &HashMap<TyDefId, &TyNameTree>,
+    mod_index: &HashMap<ModId, &ModuleNameTree>,
 ) -> Result<(), Vec<ResolveError>> {
-    let ctx = ModuleResolveCtx::new(name_tree, pkg_name, module_tree, &module.ast, ty_index)?;
+    let ctx = ModuleResolveCtx::new(
+        name_tree,
+        pkg_name,
+        module_tree,
+        &module.ast,
+        ty_index,
+        mod_index,
+    )?;
 
     let mut errors = Vec::new();
 
@@ -103,6 +114,7 @@ fn resolve_in_module(
                     module,
                     def_collector,
                     ty_index,
+                    mod_index,
                 )
                 .handle(&mut errors);
             }

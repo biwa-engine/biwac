@@ -1,7 +1,7 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use biwac_ast::{AbsolutePathHeader, Globals, ModAst, Path, PathSegmentResolution};
-use biwac_base::InternedIdent;
+use biwac_base::{InternedIdent, ModId};
 use biwac_span::{DefIdKind, TyDefId};
 
 use crate::{
@@ -17,6 +17,7 @@ pub struct ModuleResolveCtx<'t> {
     module: &'t ModuleNameTree,
     imports: HashMap<InternedIdent, &'t Path>,
     ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
+    mod_index: &'t HashMap<ModId, &'t ModuleNameTree>,
 }
 
 impl<'t> ModuleResolveCtx<'t> {
@@ -26,6 +27,7 @@ impl<'t> ModuleResolveCtx<'t> {
         module_tree: &'t ModuleNameTree,
         module_ast: &'t ModAst,
         ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
+        mod_index: &'t HashMap<ModId, &'t ModuleNameTree>,
     ) -> Result<Self, Vec<ResolveError>> {
         let mut imports = HashMap::new();
         let mut errors = Vec::new();
@@ -66,6 +68,7 @@ impl<'t> ModuleResolveCtx<'t> {
                 module: module_tree,
                 imports,
                 ty_index,
+                mod_index,
             })
         } else {
             Err(errors)
@@ -115,17 +118,56 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                     match self.imports.get(&first_segment_ident.id) {
                         Some(import_path) => match self.resolve_path(import_path) {
                             Ok(()) => {
+                                let imported_kind = def_id_kind_from_path(import_path).unwrap();
                                 path.segments[0]
                                     .resolved_id
-                                    .set(PathSegmentResolution::Ok(
-                                        def_id_kind_from_path(import_path).unwrap(),
-                                    ))
+                                    .set(PathSegmentResolution::Ok(imported_kind.clone()))
                                     .unwrap();
 
-                                // TODO:
-                                // import されているシンボルの mod tree を取得し、
-                                // resolve_path_in_module(path, 1, ...)
-                                resolve_path_in_module(path, 1, module, self.ty_index)
+                                if path.segments.len() == 1 {
+                                    return Ok(());
+                                }
+
+                                // Dispatch segment[1..] based on what the import resolved to.
+                                match imported_kind {
+                                    DefIdKind::Ty(ty_id) => match self.ty_index.get(&ty_id) {
+                                        Some(ty_tree) => {
+                                            resolve_path_in_ty(path, 1, ty_tree, self.ty_index)
+                                        }
+                                        None => {
+                                            path.segments[1]
+                                                .resolved_id
+                                                .set(PathSegmentResolution::Err)
+                                                .unwrap();
+                                            Err(ResolveError::PathResolutionFailed {
+                                                path: Box::new(path.clone()),
+                                            })
+                                        }
+                                    },
+                                    DefIdKind::Mod(mod_id) => match self.mod_index.get(&mod_id) {
+                                        Some(mod_tree) => {
+                                            resolve_path_in_module(path, 1, mod_tree, self.ty_index)
+                                        }
+                                        None => {
+                                            path.segments[1]
+                                                .resolved_id
+                                                .set(PathSegmentResolution::Err)
+                                                .unwrap();
+                                            Err(ResolveError::PathResolutionFailed {
+                                                path: Box::new(path.clone()),
+                                            })
+                                        }
+                                    },
+                                    _ => {
+                                        path.segments[1]
+                                            .resolved_id
+                                            .set(PathSegmentResolution::Err)
+                                            .unwrap();
+                                        Err(ResolveError::PathResolutionFailed {
+                                            path: Box::new(path.clone()),
+                                        })
+                                    }
+                                }
                             }
                             Err(e) => {
                                 path.segments[0]
@@ -158,7 +200,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                             {
                                 todo!(
                                     "external package resolution via PackageModuleView \
-                                     is not yet implemented"
+                                     is not yet implemented: {first_segment_ident:?}",
                                 )
                             } else {
                                 path.segments[0]

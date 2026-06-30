@@ -6,10 +6,7 @@ use std::{
 use biwac_base::{IdentInterner, InternedIdent, PackageId};
 use biwac_span::{DefId, PackageLocalDefId, TyDefId, ValDefId};
 
-use super::{
-    DepMetadata,
-    body::SymbolBody,
-};
+use super::{DepMetadata, body::SymbolBody};
 
 /// 外部パッケージのモジュールのシンボルを名前で検索する統一インタフェース。
 ///

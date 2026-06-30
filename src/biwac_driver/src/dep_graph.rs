@@ -20,8 +20,7 @@ impl DepGraph {
     /// deps が空の場合は空グラフを返す。
     pub fn discover(root_deps: &[&str], packages_dir: &Path) -> Result<Self, ()> {
         let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
-        let mut queue: VecDeque<String> =
-            root_deps.iter().map(|s| s.to_string()).collect();
+        let mut queue: VecDeque<String> = root_deps.iter().map(|s| s.to_string()).collect();
         let mut visited: HashSet<String> = HashSet::new();
 
         while let Some(dep_name) = queue.pop_front() {
@@ -72,10 +71,7 @@ impl DepGraph {
         let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
         for (pkg, deps) in &self.adjacency {
             for dep in deps {
-                reverse
-                    .entry(dep.as_str())
-                    .or_default()
-                    .push(pkg.as_str());
+                reverse.entry(dep.as_str()).or_default().push(pkg.as_str());
             }
         }
 
