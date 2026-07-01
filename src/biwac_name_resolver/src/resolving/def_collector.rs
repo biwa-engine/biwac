@@ -5,7 +5,7 @@ use std::{
 };
 
 use biwac_ast::{PathSegmentResolution, TypReprVal};
-use biwac_base::{InternedIdent, ModId, PackageId};
+use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{DepMetadata, DepMetadataModuleView, PackageModuleView};
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
@@ -55,6 +55,7 @@ impl DefCollector {
         pkg_name: InternedIdent,
         pkg: &Pkg,
         external_packages: Vec<(InternedIdent, Arc<DepMetadata>)>,
+        interner: &IdentInterner,
     ) -> Result<NameTree, Vec<ResolveError>> {
         // Step 1: assign IDs to all non-impl symbols, build module-level NameTree.
         let root_module_tree = self.collect_in_module(&pkg.root_module)?;
@@ -90,10 +91,10 @@ impl DefCollector {
         collect_mod_trees(root, &mut mod_index);
 
         // Step 2: resolve type alias RHS paths, detect cycles, populate alias_target.
-        self.resolve_alias_targets(pkg_name, pkg, &name_tree, &ty_index, &mod_index)?;
+        self.resolve_alias_targets(pkg_name, pkg, &name_tree, &ty_index, &mod_index, interner)?;
 
         // Step 3: collect impl-block symbols under their canonical (non-alias) types.
-        self.collect_impls(pkg_name, &name_tree, pkg, &ty_index, &mod_index)?;
+        self.collect_impls(pkg_name, &name_tree, pkg, &ty_index, &mod_index, interner)?;
 
         Ok(name_tree)
     }
@@ -223,6 +224,7 @@ impl DefCollector {
         name_tree: &NameTree,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
         mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
     ) -> Result<(), Vec<ResolveError>> {
         // direct_map[alias_id] = immediate_target_id
         let mut direct_map: HashMap<TyDefId, TyDefId> = HashMap::new();
@@ -235,6 +237,7 @@ impl DefCollector {
             name_tree,
             ty_index,
             mod_index,
+            interner,
             &mut direct_map,
             &mut span_map,
         )?;
@@ -270,6 +273,7 @@ impl DefCollector {
         name_tree: &NameTree,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
         mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
         direct_map: &mut HashMap<TyDefId, TyDefId>,
         span_map: &mut HashMap<TyDefId, Span>,
     ) -> Result<(), Vec<ResolveError>> {
@@ -279,6 +283,7 @@ impl DefCollector {
             name_tree,
             ty_index,
             mod_index,
+            interner,
             root_module_tree,
             &pkg.root_module,
             direct_map,
@@ -292,6 +297,7 @@ impl DefCollector {
         name_tree: &NameTree,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
         mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
         module_tree: &ModuleNameTree,
         module: &LoadedModule,
         direct_map: &mut HashMap<TyDefId, TyDefId>,
@@ -304,6 +310,7 @@ impl DefCollector {
             &module.ast,
             ty_index,
             mod_index,
+            interner,
         )?;
         let mut errors = Vec::new();
 
@@ -349,6 +356,7 @@ impl DefCollector {
                 name_tree,
                 ty_index,
                 mod_index,
+                interner,
                 child_tree,
                 child_module,
                 direct_map,
@@ -372,6 +380,7 @@ impl DefCollector {
         pkg: &Pkg,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
         mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
     ) -> Result<(), Vec<ResolveError>> {
         let root_module_tree = &name_tree.packages[&pkg_name].root_module_tree;
         self.collect_impls_in_module(
@@ -381,6 +390,7 @@ impl DefCollector {
             &pkg.root_module,
             ty_index,
             mod_index,
+            interner,
         )
     }
 
@@ -392,6 +402,7 @@ impl DefCollector {
         module: &LoadedModule,
         ty_index: &HashMap<TyDefId, &TyNameTree>,
         mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
     ) -> Result<(), Vec<ResolveError>> {
         let mctx = ModuleResolveCtx::new(
             name_tree,
@@ -400,6 +411,7 @@ impl DefCollector {
             &module.ast,
             ty_index,
             mod_index,
+            interner,
         )?;
         let mut errors = Vec::new();
 
@@ -587,6 +599,7 @@ impl DefCollector {
                 child_module,
                 ty_index,
                 mod_index,
+                interner,
             ) {
                 errors.extend(errs);
             }

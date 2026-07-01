@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use biwac_base::{InternedIdent, ModId};
+use biwac_base::{IdentInterner, InternedIdent, ModId};
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::TyDefId;
 
@@ -28,6 +28,7 @@ pub(crate) fn resolve_in_self_package(
     pkg: &Pkg,
     name_tree: &NameTree,
     def_collector: &mut DefCollector,
+    interner: &IdentInterner,
 ) -> Result<(), Vec<ResolveError>> {
     let root_module_tree = &name_tree
         .packages
@@ -49,6 +50,7 @@ pub(crate) fn resolve_in_self_package(
         def_collector,
         &ty_index,
         &mod_index,
+        interner,
     )
 }
 
@@ -60,6 +62,7 @@ fn resolve_in_module(
     def_collector: &mut DefCollector,
     ty_index: &HashMap<TyDefId, &TyNameTree>,
     mod_index: &HashMap<ModId, &ModuleNameTree>,
+    interner: &IdentInterner,
 ) -> Result<(), Vec<ResolveError>> {
     let ctx = ModuleResolveCtx::new(
         name_tree,
@@ -68,6 +71,7 @@ fn resolve_in_module(
         &module.ast,
         ty_index,
         mod_index,
+        interner,
     )?;
 
     let mut errors = Vec::new();
@@ -115,6 +119,7 @@ fn resolve_in_module(
                     def_collector,
                     ty_index,
                     mod_index,
+                    interner,
                 )
                 .handle(&mut errors);
             }

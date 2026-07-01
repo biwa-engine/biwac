@@ -5,7 +5,7 @@ use crate::TkKind;
 
 #[test]
 fn test1() {
-    let modu = ModId::new(0);
+    let modu = ModId::new_in_self(0);
     let mut interner = IdentInterner::new();
 
     // NOTE: Rustの生文字列の扱いでは以下の場合

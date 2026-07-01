@@ -8,16 +8,16 @@ pub struct SourceHolder {
 }
 
 /// [`ModId`] is global scope (inter-package) module id.
-/// Incremental compilation cache keeps map of
-/// ModId to enum {
-///     SelfPkg,
-///     External {
-///         pkg: PackageName,
-///         module: ModPath,
-///     }
-/// }
+///
+/// Encoding (u64):
+///   - Self-package module:   `(0u64 << 32) | sequential_id`  (high 32 bits = 0)
+///   - External package module: `(pkg_id as u64) << 32 | module_sym_idx as u64`
+///     where `module_sym_idx` is the symbol index in the external package's .biwameta.
+///
+/// Self-package IDs are assigned sequentially from 0 and fit in the low 32 bits.
+/// External packages always have `pkg_id >= 1`, so there is no collision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ModId(usize);
+pub struct ModId(u64);
 
 #[derive(Debug)]
 pub struct ModSource {
@@ -27,7 +27,34 @@ pub struct ModSource {
 }
 
 impl ModId {
-    pub fn new(id: usize) -> Self {
-        Self(id)
+    /// Create a self-package module id from a sequential index.
+    #[inline]
+    pub fn new_in_self(id: u32) -> Self {
+        Self(id as u64)
+    }
+
+    /// Create an external-package module id from a `PackageId` and the module's symbol index.
+    #[inline]
+    pub fn new_ext(pkg_id: u32, module_sym_idx: u32) -> Self {
+        Self((pkg_id as u64) << 32 | module_sym_idx as u64)
+    }
+
+    /// Returns true if this ModId belongs to the self-package (high 32 bits == 0).
+    #[inline]
+    pub fn is_self_pkg(&self) -> bool {
+        (self.0 >> 32) == 0
+    }
+
+    /// The PackageId encoded in the high 32 bits (0 for self-package).
+    #[inline]
+    pub fn pkg_id_bits(&self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+
+    /// The symbol index encoded in the low 32 bits.
+    /// For self-package this equals the sequential id; for external packages it is the module_sym_idx.
+    #[inline]
+    pub fn sym_idx(&self) -> u32 {
+        (self.0 & 0xFFFF_FFFF) as u32
     }
 }

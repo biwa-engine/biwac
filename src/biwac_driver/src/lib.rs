@@ -125,7 +125,7 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
         pkg,
     )
     .unwrap()
-    .try_resolve()
+    .try_resolve(&interner)
     .unwrap();
 
     // Persist self package's symbol metadata to disk for dependents.
@@ -221,7 +221,7 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
         pkg,
     )
     .unwrap()
-    .try_resolve()
+    .try_resolve(&interner)
     .unwrap();
 
     // Persist self package's symbol metadata to disk for dependents.

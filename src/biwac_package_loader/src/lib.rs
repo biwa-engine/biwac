@@ -233,7 +233,7 @@ struct ModuleTree {
 }
 
 struct ModuleTreeCtx {
-    next_mod_id: usize,
+    next_mod_id: u32,
 }
 
 impl ModuleTreeCtx {
@@ -242,9 +242,8 @@ impl ModuleTreeCtx {
     }
 
     fn alloc_mod_id(&mut self) -> ModId {
-        let mod_id = ModId::new(self.next_mod_id);
+        let mod_id = ModId::new_in_self(self.next_mod_id); // usize→u64 cast is handled inside ModId::new
         self.next_mod_id += 1;
-
         mod_id
     }
 }

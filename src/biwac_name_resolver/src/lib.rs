@@ -12,7 +12,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use biwac_base::{InternedIdent, PackageName};
+use biwac_base::{IdentInterner, InternedIdent, PackageName};
 
 use biwac_hir::Hir;
 use biwac_package_loader::Pkg;
@@ -78,10 +78,11 @@ impl NameResolver {
         })
     }
 
-    pub fn try_resolve(self) -> Result<Hir, Vec<ResolveError>> {
+    pub fn try_resolve(self, interner: &IdentInterner) -> Result<Hir, Vec<ResolveError>> {
         // definition collection (package internal + external package ID assignment)
         let mut def_collector = resolving::def_collector::DefCollector::new();
-        let name_tree = def_collector.collect(self.pkg_name, &self.pkg, self.external_packages)?;
+        let name_tree =
+            def_collector.collect(self.pkg_name, &self.pkg, self.external_packages, interner)?;
 
         // TODO: cache on disk
         // def_collector
@@ -91,7 +92,7 @@ impl NameResolver {
         // because symbol definition is not affected by name resolution result.
 
         // symbol resolution (package internal)
-        resolve_in_self_package(&self.pkg, &name_tree, &mut def_collector)?;
+        resolve_in_self_package(&self.pkg, &name_tree, &mut def_collector, interner)?;
 
         // TODO: cache on disk
         // symbol signature

@@ -90,6 +90,16 @@ impl DepMetadataModuleView {
         }
     }
 
+    /// 特定シンボルインデックスのサブモジュール view を作成する (名前解決から使用)。
+    pub fn new_for_sym_idx(dep: Arc<DepMetadata>, module_sym_idx: u32, pkg_id: PackageId) -> Self {
+        Self {
+            dep,
+            module_sym_idx,
+            pkg_id,
+            name_index: OnceLock::new(),
+        }
+    }
+
     fn new_submodule(dep: Arc<DepMetadata>, module_sym_idx: u32, pkg_id: PackageId) -> Self {
         Self {
             dep,
