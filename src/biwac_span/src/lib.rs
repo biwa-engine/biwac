@@ -27,6 +27,10 @@ impl Span {
         Self { file, begin, end }
     }
 
+    pub fn dummy() -> Self {
+        Self::new(ModId::new_in_self(0), 0, 0)
+    }
+
     pub fn merge(begin: &Self, end: &Self) -> Self {
         Self {
             file: begin.file,

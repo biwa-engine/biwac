@@ -12,3 +12,4 @@ biwac_package_loader = { path = "../biwac_package_loader"}
 biwac_dependency_loader = { path = "../biwac_dependency_loader"}
 biwac_hir = { path = "../biwac_hir"}
 biwac_name_resolver = { path = "../biwac_name_resolver"}
+biwac_dependency_metadata = { path = "../biwac_dependency_metadata"}

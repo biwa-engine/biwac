@@ -571,6 +571,324 @@ impl DepMetadata {
     pub fn get_str(&self, offset: format::DiskStringOffset) -> Result<&str, DepMetadataError> {
         self.strings.get(offset)
     }
+
+    /// 外部パッケージの fn シンボル1つを ValDefKind に変換する。
+    /// TyCtx の遅延ロードから呼ばれる。sym_idx は DefId.local_idx() と一致する。
+    pub fn get_ext_val_kind(
+        &self,
+        sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::ValDefKind> {
+        let body = self.get_symbol_body(sym_idx as usize).ok()?;
+        let SymbolBody::Fn(fn_data) = body else {
+            return None;
+        };
+        let sig = self.impl_disk_fn_to_signature(sym_idx, fn_data, pkg_id, interner);
+        Some(biwac_hir::ValDefKind::ExternalFn(Box::new(sig)))
+    }
+
+    /// 外部パッケージの struct シンボル1つを DefinedTyImpl に変換する。
+    /// TyCtx の遅延ロードから呼ばれる。struct のメンバ型と assoc fns を含む。
+    pub fn get_ext_ty_impl(
+        &self,
+        struct_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::DefinedTyImpl> {
+        use biwac_hir::{
+            AssocValDefKind, DefinedTyImpl, Ident, NativeFnDef, StructDef, TyDefKind,
+            TyValImplGenargsContentPair, TyValImplList,
+        };
+        use biwac_span::{DefId, GenDefId, LocalGenDefId, PackageLocalDefId, Span, ValDefId};
+
+        let body = self.get_symbol_body(struct_sym_idx as usize).ok()?;
+        let SymbolBody::Struct(struct_data) = body else {
+            return None;
+        };
+
+        // struct のジェネリクス引数 GenDefId を割り当て
+        let genargs: Vec<GenDefId> = (0..struct_data.genargs.0.len())
+            .map(|i| {
+                GenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_gen_id(struct_sym_idx, i as u32)),
+                ))
+            })
+            .collect();
+
+        // メンバを変換
+        let mut members = std::collections::HashMap::new();
+        for m in &struct_data.members.0 {
+            let name_str = self.get_str(m.name).unwrap_or("");
+            let name_id = interner.get_or_insert(name_str);
+            let ty = self.impl_disk_ty_to_ty(&m.ty, pkg_id, Some(struct_sym_idx), None);
+            members.insert(name_id, ty);
+        }
+
+        let struct_name_str = self.get_str(struct_data.name).unwrap_or("");
+        let struct_name_id = interner.get_or_insert(struct_name_str);
+        let struct_def = StructDef {
+            name: Ident {
+                id: struct_name_id,
+                span: Span::dummy(),
+            },
+            members,
+            genargs,
+        };
+
+        let struct_genarg_count = struct_data.genargs.0.len();
+        let mut vals: std::collections::HashMap<biwac_base::InternedIdent, TyValImplList> =
+            std::collections::HashMap::new();
+
+        // assoc fns を vals に登録する。
+        // NOTE: disk format にはimpl genargs とfn genargs の境界が記録されていないため、
+        //       struct のジェネリクス数を上限として先頭から impl genargs とみなす。
+        //       impl[T] Foo[T] のような標準的なパターンは正しく再現できる。
+        //       TODO: impl Foo[Int] { ... } のように特殊化されたimplの場合は
+        //             disk format に impl_target_genargs を追加することで解決する。
+        for &assoc_sym_idx_disk in &struct_data.assoc_symbols.0 {
+            let assoc_sym_idx = assoc_sym_idx_disk.0;
+            let Ok(assoc_body) = self.get_symbol_body(assoc_sym_idx as usize) else {
+                continue;
+            };
+            let SymbolBody::Fn(fn_data) = assoc_body else {
+                continue;
+            };
+
+            let val_def_id =
+                ValDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(assoc_sym_idx)));
+
+            let impl_genarg_count = struct_genarg_count.min(fn_data.genargs.0.len());
+            let impl_genarg_pattern: Vec<biwac_hir::Ty> = (0..impl_genarg_count)
+                .map(|i| {
+                    let lgid = LocalGenDefId::new(DefId::new(
+                        pkg_id,
+                        PackageLocalDefId::new(ext_loc_gen_id(assoc_sym_idx, i as u32)),
+                    ));
+                    biwac_hir::Ty::new(biwac_hir::TyKind::LocGen(lgid), Span::dummy())
+                })
+                .collect();
+
+            let impl_block_genargs: std::collections::HashMap<_, _> = (0..impl_genarg_count)
+                .map(|i| {
+                    let name_str = fn_data
+                        .genargs
+                        .0
+                        .get(i)
+                        .and_then(|g| self.get_str(g.name).ok())
+                        .unwrap_or("");
+                    let name_id = interner.get_or_insert(name_str);
+                    let lgid = LocalGenDefId::new(DefId::new(
+                        pkg_id,
+                        PackageLocalDefId::new(ext_loc_gen_id(assoc_sym_idx, i as u32)),
+                    ));
+                    (name_id, (lgid, Span::dummy()))
+                })
+                .collect();
+
+            // val_content は型推論中に参照されないが構造体に必要なためダミーで埋める
+            let fn_name_str = self.get_str(fn_data.name).unwrap_or("");
+            let fn_name_id = interner.get_or_insert(fn_name_str);
+            let placeholder_sig =
+                self.impl_disk_fn_to_signature(assoc_sym_idx, fn_data, pkg_id, interner);
+            let placeholder = NativeFnDef {
+                name: Ident {
+                    id: fn_name_id,
+                    span: Span::dummy(),
+                },
+                signature: placeholder_sig,
+                native_body: String::new(),
+                native_span: Span::dummy(),
+                span: Span::dummy(),
+                impl_genargs: vec![],
+            };
+
+            let pair = TyValImplGenargsContentPair {
+                impl_block_genargs,
+                genargs: impl_genarg_pattern,
+                val_content: AssocValDefKind::NativeFn(Box::new(placeholder)),
+            };
+
+            vals.entry(fn_name_id)
+                .or_insert_with(|| TyValImplList {
+                    vals: std::collections::HashMap::new(),
+                })
+                .vals
+                .insert(val_def_id, pair);
+        }
+
+        Some(DefinedTyImpl {
+            ty_content: TyDefKind::Struct(Box::new(struct_def)),
+            vals,
+        })
+    }
+
+    /// DiskFnData → FnSignature 変換。fn_sym_idx を LocGenDefId の名前空間として使用する。
+    fn impl_disk_fn_to_signature(
+        &self,
+        fn_sym_idx: u32,
+        fn_data: &format::DiskFnData,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> biwac_hir::FnSignature {
+        use biwac_hir::{FnArgDecl, FnSignature, Ident};
+        use biwac_span::{DefId, LocalGenDefId, PackageLocalDefId, Span, VarId};
+
+        // disk のジェネリクス引数 → LocalGenDefId のマップ (ordinal → lgid)
+        let genargs: Vec<(biwac_hir::Ident, biwac_span::LocalGenDefId)> = fn_data
+            .genargs
+            .0
+            .iter()
+            .enumerate()
+            .map(|(i, g)| {
+                let name_str = self.get_str(g.name).unwrap_or("");
+                let name_id = interner.get_or_insert(name_str);
+                let lgid = LocalGenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_loc_gen_id(fn_sym_idx, i as u32)),
+                ));
+                (
+                    Ident {
+                        id: name_id,
+                        span: Span::dummy(),
+                    },
+                    lgid,
+                )
+            })
+            .collect();
+
+        // 引数を変換 (self 引数は FnSignature.args には含まない)
+        let args: Vec<FnArgDecl> = fn_data
+            .args
+            .0
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let name_str = self.get_str(a.name).unwrap_or("");
+                let name_id = interner.get_or_insert(name_str);
+                let ty = self.impl_disk_ty_to_ty(&a.ty, pkg_id, None, Some(fn_sym_idx));
+                FnArgDecl {
+                    id: Ident {
+                        id: name_id,
+                        span: Span::dummy(),
+                    },
+                    ty,
+                    // var_id は外部 fn の型推論では使われないためダミー値を使用
+                    var_id: VarId::new(i as u32 + 1),
+                }
+            })
+            .collect();
+
+        let rty = self.impl_disk_ty_to_ty(&fn_data.rty, pkg_id, None, Some(fn_sym_idx));
+
+        FnSignature {
+            args,
+            // TODO: メソッドの self_ty は disk format から復元していない。
+            //       現状の型推論では self_ty は参照されないため問題ないが、
+            //       将来 emit 等で必要になった場合は disk format への追加が必要。
+            self_ty: None,
+            rty,
+            genargs,
+            span: Span::dummy(),
+        }
+    }
+
+    /// DiskTy → Ty 変換。
+    /// struct_gen_sym_idx: struct メンバ型の Gen 解決に使うシンボルインデックス
+    /// fn_loc_gen_sym_idx: fn シグニチャの LocGen 解決に使うシンボルインデックス
+    fn impl_disk_ty_to_ty(
+        &self,
+        disk_ty: &format::DiskTy,
+        pkg_id: biwac_base::PackageId,
+        struct_gen_sym_idx: Option<u32>,
+        fn_loc_gen_sym_idx: Option<u32>,
+    ) -> biwac_hir::Ty {
+        use biwac_hir::{DefinedTy, FnTy, TyKind};
+        use biwac_span::{DefId, GenDefId, LocalGenDefId, PackageLocalDefId, Span, TyDefId};
+
+        let kind = match DiskTyKind::try_from(disk_ty.hdr.kind) {
+            Ok(k) => k,
+            Err(_) => return biwac_hir::Ty::new(TyKind::Void, Span::dummy()),
+        };
+
+        let ty_kind = match kind {
+            DiskTyKind::Int => TyKind::Int,
+            DiskTyKind::Float => TyKind::Float,
+            DiskTyKind::Bool => TyKind::Bool,
+            DiskTyKind::Void => TyKind::Void,
+            DiskTyKind::Defined => {
+                let sym_idx = disk_ty.hdr.sym_id.0;
+                let genargs = disk_ty
+                    .genargs
+                    .iter()
+                    .map(|g| {
+                        self.impl_disk_ty_to_ty(g, pkg_id, struct_gen_sym_idx, fn_loc_gen_sym_idx)
+                    })
+                    .collect();
+                TyKind::Defined(DefinedTy {
+                    def_id: TyDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(sym_idx))),
+                    genargs,
+                })
+            }
+            DiskTyKind::Gen => {
+                // sym_id = struct genargs 内の ordinal (0-base)
+                let ordinal = disk_ty.hdr.sym_id.0;
+                let struct_sym_idx = struct_gen_sym_idx.unwrap_or(0);
+                TyKind::Gen(GenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_gen_id(struct_sym_idx, ordinal)),
+                )))
+            }
+            DiskTyKind::LocGen => {
+                // sym_id = fn の combined genargs 内の ordinal (0-base)
+                let ordinal = disk_ty.hdr.sym_id.0;
+                let fn_sym_idx = fn_loc_gen_sym_idx.unwrap_or(0);
+                TyKind::LocGen(LocalGenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_loc_gen_id(fn_sym_idx, ordinal)),
+                )))
+            }
+            DiskTyKind::Fn => {
+                // sym_id = 引数の数; genargs = [arg0, ..., argN, rty]
+                let arg_count = disk_ty.hdr.sym_id.0 as usize;
+                if arg_count + 1 > disk_ty.genargs.len() {
+                    return biwac_hir::Ty::new(TyKind::Void, Span::dummy());
+                }
+                let args = disk_ty.genargs[..arg_count]
+                    .iter()
+                    .map(|g| {
+                        self.impl_disk_ty_to_ty(g, pkg_id, struct_gen_sym_idx, fn_loc_gen_sym_idx)
+                    })
+                    .collect();
+                let rty = self.impl_disk_ty_to_ty(
+                    &disk_ty.genargs[arg_count],
+                    pkg_id,
+                    struct_gen_sym_idx,
+                    fn_loc_gen_sym_idx,
+                );
+                TyKind::Fn(FnTy {
+                    args,
+                    rty: Box::new(rty),
+                    genargs: vec![],
+                })
+            }
+        };
+
+        biwac_hir::Ty::new(ty_kind, Span::dummy())
+    }
+}
+
+/// 外部パッケージの struct ジェネリクス引数 ID エンコード。
+/// GenDefId/LocalGenDefId の PackageLocal 部分として使用する。
+/// 1シンボルあたり最大 1024 genargs、最大 4M シンボルをサポート。
+fn ext_gen_id(struct_sym_idx: u32, ordinal: u32) -> u32 {
+    (struct_sym_idx << 10) | ordinal
+}
+
+/// 外部パッケージの fn ローカルジェネリクス引数 ID エンコード。
+fn ext_loc_gen_id(fn_sym_idx: u32, ordinal: u32) -> u32 {
+    (fn_sym_idx << 10) | ordinal
 }
 
 // --- BodyBuilder: encode 時にシンボルボディを sym_body_bytes に追記するヘルパー ---

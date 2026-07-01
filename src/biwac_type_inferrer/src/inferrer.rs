@@ -26,7 +26,7 @@ struct DefinedTyCtx {
     gen_assigns: HashMap<GenDefId, Ty>,
 }
 
-impl<'tctx> FnTyCtx<'tctx> {
+impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     fn apply(&mut self, t: TyKind) -> TyKind {
         match t {
             TyKind::Infer(i) => match i {
@@ -1050,7 +1050,12 @@ impl<'tctx> FnTyCtx<'tctx> {
 
                 Ok(None)
             }
-            Stmt::NovelWrite(_) | Stmt::NovelWait(_) => todo!(),
+            Stmt::NovelWrite(_) | Stmt::NovelWait(_) => {
+                // TODO: NovelWrite/NovelWait 型推論未実装。
+                // 将来的に Rust の lang item に相当する概念を導入し、std のシンボルの一部を
+                // コンパイラのビルトイン (lang item) として解決・利用できるようにする際に実装する。
+                Ok(None)
+            }
         }
     }
 
@@ -1098,7 +1103,7 @@ fn min_of_ty(t1: &Option<Ty>, t2: &Option<Ty>) -> TyResult<Option<Ty>> {
     }
 }
 
-impl TyCtx {
+impl<'a> TyCtx<'a> {
     fn infer_fn_body(&self, fn_body: &FnBody, fn_signature: &FnSignature) -> TyResult<TyInfo> {
         let mut fctx = FnTyCtx::new(self, fn_signature.rty.clone());
 

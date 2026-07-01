@@ -118,6 +118,13 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
 
     // println!("{interner:#?}");
 
+    // PackageId は名前解決時の割り付けと同じ: external_packages[i] → PackageId(i+1)
+    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
+        .iter()
+        .enumerate()
+        .map(|(i, (_, dep))| (biwac_base::PackageId::new(i as u32 + 1), Arc::clone(dep)))
+        .collect();
+
     let hir = biwac_name_resolver::NameResolver::new(
         &metadata,
         external_packages,
@@ -131,7 +138,8 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     // Persist self package's symbol metadata to disk for dependents.
     persist_dep_metadata(&hir, &srcs, &interner, build_dir_path.clone(), &metadata)?;
 
-    let hir = biwac_type_inferrer::TyCtx::new(hir).infer().unwrap();
+    let hir =
+        biwac_type_inferrer::TyCtx::new(hir, ext_pkgs_for_ty, &mut interner).infer().unwrap();
 
     let bin = biwac_generator::arch::typescript::generate(&hir, &interner, &srcs);
 
@@ -214,6 +222,13 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
     )
     .map_err(|e| e.print_error_messages())?;
 
+    // PackageId は名前解決時の割り付けと同じ: external_packages[i] → PackageId(i+1)
+    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
+        .iter()
+        .enumerate()
+        .map(|(i, (_, dep))| (biwac_base::PackageId::new(i as u32 + 1), Arc::clone(dep)))
+        .collect();
+
     let hir = biwac_name_resolver::NameResolver::new(
         &metadata,
         external_packages,
@@ -227,7 +242,8 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
     // Persist self package's symbol metadata to disk for dependents.
     persist_dep_metadata(&hir, &srcs, &interner, build_dir_path.clone(), &metadata)?;
 
-    let hir = biwac_type_inferrer::TyCtx::new(hir).infer().unwrap();
+    let hir =
+        biwac_type_inferrer::TyCtx::new(hir, ext_pkgs_for_ty, &mut interner).infer().unwrap();
 
     let bin = biwac_generator::arch::typescript::generate(&hir, &interner, &srcs);
 
