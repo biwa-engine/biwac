@@ -80,12 +80,19 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
             let batches = dep_graph.topo_batches().map_err(|_| {
                 biwac_base::print_error_finish_message(1);
             })?;
+            if !batches.is_empty() {
+                println!("{}", "Compiling dependencies...".green().bold(),);
+            }
             for batch in &batches {
                 // TODO: parallelize within batch using tokio
+
                 for dep_name in batch {
                     let dep_root = packages_dir.join(dep_name);
                     build_single_dep(dep_root, dep_name)?;
                 }
+            }
+            if !batches.is_empty() {
+                println!("{}", "Compiling dependencies finished!".green().bold(),);
             }
 
             // Load .biwameta for direct (root-level) dependencies only.
@@ -109,7 +116,7 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     )
     .map_err(|e| e.print_error_messages())?;
 
-    println!("{interner:#?}");
+    // println!("{interner:#?}");
 
     let hir = biwac_name_resolver::NameResolver::new(
         &metadata,
@@ -122,12 +129,7 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     .unwrap();
 
     // Persist self package's symbol metadata to disk for dependents.
-    let dep_meta = DepMetadata::new(&hir, &srcs, &interner);
-    let meta_bytes = dep_meta.encode_file();
-    let meta_path = build_dir_path.join(format!("{}.biwameta", metadata.metadata.name.value()));
-    std::fs::write(&meta_path, meta_bytes).map_err(|e| {
-        eprintln!("Error: failed to write {:?}: {}", meta_path, e);
-    })?;
+    persist_dep_metadata(&hir, &srcs, &interner, build_dir_path.clone(), &metadata)?;
 
     let hir = biwac_type_inferrer::TyCtx::new(hir).infer().unwrap();
 
@@ -148,7 +150,92 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
     if meta_path.exists() {
         return Ok(()); // cached
     }
-    compile(dep_root)
+
+    // compiling single dependency
+
+    let mut srcs = SourceHolder::default();
+    let mut interner = IdentInterner::new();
+
+    let metadata =
+        biwac_metadata_loader::try_load_package_metadata(dep_root.clone()).map_err(|e| {
+            e.print_error_message();
+            biwac_base::print_error_finish_message(1);
+        })?;
+    let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
+
+    println!(
+        "  {} {} v{}.{}.{}",
+        "Compiling...".green().bold(),
+        metadata.metadata.name.value(),
+        metadata.metadata.version.major(),
+        metadata.metadata.version.minor(),
+        metadata.metadata.version.patch()
+    );
+
+    // build directory preparation
+    let build_dir_path = dep_root.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
+
+    // Dependency building via DepGraph (BFS discovery + Kahn's topological batching)
+    //
+    // packages_dir: sibling directory of pkg_root_path (workspace root).
+    // Each package lives at packages_dir/<name>/.
+    let packages_dir = dep_root
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let root_dep_names: Vec<String> = metadata
+        .metadata
+        .dependencies
+        .iter()
+        .map(|d| d.name.value().to_string())
+        .collect();
+
+    let external_packages: Vec<(biwac_base::InternedIdent, Arc<DepMetadata>)> =
+        if !root_dep_names.is_empty() {
+            // Load .biwameta for direct (root-level) dependencies only.
+            let mut ext_pkgs = Vec::new();
+            for dep_name in &root_dep_names {
+                let dep_root = packages_dir.join(dep_name);
+                let dep_meta = load_dep_metadata(&dep_root, dep_name)?;
+                let dep_ident = interner.get_or_insert(dep_name);
+                ext_pkgs.push((dep_ident, Arc::new(dep_meta)));
+            }
+            ext_pkgs
+        } else {
+            Vec::new()
+        };
+
+    let pkg = biwac_package_loader::Pkg::try_load(
+        &metadata,
+        &mut interner,
+        &mut srcs,
+        dep_root.to_path_buf(),
+    )
+    .map_err(|e| e.print_error_messages())?;
+
+    let hir = biwac_name_resolver::NameResolver::new(
+        &metadata,
+        external_packages,
+        package_name_interned,
+        pkg,
+    )
+    .unwrap()
+    .try_resolve()
+    .unwrap();
+
+    // Persist self package's symbol metadata to disk for dependents.
+    persist_dep_metadata(&hir, &srcs, &interner, build_dir_path.clone(), &metadata)?;
+
+    let hir = biwac_type_inferrer::TyCtx::new(hir).infer().unwrap();
+
+    let bin = biwac_generator::arch::typescript::generate(&hir, &interner, &srcs);
+
+    write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
+
+    println!("    -> {}", "Finished!".green().bold(),);
+
+    Ok(())
 }
 
 /// Loads a .biwameta file from a built dependency's build directory.
@@ -161,6 +248,22 @@ fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> Result<DepMetadata, ()>
     })?;
     DepMetadata::decode_file(&data).map_err(|e| {
         eprintln!("Error: failed to decode {:?}: {:?}", meta_path, e);
+    })
+}
+
+// Persist self package's symbol metadata to disk for dependents.
+fn persist_dep_metadata(
+    hir: &biwac_hir::Hir,
+    srcs: &biwac_base::SourceHolder,
+    interner: &biwac_base::IdentInterner,
+    build_dir_path: PathBuf,
+    metadata: &biwac_base::MetadataHolder,
+) -> Result<(), ()> {
+    let dep_meta = DepMetadata::new(hir, srcs, interner);
+    let meta_bytes = dep_meta.encode_file();
+    let meta_path = build_dir_path.join(format!("{}.biwameta", metadata.metadata.name.value()));
+    std::fs::write(&meta_path, meta_bytes).map_err(|e| {
+        eprintln!("Error: failed to write {:?}: {}", meta_path, e);
     })
 }
 

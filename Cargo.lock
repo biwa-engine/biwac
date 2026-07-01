@@ -158,6 +158,7 @@ dependencies = [
  "biwac_base",
  "biwac_dependency_metadata",
  "biwac_generator",
+ "biwac_hir",
  "biwac_metadata_loader",
  "biwac_name_resolver",
  "biwac_package_loader",
