@@ -241,8 +241,10 @@ impl TyKind {
             (_, Self::Gen(_)) => true,
             (Self::LocGen(_), _) => true,
             (_, Self::LocGen(_)) => true,
-            (Self::Infer(_), _) => panic!("compiler bug: inferrence needed type cannot be impled"),
-            (_, Self::Infer(_)) => panic!("compiler bug: inferrence needed type cannot be impled"),
+            (Self::Infer(_), _) => true,
+            (_, Self::Infer(_)) => true,
+            // (Self::Infer(_), _) => panic!("compiler bug: inferrence needed type cannot be impled"),
+            // (_, Self::Infer(_)) => panic!("compiler bug: inferrence needed type cannot be impled"),
             (_, _) => false,
         }
     }
