@@ -14,15 +14,15 @@ pub struct DefId {
 }
 
 impl DefId {
-    pub const VOID_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::VOID_LOCAL_DEF_ID);
+    const VOID_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::VOID_LOCAL_DEF_ID);
 
-    pub const INT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::INT_LOCAL_DEF_ID);
+    const INT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::INT_LOCAL_DEF_ID);
 
-    pub const UINT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::UINT_LOCAL_DEF_ID);
+    const UINT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::UINT_LOCAL_DEF_ID);
 
-    pub const FLOAT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::FLOAT_LOCAL_DEF_ID);
+    const FLOAT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::FLOAT_LOCAL_DEF_ID);
 
-    pub const BOOL_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::BOOL_LOCAL_DEF_ID);
+    const BOOL_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::BOOL_LOCAL_DEF_ID);
 
     #[inline]
     pub const fn new(pkg: PackageId, local: PackageLocalDefId) -> Self {
@@ -80,8 +80,6 @@ impl PackageLocalDefId {
     pub const FLOAT_LOCAL_DEF_ID: Self = Self(3);
 
     pub const BOOL_LOCAL_DEF_ID: Self = Self(4);
-
-    // pub const INT_LOCAL_DEF_ID: Self = Self(0);
 
     pub const UNRESERVED_LOCAL_DEF_ID_MIN: u32 = 10;
 
@@ -153,6 +151,18 @@ macro_rules! impl_typed_def_id {
 }
 
 impl_typed_def_id!(TyDefId);
+
+impl TyDefId {
+    pub const VOID_TY_DEF_ID: Self = Self(DefId::VOID_DEF_ID);
+
+    pub const INT_TY_DEF_ID: Self = Self(DefId::INT_DEF_ID);
+
+    pub const UINT_TY_DEF_ID: Self = Self(DefId::UINT_DEF_ID);
+
+    pub const FLOAT_TY_DEF_ID: Self = Self(DefId::FLOAT_DEF_ID);
+
+    pub const BOOL_TY_DEF_ID: Self = Self(DefId::BOOL_DEF_ID);
+}
 impl_typed_def_id!(ValDefId);
 
 // 型定義側で

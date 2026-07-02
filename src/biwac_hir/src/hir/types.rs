@@ -319,6 +319,17 @@ impl TyKind {
             }
         }
     }
+
+    pub fn def_id(&self) -> Option<TyDefId> {
+        match self {
+            Self::Defined(defined_ty) => Some(defined_ty.def_id),
+            Self::Int => Some(TyDefId::INT_TY_DEF_ID),
+            Self::Float => Some(TyDefId::FLOAT_TY_DEF_ID),
+            Self::Bool => Some(TyDefId::BOOL_TY_DEF_ID),
+            Self::Void => Some(TyDefId::VOID_TY_DEF_ID),
+            Self::Gen(_) | Self::LocGen(_) | Self::Fn(_) | Self::Infer(_) => None,
+        }
+    }
 }
 
 impl Ty {
