@@ -14,15 +14,33 @@ pub struct DefId {
 }
 
 impl DefId {
+    pub const VOID_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::VOID_LOCAL_DEF_ID);
+
+    pub const INT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::INT_LOCAL_DEF_ID);
+
+    pub const UINT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::UINT_LOCAL_DEF_ID);
+
+    pub const FLOAT_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::FLOAT_LOCAL_DEF_ID);
+
+    pub const BOOL_DEF_ID: Self = Self::new_reserved(PackageLocalDefId::BOOL_LOCAL_DEF_ID);
+
     #[inline]
-    pub fn new(pkg: PackageId, local: PackageLocalDefId) -> Self {
+    pub const fn new(pkg: PackageId, local: PackageLocalDefId) -> Self {
         Self { pkg, local }
     }
 
     #[inline]
-    pub fn new_in_self_pkg(local: PackageLocalDefId) -> Self {
+    pub const fn new_in_self_pkg(local: PackageLocalDefId) -> Self {
         Self {
             pkg: PackageId::SELF_PACKAGE,
+            local,
+        }
+    }
+
+    #[inline]
+    const fn new_reserved(local: PackageLocalDefId) -> Self {
+        Self {
+            pkg: PackageId::BUILTIN_RESERVED_PACKAGE,
             local,
         }
     }
@@ -53,6 +71,20 @@ impl Hash for DefId {
 pub struct PackageLocalDefId(u32);
 
 impl PackageLocalDefId {
+    pub const VOID_LOCAL_DEF_ID: Self = Self(0);
+
+    pub const INT_LOCAL_DEF_ID: Self = Self(1);
+
+    pub const UINT_LOCAL_DEF_ID: Self = Self(2);
+
+    pub const FLOAT_LOCAL_DEF_ID: Self = Self(3);
+
+    pub const BOOL_LOCAL_DEF_ID: Self = Self(4);
+
+    // pub const INT_LOCAL_DEF_ID: Self = Self(0);
+
+    pub const UNRESERVED_LOCAL_DEF_ID_MIN: u32 = 10;
+
     #[inline]
     pub fn new(id: u32) -> Self {
         Self(id)

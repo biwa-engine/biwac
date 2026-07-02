@@ -104,7 +104,6 @@ name = "biwac"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
- "biwac_dependency_loader",
  "biwac_driver",
  "biwac_generator",
  "biwac_metadata_loader",
@@ -128,18 +127,6 @@ version = "0.1.0"
 dependencies = [
  "colored",
  "regex",
-]
-
-[[package]]
-name = "biwac_dependency_loader"
-version = "0.1.0"
-dependencies = [
- "biwac_base",
- "biwac_hir",
- "biwac_span",
- "regex",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -280,7 +267,6 @@ version = "0.1.0"
 dependencies = [
  "biwac_ast",
  "biwac_base",
- "biwac_dependency_loader",
  "biwac_dependency_metadata",
  "biwac_hir",
  "biwac_metadata_loader",

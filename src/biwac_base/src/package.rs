@@ -50,6 +50,10 @@ pub struct PackageId(u32);
 impl PackageId {
     pub const SELF_PACKAGE: PackageId = PackageId(0);
 
+    pub const BUILTIN_RESERVED_PACKAGE: PackageId = PackageId(1);
+
+    pub const UNRESERVED_PACKAGE_MIN: u32 = 2;
+
     #[inline]
     pub fn new(id: u32) -> Self {
         Self(id)

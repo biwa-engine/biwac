@@ -54,6 +54,7 @@ pub(crate) fn resolve_in_self_package(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_in_module(
     name_tree: &NameTree,
     pkg_name: InternedIdent,

@@ -68,7 +68,7 @@ impl DefCollector {
         let mut ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>> = HashMap::new();
         let mut ext_pkg_data: HashMap<PackageId, Arc<DepMetadata>> = HashMap::new();
         for (i, (pkg_ident, dep_arc)) in external_packages.into_iter().enumerate() {
-            let pkg_id = PackageId::new(i as u32 + 1); // 0 is SELF_PACKAGE
+            let pkg_id = PackageId::new(i as u32 + PackageId::UNRESERVED_PACKAGE_MIN);
             let view = DepMetadataModuleView::new_root(Arc::clone(&dep_arc), pkg_id);
             ext_pkg_views.insert(pkg_ident, Arc::new(view) as Arc<dyn PackageModuleView>);
             ext_pkg_data.insert(pkg_id, dep_arc);
@@ -266,6 +266,7 @@ impl DefCollector {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn collect_alias_direct_targets(
         &self,
         pkg_name: InternedIdent,
@@ -291,6 +292,7 @@ impl DefCollector {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn collect_alias_direct_targets_in_module(
         &self,
         pkg_name: InternedIdent,
@@ -394,6 +396,7 @@ impl DefCollector {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn collect_impls_in_module(
         &mut self,
         name_tree: &NameTree,
