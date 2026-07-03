@@ -193,6 +193,5 @@ fn expand_val_def_kind(val: &mut ValDefKind, aliases: &HashMap<TyDefId, TypeAlia
         ValDefKind::Fn(fn_def) => expand_fn_def(fn_def, aliases),
         ValDefKind::Native(fn_def) => expand_native_fn_def(fn_def, aliases),
         ValDefKind::NovelScene(scene) => expand_novel_scene_def(scene, aliases),
-        ValDefKind::ExternalFn(sig) => expand_fn_signature(sig, aliases),
     }
 }

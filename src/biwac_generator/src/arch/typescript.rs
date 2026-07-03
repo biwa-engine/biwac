@@ -205,7 +205,6 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
                     ValDefKind::Fn(f) => Some(f.as_oxc_global(id, &ctx)),
                     ValDefKind::Native(f) => Some(f.as_oxc_global(id, &ctx)),
                     ValDefKind::NovelScene(n) => Some(n.as_oxc_global(id, &ctx)),
-                    ValDefKind::ExternalFn(_) => None,
                 }
             })),
         &allocator,

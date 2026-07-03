@@ -11,7 +11,7 @@ pub enum ValDefKind {
     Fn(Box<FnDef>),
     Native(Box<NativeFnDef>),
     NovelScene(Box<NovelSceneDef>),
-    ExternalFn(Box<FnSignature>),
+    // ExternalFn(Box<FnSignature>),
 }
 
 // impl block 内での

@@ -699,12 +699,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             Primary::FnCall(c) => match &c.callee {
                 Callee::Fn(def_id) => {
                     // let callee_ty = self.tctx.hir.get_fn_sign(vid).unwrap().as_ty();
-                    let callee_ty = match self.tctx.get_value_definition(def_id).unwrap() {
-                        ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),
-                        ValDefKind::Native(fn_def) => fn_def.signature.as_ty(),
-                        ValDefKind::NovelScene(scene_def) => scene_def.signature.as_ty(),
-                        ValDefKind::ExternalFn(fn_signature) => fn_signature.as_ty(),
-                    };
+                    let callee_ty = self.tctx.get_value_ty(def_id).unwrap();
 
                     let args = c
                         .args
@@ -791,13 +786,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
                 let def_id = self.tctx.get_method_def_id(&left, &m.method)?;
                 m.def_id.set(def_id).unwrap();
-                let callee_ty = match self.tctx.get_value_definition(&def_id).unwrap() {
-                    // TODO: check method form or not
-                    ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),
-                    ValDefKind::Native(fn_def) => fn_def.signature.as_ty(),
-                    ValDefKind::ExternalFn(fn_signature) => fn_signature.as_ty(),
-                    ValDefKind::NovelScene(_) => panic!("compiler bug: unexpected novel scene"),
-                };
+                let callee_ty = self.tctx.get_value_ty(&def_id).unwrap();
 
                 let args = m
                     .args
@@ -1162,7 +1151,7 @@ impl<'a> TyCtx<'a> {
                     // 計算した型を記録
                     fn_ty_infos.push((*def_id, self.infer_fn_body(&n.body, &n.signature)?));
                 }
-                ValDefKind::Native(_) | ValDefKind::ExternalFn(_) => {
+                ValDefKind::Native(_) => {
                     // nothing to do
                 }
             }
@@ -1184,7 +1173,7 @@ impl<'a> TyCtx<'a> {
                     n.expr_tys = ty_info.expr_tys;
                     n.var_tys = ty_info.var_tys;
                 }
-                ValDefKind::Native(_) | ValDefKind::ExternalFn(_) => {
+                ValDefKind::Native(_) => {
                     // nothing to do
                 }
             }

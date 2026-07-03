@@ -6,7 +6,7 @@ use std::{
 pub(crate) mod symbols;
 pub(crate) mod types;
 
-use biwac_base::{InternedIdent, ModPath, PackageId, PackageName};
+use biwac_base::{InternedIdent, PackageId, PackageName};
 use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId};
 
 use crate::{
@@ -46,6 +46,9 @@ pub struct Hir {
     pub ty_aliases: HashMap<TyDefId, TypeAliasDef>,
 
     pub module_global_natives: Vec<NativeCode>,
+
+    /// self package の assoc fn ValDefId -> (TyDefId, method 名 InternedIdent) マップ
+    pub assoc_val_map: HashMap<ValDefId, (TyDefId, InternedIdent)>,
 
     // 外部パッケージのシンボルで、
     // 使用されていることを確認したシンボル
@@ -91,6 +94,18 @@ impl Hir {
         native_codes: Vec<NativeCode>,
     ) -> Self {
         let ty_aliases = HashMap::new();
+        let mut assoc_val_map = HashMap::new();
+        for (ty_def_id, ty_impl) in &tys {
+            if !ty_def_id.pkg().is_self() && ty_def_id.pkg() != PackageId::BUILTIN_RESERVED_PACKAGE
+            {
+                continue;
+            }
+            for (method_id, impl_list) in &ty_impl.vals {
+                for val_def_id in impl_list.vals.keys() {
+                    assoc_val_map.insert(*val_def_id, (*ty_def_id, *method_id));
+                }
+            }
+        }
 
         Self {
             deps_recorder: RefCell::new(DepsRecorder::new(pkg_name.clone())),
@@ -99,6 +114,7 @@ impl Hir {
             vals,
             tys,
             ty_aliases,
+            assoc_val_map,
             module_global_natives: native_codes,
         }
     }

@@ -158,7 +158,6 @@ impl DepMetadata {
                     ValDefKind::Fn(f) => (&f.name, &f.signature, f.impl_genargs.as_slice()),
                     ValDefKind::Native(f) => (&f.name, &f.signature, f.impl_genargs.as_slice()),
                     ValDefKind::NovelScene(ns) => (&ns.name, &ns.signature, [].as_slice()),
-                    ValDefKind::ExternalFn(_) => return None,
                 };
                 Some(TopFnItem {
                     val_def_id: *def_id,
@@ -579,13 +578,13 @@ impl DepMetadata {
         sym_idx: u32,
         pkg_id: biwac_base::PackageId,
         interner: &mut biwac_base::IdentInterner,
-    ) -> Option<biwac_hir::ValDefKind> {
+    ) -> Option<biwac_hir::FnSignature> {
         let body = self.get_symbol_body(sym_idx as usize).ok()?;
         let SymbolBody::Fn(fn_data) = body else {
             return None;
         };
         let sig = self.impl_disk_fn_to_signature(sym_idx, fn_data, pkg_id, interner);
-        Some(biwac_hir::ValDefKind::ExternalFn(Box::new(sig)))
+        Some(sig)
     }
 
     /// 外部パッケージの struct シンボル1つを DefinedTyImpl に変換する。

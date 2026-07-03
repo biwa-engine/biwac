@@ -18,16 +18,13 @@ pub struct TyCtx<'a> {
     /// &'a mut IdentInterner を RefCell でラップして &self メソッドから変更可能にする。
     /// interner は borrow_mut() で短時間だけ借用し、返却後に解放する。
     pub(super) interner: RefCell<&'a mut IdentInterner>,
-    /// fn シンボルの遅延キャッシュ (self package の assoc fn + 外部パッケージの fn)。
-    /// Box<ValDefKind> によりヒープ番地が安定し、&ValDefKind を &self 寿命で返せる。
-    pub(super) val_cache: RefCell<HashMap<ValDefId, Box<ValDefKind>>>,
     /// 外部パッケージの struct シンボル遅延キャッシュ。同上。
     pub(super) ext_ty_cache: RefCell<HashMap<TyDefId, Box<DefinedTyImpl>>>,
-    /// assoc fn ValDefId → (struct TyDefId, method 名 InternedIdent) マップ。
-    /// self package 分は TyCtx::new() で hir.tys を走査して一括登録。
+    /// 外部パッケージの assoc fn ValDefId -> (TyDefId, method 名 InternedIdent) マップ。
+    /// self package 分は Hir 内にすでにある
     /// 外部パッケージ分は get_ty_impl で struct を遅延ロードした際に追加。
     /// get_value_definition から assoc fn を引く際に使用する。
-    pub(super) assoc_val_map: RefCell<HashMap<ValDefId, (TyDefId, InternedIdent)>>,
+    pub(super) ext_assoc_val_map: RefCell<HashMap<ValDefId, (TyDefId, InternedIdent)>>,
 }
 
 impl<'a> TyCtx<'a> {
@@ -36,29 +33,12 @@ impl<'a> TyCtx<'a> {
         ext_pkgs: Vec<(PackageId, Arc<DepMetadata>)>,
         interner: &'a mut IdentInterner,
     ) -> Self {
-        // self package の assoc fn を assoc_val_map に一括登録する。
-        // hir.vals には top-level fn のみ存在するため、assoc fn は別途登録が必要。
-        // self package + プリミティブ型 (BUILTIN_RESERVED_PACKAGE) の assoc fn を登録する。
-        let mut assoc_val_map: HashMap<ValDefId, (TyDefId, InternedIdent)> = HashMap::new();
-        for (ty_def_id, ty_impl) in &hir.tys {
-            if !ty_def_id.pkg().is_self() && ty_def_id.pkg() != PackageId::BUILTIN_RESERVED_PACKAGE
-            {
-                continue;
-            }
-            for (method_id, impl_list) in &ty_impl.vals {
-                for val_def_id in impl_list.vals.keys() {
-                    assoc_val_map.insert(*val_def_id, (*ty_def_id, *method_id));
-                }
-            }
-        }
-
         Self {
             hir,
             ext_pkgs,
             interner: RefCell::new(interner),
-            val_cache: RefCell::new(HashMap::new()),
             ext_ty_cache: RefCell::new(HashMap::new()),
-            assoc_val_map: RefCell::new(assoc_val_map),
+            ext_assoc_val_map: RefCell::new(HashMap::new()),
         }
     }
 
@@ -100,7 +80,7 @@ impl<'a> TyCtx<'a> {
         // 外部 struct の assoc fn を assoc_val_map に登録する。
         // ty_impl を Box に移す前に登録する。
         {
-            let mut assoc_map = self.assoc_val_map.borrow_mut();
+            let mut assoc_map = self.ext_assoc_val_map.borrow_mut();
             for (method_id, impl_list) in &ty_impl.vals {
                 for val_def_id in impl_list.vals.keys() {
                     assoc_map
@@ -121,70 +101,65 @@ impl<'a> TyCtx<'a> {
             .and_then(|di| di.ty_content.as_ref())
     }
 
-    pub(super) fn get_value_definition(&self, def_id: &ValDefId) -> Option<&ValDefKind> {
-        // self package の top-level fn は hir.vals から直接返す。
-        if def_id.pkg().is_self()
-            && let Some(v) = self.hir.vals.get(def_id)
-        {
-            return Some(v);
-            // hir.vals に存在しない場合は assoc fn の可能性があるため以下の共通パスへ進む。
-        }
+    pub(super) fn get_value_ty(&self, def_id: &ValDefId) -> Option<Ty> {
+        if def_id.pkg().is_self() {
+            // self package の top-level fn は hir.vals から直接返す。
+            if let Some(v) = self.hir.vals.get(def_id) {
+                let fty = match v {
+                    ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),
+                    ValDefKind::Native(fn_def) => fn_def.signature.as_ty(),
+                    ValDefKind::NovelScene(scene_def) => scene_def.signature.as_ty(),
+                };
+                Some(fty)
+            } else {
+                let (ty_def_id, assoc_name) = self.hir.assoc_val_map.get(def_id)?;
 
-        // val_cache 確認 (assoc fn のキャッシュを含む)
-        {
-            let cache = self.val_cache.borrow();
-            if let Some(b) = cache.get(def_id) {
-                // SAFETY: get_ty_impl のコメントと同じ理由で安全。
-                return Some(unsafe { &*(b.as_ref() as *const ValDefKind) });
+                match &self
+                    .hir
+                    .tys
+                    .get(ty_def_id)
+                    .unwrap()
+                    .vals
+                    .get(assoc_name)?
+                    .vals
+                    .get(def_id)
+                    .unwrap()
+                    .val_content
+                {
+                    AssocValDefKind::Fn(fn_def) => Some(fn_def.signature.as_ty()),
+                    AssocValDefKind::NativeFn(fn_def) => Some(fn_def.signature.as_ty()),
+                }
             }
-        }
+        } else {
+            // 外部パッケージの top-level fn パス
+            let pkg_id = def_id.pkg();
+            let dep = self.find_ext_dep(pkg_id)?;
+            if let Some(sign) = {
+                let mut ig = self.interner.borrow_mut();
+                dep.get_ext_val_kind(def_id.local_idx(), pkg_id, &mut ig)
+            } {
+                Some(sign.as_ty())
+            } else {
+                // 外部パッケージ assoc fn マップ確認
+                // val_content から FnSignature を取り出して ValDefKind::ExternalFn に変換してキャッシュする。
+                let assoc_map = self.ext_assoc_val_map.borrow();
+                let &(ty_def_id, method_id) = assoc_map.get(def_id)?;
 
-        // assoc fn マップ確認 (self package + 外部パッケージ共通)。
-        // val_content から FnSignature を取り出して ValDefKind::ExternalFn に変換してキャッシュする。
-        // self / external 共に署名が取れれば型推論上は等価であるため ExternalFn で統一する。
-        {
-            let assoc_map = self.assoc_val_map.borrow();
-            if let Some(&(ty_def_id, method_id)) = assoc_map.get(def_id) {
                 drop(assoc_map); // get_ty_impl が ext_ty_cache を borrow するため先に解放
 
                 let ty_impl = self.get_ty_impl(&ty_def_id)?;
-                let sig =
-                    ty_impl
-                        .vals
-                        .get(&method_id)?
-                        .vals
-                        .get(def_id)
-                        .map(|pair| match &pair.val_content {
-                            AssocValDefKind::NativeFn(f) => Some(f.signature.clone()),
-                            AssocValDefKind::Fn(f) => Some(f.signature.clone()),
-                        })??;
-
-                let mut cache = self.val_cache.borrow_mut();
-                let b = cache
-                    .entry(*def_id)
-                    .or_insert_with(|| Box::new(ValDefKind::ExternalFn(Box::new(sig))));
-                // SAFETY: 同上
-                return Some(unsafe { &*(b.as_ref() as *const ValDefKind) });
+                ty_impl
+                    .vals
+                    .get(&method_id)?
+                    .vals
+                    .get(def_id)
+                    .map(|pair| match &pair.val_content {
+                        AssocValDefKind::NativeFn(f) => Some(f.signature.clone()),
+                        AssocValDefKind::Fn(f) => Some(f.signature.clone()),
+                    })?
+                    .map(|sign| sign.as_ty())
             }
         }
-
-        // self package でここまで来た場合は該当なし (assoc fn でも top-level fn でもない)
-        if def_id.pkg().is_self() {
-            return None;
-        }
-
-        // 外部パッケージの top-level fn パス
-        let pkg_id = def_id.pkg();
-        let dep = self.find_ext_dep(pkg_id)?;
-        let val_kind = {
-            let mut ig = self.interner.borrow_mut();
-            dep.get_ext_val_kind(def_id.local_idx(), pkg_id, &mut ig)?
-        };
-
-        let mut cache = self.val_cache.borrow_mut();
-        let b = cache.entry(*def_id).or_insert_with(|| Box::new(val_kind));
-        // SAFETY: 同上
-        Some(unsafe { &*(b.as_ref() as *const ValDefKind) })
     }
 
     pub(super) fn get_method_def_id(&self, ty: &Ty, method: &Ident) -> Result<ValDefId, TyError> {

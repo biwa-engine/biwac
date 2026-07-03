@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biwac_base::{IdentInterner, InternedIdent, ModPath, SourceHolder};
-use biwac_hir::{ExprId, Hir, Ident, Ty, TyDefKind, ValDefKind};
+use biwac_hir::{AssocValDefKind, ExprId, Hir, Ident, Ty, TyDefKind, ValDefKind};
 use biwac_span::{TyDefId, ValDefId, VarId};
 
 pub(super) struct AstBuildCtx<'a> {
@@ -50,11 +50,30 @@ impl<'a> AstBuildCtx<'a> {
     }
 
     fn get_value_ident(&self, def_id: &ValDefId) -> &Ident {
-        match self.hir.vals.get(def_id).unwrap() {
-            ValDefKind::Fn(fn_def) => &fn_def.name,
-            ValDefKind::Native(fn_def) => &fn_def.name,
-            ValDefKind::NovelScene(scene_def) => &scene_def.name,
-            ValDefKind::ExternalFn(_) => todo!(),
+        if let Some(val) = self.hir.vals.get(def_id) {
+            match val {
+                ValDefKind::Fn(fn_def) => &fn_def.name,
+                ValDefKind::Native(fn_def) => &fn_def.name,
+                ValDefKind::NovelScene(scene_def) => &scene_def.name,
+            }
+        } else {
+            let (ty_def_id, assoc_name) = self.hir.assoc_val_map.get(def_id).unwrap();
+            match &self
+                .hir
+                .tys
+                .get(ty_def_id)
+                .unwrap()
+                .vals
+                .get(assoc_name)
+                .unwrap()
+                .vals
+                .get(def_id)
+                .unwrap()
+                .val_content
+            {
+                AssocValDefKind::Fn(fn_def) => &fn_def.name,
+                AssocValDefKind::NativeFn(fn_def) => &fn_def.name,
+            }
         }
     }
 
@@ -81,7 +100,6 @@ impl<'a> AstBuildCtx<'a> {
     }
     fn get_symbol_mangled(&self, ident: &Ident) -> String {
         let module = self.srcs.mods.get(&ident.span.module()).unwrap();
-        println!("packages: {:?}", self.hir.packages);
         let pkg_name_interned = self.hir.packages.get(&module.pkg_id).unwrap();
         let pkg_name = self.interner.get_str(pkg_name_interned).unwrap();
         let module_path = &module.modu;
