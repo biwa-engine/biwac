@@ -6,7 +6,7 @@ use std::{
 use biwac_ast::{AbsolutePathHeader, Globals, ModAst, Path, PathSegmentResolution};
 use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{
-    DepMetadata, DepMetadataModuleView, ExternalChildKind, ExternalChildRef, PackageModuleView,
+    DepMetadataModuleView, ExternalChildKind, ExternalChildRef, PackageModuleView,
 };
 use biwac_span::{DefIdKind, TyDefId};
 

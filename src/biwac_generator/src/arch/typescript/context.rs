@@ -81,6 +81,7 @@ impl<'a> AstBuildCtx<'a> {
     }
     fn get_symbol_mangled(&self, ident: &Ident) -> String {
         let module = self.srcs.mods.get(&ident.span.module()).unwrap();
+        println!("packages: {:?}", self.hir.packages);
         let pkg_name_interned = self.hir.packages.get(&module.pkg_id).unwrap();
         let pkg_name = self.interner.get_str(pkg_name_interned).unwrap();
         let module_path = &module.modu;

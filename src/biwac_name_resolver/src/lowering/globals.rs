@@ -1,20 +1,17 @@
 use std::collections::HashMap;
 
 use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef};
-use biwac_base::{InternedIdent, ModPath};
+use biwac_base::InternedIdent;
 use biwac_hir::{
-    AssocValDefKind, DefinedTy, DefinedTyImpl, FnArgDecl, FnBody, FnDef, FnSignature, Hir, Ident,
+    AssocValDefKind, DefinedTy, DefinedTyImpl, FnArgDecl, FnBody, FnDef, FnSignature, Ident,
     NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
     TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
 };
-use biwac_span::{GenDefId, LocalGenDefId, Span, ValDefId, VarId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
 
-use crate::ResolveError;
+use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
-use super::{
-    ExprLowerCtx, alias_expansion, expressions::lower_expr, statements::lower_stmt,
-    ty_from_typ_repr,
-};
+use super::{ExprLowerCtx, expressions::lower_expr, statements::lower_stmt, ty_from_typ_repr};
 
 pub(super) fn build_fn_signature(
     args: &ArgDeclList,
@@ -173,15 +170,14 @@ fn collect_impl_block_genargs_map(
 }
 
 pub(super) fn lower_fn_def(
-    hir: &mut Hir,
     fn_def: &biwac_ast::FnDef,
     impl_genargs: Vec<(Ident, LocalGenDefId)>,
     errors: &mut Vec<ResolveError>,
-) {
-    let val_def_id = match fn_def.def_id.get() {
-        Some(id) => *id,
-        None => return,
-    };
+) -> (ValDefId, ValDefKind) {
+    let val_def_id = *fn_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
 
     let signature = build_fn_signature(
         &fn_def.args,
@@ -201,7 +197,7 @@ pub(super) fn lower_fn_def(
         errors,
     );
 
-    hir.vals.insert(
+    (
         val_def_id,
         ValDefKind::Fn(Box::new(FnDef::new(
             fn_def.id.clone().into(),
@@ -209,19 +205,18 @@ pub(super) fn lower_fn_def(
             body,
             impl_genargs,
         ))),
-    );
+    )
 }
 
 pub(super) fn lower_native_fn_def(
-    hir: &mut Hir,
     fn_def: &biwac_ast::NativeFnDef,
     impl_genargs: Vec<(Ident, LocalGenDefId)>,
     _errors: &mut Vec<ResolveError>,
-) {
-    let val_def_id = match fn_def.def_id.get() {
-        Some(id) => *id,
-        None => return,
-    };
+) -> (ValDefId, ValDefKind) {
+    let val_def_id = *fn_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
 
     let signature = build_fn_signature(
         &fn_def.args,
@@ -231,7 +226,7 @@ pub(super) fn lower_native_fn_def(
         fn_def.span.clone(),
     );
 
-    hir.vals.insert(
+    (
         val_def_id,
         ValDefKind::Native(Box::new(NativeFnDef::new(
             fn_def.id.clone().into(),
@@ -241,26 +236,38 @@ pub(super) fn lower_native_fn_def(
             signature,
             impl_genargs,
         ))),
-    );
+    )
 }
 
-pub(crate) fn lower_type_def(hir: &mut Hir, type_def: &TypeDef, errors: &mut Vec<ResolveError>) {
+pub(crate) fn lower_type_def(
+    type_def: &TypeDef,
+    errors: &mut Vec<ResolveError>,
+) -> Vec<(TyDefId, DefinedTyImpl)> {
+    let mut tys = Vec::new();
+
     match type_def {
-        TypeDef::Struct(s) => lower_struct_def(hir, s, errors),
-        TypeDef::TypeAlias(a) => lower_type_alias(hir, a, errors),
-        TypeDef::NativeTypeAlias(n) => lower_native_type_alias(hir, n),
+        TypeDef::Struct(s) => {
+            tys.push(lower_struct_def(s, errors));
+        }
+        TypeDef::NativeTypeAlias(n) => {
+            tys.push(lower_native_type_alias(n));
+        }
+        TypeDef::TypeAlias(_) => {
+            // nothing to do
+        } // TypeDef::TypeAlias(a) => lower_type_alias(hir, a, errors),
     }
+
+    tys
 }
 
 fn lower_struct_def(
-    hir: &mut Hir,
     struct_def: &biwac_ast::StructDef,
     _errors: &mut Vec<ResolveError>,
-) {
-    let ty_def_id = match struct_def.def_id.get() {
-        Some(id) => *id,
-        None => return,
-    };
+) -> (TyDefId, DefinedTyImpl) {
+    let ty_def_id = *struct_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
 
     let genargs: Vec<GenDefId> = struct_def
         .genargs
@@ -289,25 +296,24 @@ fn lower_struct_def(
         members,
         genargs,
     }));
-    let fallback = DefinedTyImpl {
-        ty_content: Some(ty_content.clone()),
-        vals: HashMap::new(),
-    };
-    hir.tys
-        .entry(ty_def_id)
-        .or_insert_with(|| fallback)
-        .ty_content = Some(ty_content);
+
+    (
+        ty_def_id,
+        DefinedTyImpl {
+            ty_content: Some(ty_content.clone()),
+            vals: HashMap::new(),
+        },
+    )
 }
 
 fn lower_type_alias(
-    hir: &mut Hir,
     alias_def: &biwac_ast::TypeAlias,
     _errors: &mut Vec<ResolveError>,
-) {
-    let ty_def_id = match alias_def.def_id.get() {
-        Some(id) => *id,
-        None => return,
-    };
+) -> (TyDefId, TypeAliasDef) {
+    let ty_def_id = *alias_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
 
     let genargs: Vec<GenDefId> = alias_def
         .genargs
@@ -327,21 +333,21 @@ fn lower_type_alias(
 
     let right = ty_from_typ_repr(&alias_def.right, None);
 
-    hir.ty_aliases.insert(
+    (
         ty_def_id,
         TypeAliasDef {
             name: alias_def.ident.clone().into(),
             genargs,
             right,
         },
-    );
+    )
 }
 
-fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlias) {
-    let ty_def_id = match native_def.def_id.get() {
-        Some(id) => *id,
-        None => return,
-    };
+fn lower_native_type_alias(native_def: &biwac_ast::NativeTypeAlias) -> (TyDefId, DefinedTyImpl) {
+    let ty_def_id = *native_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
 
     let genargs: Vec<Ident> = native_def
         .genargs
@@ -360,25 +366,27 @@ fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlia
         native: native_def.native.clone(),
         native_span: native_def.native_span.clone(),
     }));
-    let fallback = DefinedTyImpl {
-        ty_content: Some(ty_content.clone()),
-        vals: HashMap::new(),
-    };
-    hir.tys
-        .entry(ty_def_id)
-        .or_insert_with(|| fallback)
-        .ty_content = Some(ty_content);
+
+    (
+        ty_def_id,
+        DefinedTyImpl {
+            ty_content: Some(ty_content.clone()),
+            vals: HashMap::new(),
+        },
+    )
 }
 
 pub(super) fn lower_impl_block(
-    hir: &mut Hir,
+    tys: &mut HashMap<TyDefId, DefinedTyImpl>,
     impl_block: &biwac_ast::ImplBlock,
+    impl_collector: &ImplCollector,
     errors: &mut Vec<ResolveError>,
 ) {
-    // Expand type aliases so we register under the canonical type, not the alias.
-    let raw_self_ty = ty_from_typ_repr(&impl_block.self_typ, None);
-    let aliases = hir.ty_aliases.clone();
-    let self_ty_kind = alias_expansion::expand_ty(raw_self_ty, &aliases).kind;
+    let self_ty_kind = impl_collector
+        .impl_self_tys
+        .get(impl_block.impl_id.get().unwrap())
+        .unwrap()
+        .clone();
     let impl_genargs = collect_impl_genargs(impl_block);
     let impl_block_genargs_map = collect_impl_block_genargs_map(impl_block);
 
@@ -412,7 +420,7 @@ pub(super) fn lower_impl_block(
             impl_genargs.clone(),
         );
         register_impl_val(
-            hir,
+            tys,
             *fn_def.def_id.get().unwrap(),
             &self_ty_kind,
             fn_def.id.id,
@@ -450,7 +458,7 @@ pub(super) fn lower_impl_block(
             impl_genargs.clone(),
         );
         register_impl_val(
-            hir,
+            tys,
             *method_def.def_id.get().unwrap(),
             &self_ty_kind,
             method_def.id.id,
@@ -477,7 +485,7 @@ pub(super) fn lower_impl_block(
             impl_genargs.clone(),
         );
         register_impl_val(
-            hir,
+            tys,
             *fn_def.def_id.get().unwrap(),
             &self_ty_kind,
             fn_def.id.id,
@@ -508,7 +516,7 @@ pub(super) fn lower_impl_block(
             impl_genargs.clone(),
         );
         register_impl_val(
-            hir,
+            tys,
             *method_def.def_id.get().unwrap(),
             &self_ty_kind,
             method_def.id.id,
@@ -520,7 +528,7 @@ pub(super) fn lower_impl_block(
 }
 
 fn register_impl_val(
-    hir: &mut Hir,
+    tys: &mut HashMap<TyDefId, DefinedTyImpl>,
     def_id: ValDefId,
     self_ty_kind: &TyKind,
     name: InternedIdent,
@@ -530,7 +538,7 @@ fn register_impl_val(
 ) {
     match self_ty_kind {
         TyKind::Defined(defined_ty) => {
-            let entry = hir.tys.get_mut(&defined_ty.def_id).unwrap();
+            let entry = tys.get_mut(&defined_ty.def_id).unwrap();
             entry
                 .vals
                 .entry(name)
@@ -549,7 +557,7 @@ fn register_impl_val(
         }
         other => {
             if let Some(prim_def_id) = other.def_id() {
-                let entry = hir.tys.entry(prim_def_id).or_insert_with(|| DefinedTyImpl {
+                let entry = tys.entry(prim_def_id).or_insert_with(|| DefinedTyImpl {
                     ty_content: None,
                     vals: HashMap::new(),
                 });
@@ -574,9 +582,6 @@ fn register_impl_val(
     }
 }
 
-pub(super) fn lower_native_code(hir: &mut Hir, modpath: &ModPath, native: &biwac_ast::NativeCode) {
-    hir.module_global_natives
-        .entry(modpath.clone())
-        .or_default()
-        .push(NativeCode::from(native));
+pub(super) fn lower_native_code(native: &biwac_ast::NativeCode) -> NativeCode {
+    NativeCode::from(native)
 }

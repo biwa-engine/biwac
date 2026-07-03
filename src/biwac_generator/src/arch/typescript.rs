@@ -36,11 +36,7 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
 
     // module global native code は、必ず先頭に展開される
     let mut body = oxc_allocator::Vec::new_in(&allocator);
-    for native in hir
-        .module_global_natives
-        .values()
-        .flat_map(|natives| natives.iter())
-    {
+    for native in &hir.module_global_natives {
         body.extend(native_code_as_oxc(native, &ctx));
     }
 

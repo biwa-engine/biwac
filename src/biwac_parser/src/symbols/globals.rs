@@ -401,6 +401,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                             self.next();
 
                             return Ok(Some(Globals::ImplBlock(ImplBlock {
+                                impl_id: OnceCell::new(),
                                 assoc_fns,
                                 methods,
                                 native_assoc_fns,

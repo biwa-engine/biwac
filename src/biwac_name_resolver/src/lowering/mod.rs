@@ -4,73 +4,134 @@ mod globals;
 mod novel;
 mod statements;
 
+use std::collections::HashMap;
+
 pub(crate) use expressions::ExprLowerCtx;
 
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
-use biwac_base::PackageName;
-use biwac_hir::{DefinedTy, Hir, Ty, TyKind};
+use biwac_base::{InternedIdent, PackageId, PackageName};
+use biwac_hir::{DefinedTy, DefinedTyImpl, Hir, Ty, TyKind, ValDefKind};
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId, ValDefId};
 
-use crate::ResolveError;
+use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
-pub(crate) fn lower(pkg_name: PackageName, pkg: Pkg) -> Result<Hir, Vec<ResolveError>> {
-    let mut hir = Hir::new(pkg_name);
+pub(crate) fn lower(
+    pkg_name: PackageName,
+    pkg: Pkg,
+    pkg_names: HashMap<PackageId, InternedIdent>,
+    impl_collector: &ImplCollector,
+) -> Result<Hir, Vec<ResolveError>> {
     let mut errors = Vec::new();
 
     // Pass 1: register all type definitions so impl blocks can reference them.
-    lower_module_types(&mut hir, &pkg.root_module, &mut errors);
+    let mut tys = lower_module_types(&pkg.root_module, &mut errors)
+        .into_iter()
+        .map(|(def_id, ty)| (def_id, ty))
+        .collect();
 
-    // Pass 2: expand type aliases recursively, detect cycles.
-    alias_expansion::expand_aliases(&mut hir, &mut errors);
+    // NOTE: maybe unnecessary because alias expanded (and cycle detected) in resolving path.
+    //
+    // // Pass 2: expand type aliases recursively, detect cycles.
+    // alias_expansion::expand_aliases(&mut hir, &mut errors);
+
+    // Pass 2: lower impl blocks
+    lower_impl_blocks(&mut tys, &pkg.root_module, impl_collector, &mut errors);
 
     // Pass 3: lower all values (fns, impls, novel scenes, native code).
-    lower_module_vals(&mut hir, &pkg.root_module, &mut errors);
+    let vals = lower_module_vals(&pkg.root_module, &mut errors)
+        .into_iter()
+        .map(|(def_id, val)| (def_id, val))
+        .collect();
+
+    // Pass 4: lower native codes
+    let native_codes = lower_native_codes(&pkg.root_module);
 
     if errors.is_empty() {
-        Ok(hir)
+        Ok(Hir::new(pkg_name, pkg_names, tys, vals, native_codes))
     } else {
         Err(errors)
     }
 }
 
-fn lower_module_types(hir: &mut Hir, module: &LoadedModule, errors: &mut Vec<ResolveError>) {
+fn lower_module_types(
+    module: &LoadedModule,
+    errors: &mut Vec<ResolveError>,
+) -> Vec<(TyDefId, DefinedTyImpl)> {
+    let mut tys = Vec::new();
+
     for g in &module.ast.globals {
         if let biwac_ast::Globals::TypeDef(type_def) = g {
-            globals::lower_type_def(hir, type_def, errors);
+            tys.extend(globals::lower_type_def(type_def, errors));
         }
     }
     for child in module.children.values() {
-        lower_module_types(hir, child, errors);
+        tys.extend(lower_module_types(child, errors));
+    }
+
+    tys
+}
+
+fn lower_impl_blocks(
+    tys: &mut HashMap<TyDefId, DefinedTyImpl>,
+    module: &LoadedModule,
+    impl_collector: &ImplCollector,
+    errors: &mut Vec<ResolveError>,
+) {
+    for g in &module.ast.globals {
+        if let biwac_ast::Globals::ImplBlock(impl_block) = g {
+            globals::lower_impl_block(tys, impl_block, impl_collector, errors);
+        }
+    }
+    for child in module.children.values() {
+        lower_impl_blocks(tys, child, impl_collector, errors);
     }
 }
 
-fn lower_module_vals(hir: &mut Hir, module: &LoadedModule, errors: &mut Vec<ResolveError>) {
+fn lower_module_vals(
+    module: &LoadedModule,
+    errors: &mut Vec<ResolveError>,
+) -> Vec<(ValDefId, ValDefKind)> {
+    let mut vals = Vec::new();
+
     for g in &module.ast.globals {
         match g {
             biwac_ast::Globals::FnDef(fn_def) => {
-                globals::lower_fn_def(hir, fn_def, vec![], errors);
+                vals.push(globals::lower_fn_def(fn_def, vec![], errors));
             }
             biwac_ast::Globals::NativeFnDef(fn_def) => {
-                globals::lower_native_fn_def(hir, fn_def, vec![], errors);
-            }
-            biwac_ast::Globals::ImplBlock(impl_block) => {
-                globals::lower_impl_block(hir, impl_block, errors);
+                vals.push(globals::lower_native_fn_def(fn_def, vec![], errors));
             }
             biwac_ast::Globals::NovelScene(scene_def) => {
-                novel::lower_novel_scene(hir, scene_def, errors);
-            }
-            biwac_ast::Globals::NativeCode(code) => {
-                globals::lower_native_code(hir, &module.ast.modpath, code);
+                vals.push(novel::lower_novel_scene(scene_def, errors));
             }
             biwac_ast::Globals::TypeDef(_)
             | biwac_ast::Globals::Import(_)
-            | biwac_ast::Globals::VarDecl(_) => {}
+            | biwac_ast::Globals::VarDecl(_)
+            | biwac_ast::Globals::ImplBlock(_)
+            | biwac_ast::Globals::NativeCode(_) => {}
         }
     }
     for child in module.children.values() {
-        lower_module_vals(hir, child, errors);
+        vals.extend(lower_module_vals(child, errors));
     }
+
+    vals
+}
+
+fn lower_native_codes(module: &LoadedModule) -> Vec<biwac_hir::NativeCode> {
+    let mut codes = Vec::new();
+
+    for g in &module.ast.globals {
+        if let biwac_ast::Globals::NativeCode(native) = g {
+            codes.push(globals::lower_native_code(native));
+        }
+    }
+    for child in module.children.values() {
+        codes.extend(lower_native_codes(child));
+    }
+
+    codes
 }
 
 /// Converts a resolved TypRepr to TyKind.

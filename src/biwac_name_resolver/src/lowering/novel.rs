@@ -1,8 +1,9 @@
 use biwac_ast::symbols::novel::{NovelBlockStmt, NovelStmt};
 use biwac_hir::{
-    AssignStmt, BlockStmt, DecledVar, ExprStmt, FnBody, Hir, Ident, NovelSceneDef, NovelWaitStmt,
+    AssignStmt, BlockStmt, DecledVar, ExprStmt, FnBody, Ident, NovelSceneDef, NovelWaitStmt,
     NovelWriteStmt, ReturnStmt, Stmt, Ty, TyKind, ValDefKind, VarDecl,
 };
+use biwac_span::ValDefId;
 
 use crate::ResolveError;
 
@@ -12,14 +13,13 @@ use super::{
 };
 
 pub(super) fn lower_novel_scene(
-    hir: &mut Hir,
     scene_def: &biwac_ast::NovelScene,
     errors: &mut Vec<ResolveError>,
-) {
-    let val_def_id = match scene_def.def_id.get() {
-        Some(id) => *id,
-        None => return,
-    };
+) -> (ValDefId, ValDefKind) {
+    let val_def_id = *scene_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
 
     let signature = super::globals::build_fn_signature(
         &scene_def.args,
@@ -31,14 +31,14 @@ pub(super) fn lower_novel_scene(
 
     let body = build_novel_body(&scene_def.args, &scene_def.stmts, &signature, errors);
 
-    hir.vals.insert(
+    (
         val_def_id,
         ValDefKind::NovelScene(Box::new(NovelSceneDef::new(
             scene_def.id.clone().into(),
             signature,
             body,
         ))),
-    );
+    )
 }
 
 fn build_novel_body(

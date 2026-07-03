@@ -10,7 +10,7 @@ pub use name_tree::{
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use biwac_base::{IdentInterner, InternedIdent, PackageId, PackageName};
 
@@ -87,6 +87,13 @@ impl NameResolver {
     }
 
     pub fn try_resolve(self, interner: &IdentInterner) -> Result<Hir, Vec<ResolveError>> {
+        let mut pkg_names = self
+            .external_packages
+            .iter()
+            .map(|(interned, pkg_id, _)| (*pkg_id, *interned))
+            .collect::<HashMap<_, _>>();
+        pkg_names.insert(PackageId::SELF_PACKAGE, self.pkg_name);
+
         // definition collection (package internal + external package ID assignment)
         let mut def_collector = resolving::def_collector::DefCollector::new();
         let name_tree =
@@ -106,6 +113,11 @@ impl NameResolver {
         // symbol signature
 
         // lowering to HIR
-        lowering::lower(self.pkg_package_name, self.pkg)
+        lowering::lower(
+            self.pkg_package_name,
+            self.pkg,
+            pkg_names,
+            &def_collector.impl_collector,
+        )
     }
 }

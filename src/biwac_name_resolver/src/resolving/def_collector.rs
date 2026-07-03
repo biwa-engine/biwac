@@ -9,7 +9,7 @@ use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{DepMetadata, DepMetadataModuleView, PackageModuleView};
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::{DefId, DefIdKind, PackageLocalDefId, Span, TyDefId, ValDefId};
+use biwac_span::{DefId, DefIdKind, ImplId, PackageLocalDefId, Span, TyDefId, ValDefId};
 
 use crate::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, ResolveError,
@@ -28,6 +28,7 @@ pub struct DefCollector {
     next_pkg_local_def_id: u32,
     /// Maps alias TyDefId → canonical (non-alias) TyDefId; populated during collect().
     pub(super) alias_canonical: HashMap<TyDefId, TyDefId>,
+    pub(crate) impl_collector: ImplCollector,
 }
 
 impl Default for DefCollector {
@@ -41,6 +42,7 @@ impl DefCollector {
         Self {
             next_pkg_local_def_id: 0,
             alias_canonical: HashMap::new(),
+            impl_collector: ImplCollector::new(),
         }
     }
 
@@ -428,6 +430,8 @@ impl DefCollector {
                 };
 
                 let self_ty = ictx.opt_self_ty().unwrap();
+                let impl_id = self.impl_collector.register_self_ty(self_ty.clone());
+                impl_block.impl_id.set(impl_id).unwrap();
 
                 // Determine the canonical TyDefId (following alias chain).
                 let canonical_id = match canonical_ty_def_id(&self_ty, &self.alias_canonical) {
@@ -612,6 +616,28 @@ impl DefCollector {
         } else {
             Err(errors)
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ImplCollector {
+    next_impl_id: u32,
+    pub(crate) impl_self_tys: HashMap<ImplId, TyKind>,
+}
+
+impl ImplCollector {
+    fn new() -> Self {
+        Self {
+            next_impl_id: 0,
+            impl_self_tys: HashMap::new(),
+        }
+    }
+
+    fn register_self_ty(&mut self, ty_kind: TyKind) -> ImplId {
+        let id = ImplId::new(self.next_impl_id);
+        self.next_impl_id += 1;
+        self.impl_self_tys.insert(id, ty_kind);
+        id
     }
 }
 

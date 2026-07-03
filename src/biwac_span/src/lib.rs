@@ -5,7 +5,7 @@ mod package_hash;
 use biwac_base::ModId;
 
 pub use def_id::{
-    DefId, DefIdKind, GenDefId, LocalGenDefId, PackageLocalDefId, TyDefId, ValDefId, VarId,
+    DefId, DefIdKind, GenDefId, ImplId, LocalGenDefId, PackageLocalDefId, TyDefId, ValDefId, VarId,
 };
 pub use def_path::{DefPath, DefPathHash, DefPathSegment};
 pub use package_hash::PackageHashId;

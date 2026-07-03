@@ -191,3 +191,12 @@ impl_typed_def_id!(GenDefId);
 //  }
 // ```
 impl_typed_def_id!(LocalGenDefId);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImplId(u32);
+
+impl ImplId {
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+}

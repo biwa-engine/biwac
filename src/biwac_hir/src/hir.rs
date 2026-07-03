@@ -45,20 +45,7 @@ pub struct Hir {
 
     pub ty_aliases: HashMap<TyDefId, TypeAliasDef>,
 
-    // プリミティブ型やジェネリック型など
-    // 特殊な型に対する実装
-    // ```
-    //  impl Int {
-    //      fn foo(self) { ... }
-    //  }
-    //
-    //  impl[T] T: Into[T] {
-    //      [[inline]]
-    //      fn into(self) { self }
-    //  }
-    // ```
-    // pub special_ty_impls: HashMap<TyKind, SpecialTyImpl>,
-    pub module_global_natives: HashMap<ModPath, Vec<NativeCode>>,
+    pub module_global_natives: Vec<NativeCode>,
 
     // 外部パッケージのシンボルで、
     // 使用されていることを確認したシンボル
@@ -98,21 +85,21 @@ pub struct TyExistence {
 impl Hir {
     pub fn new(
         pkg_name: PackageName,
-        // external_tys: HashMap<TyId, TyDefContentKind>,
-        // external_vals: HashMap<ValId, FnDefContentSignature>,
+        pkg_names: HashMap<PackageId, InternedIdent>,
+        tys: HashMap<TyDefId, DefinedTyImpl>,
+        vals: HashMap<ValDefId, ValDefKind>,
+        native_codes: Vec<NativeCode>,
     ) -> Self {
-        let vals = HashMap::new();
-        let tys = HashMap::new();
         let ty_aliases = HashMap::new();
 
         Self {
             deps_recorder: RefCell::new(DepsRecorder::new(pkg_name.clone())),
             pkg_name,
-            packages: HashMap::new(),
+            packages: pkg_names,
             vals,
             tys,
             ty_aliases,
-            module_global_natives: HashMap::new(),
+            module_global_natives: native_codes,
         }
     }
 }

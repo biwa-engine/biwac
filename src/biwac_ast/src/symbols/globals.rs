@@ -1,6 +1,6 @@
 use std::cell::OnceCell;
 
-use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
+use biwac_span::{GenDefId, ImplId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
 
 use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
@@ -147,6 +147,7 @@ pub struct NativeMethodDef {
 
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
+    pub impl_id: OnceCell<ImplId>,
     pub assoc_fns: Vec<FnDef>,
     pub methods: Vec<MethodDef>,
     pub native_assoc_fns: Vec<NativeFnDef>,
