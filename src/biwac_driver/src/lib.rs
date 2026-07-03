@@ -15,7 +15,6 @@ use dep_graph::DepGraph;
 pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     println!("{}", "Compiling...".green().bold(),);
 
-    let mut srcs = SourceHolder::default();
     let mut interner = IdentInterner::new();
 
     let metadata = biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone())
@@ -23,7 +22,6 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
             e.print_error_message();
             biwac_base::print_error_finish_message(1);
         })?;
-    let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
 
     println!(
         "Package: {} v{}.{}.{}",
@@ -108,42 +106,32 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
             Vec::new()
         };
 
-    let pkg = biwac_package_loader::Pkg::try_load(
-        &metadata,
-        &mut interner,
-        &mut srcs,
-        pkg_root_path.to_path_buf(),
-    )
-    .map_err(|e| e.print_error_messages())?;
-
-    // println!("{interner:#?}");
-
-    // PackageId は名前解決時の割り付けと同じ: external_packages[i] → PackageId(i+1)
-    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
-        .iter()
+    // PackageId を driver が単一の割り当て元として決定する。
+    let external_packages_with_ids: Vec<(
+        biwac_base::InternedIdent,
+        biwac_base::PackageId,
+        Arc<DepMetadata>,
+    )> = external_packages
+        .into_iter()
         .enumerate()
-        .map(|(i, (_, dep))| (biwac_base::PackageId::new(i as u32 + 1), Arc::clone(dep)))
+        .map(|(i, (ident, dep))| {
+            (
+                ident,
+                biwac_base::PackageId::new(
+                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
+                ),
+                dep,
+            )
+        })
         .collect();
 
-    let hir = biwac_name_resolver::NameResolver::new(
+    load_analyze_and_codegen_single_package(
+        external_packages_with_ids,
+        &mut interner,
         &metadata,
-        external_packages,
-        package_name_interned,
-        pkg,
-    )
-    .unwrap()
-    .try_resolve(&interner)
-    .unwrap();
-
-    // Persist self package's symbol metadata to disk for dependents.
-    persist_dep_metadata(&hir, &srcs, &interner, build_dir_path.clone(), &metadata)?;
-
-    let hir =
-        biwac_type_inferrer::TyCtx::new(hir, ext_pkgs_for_ty, &mut interner).infer().unwrap();
-
-    let bin = biwac_generator::arch::typescript::generate(&hir, &interner, &srcs);
-
-    write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
+        pkg_root_path,
+        build_dir_path,
+    )?;
 
     println!("{}", "Finished!".green().bold(),);
 
@@ -161,7 +149,6 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
 
     // compiling single dependency
 
-    let mut srcs = SourceHolder::default();
     let mut interner = IdentInterner::new();
 
     let metadata =
@@ -169,7 +156,6 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
             e.print_error_message();
             biwac_base::print_error_finish_message(1);
         })?;
-    let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
 
     println!(
         "  {} {} v{}.{}.{}",
@@ -214,40 +200,32 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
             Vec::new()
         };
 
-    let pkg = biwac_package_loader::Pkg::try_load(
-        &metadata,
-        &mut interner,
-        &mut srcs,
-        dep_root.to_path_buf(),
-    )
-    .map_err(|e| e.print_error_messages())?;
-
-    // PackageId は名前解決時の割り付けと同じ: external_packages[i] → PackageId(i+1)
-    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
-        .iter()
+    // PackageId を driver が単一の割り当て元として決定する。
+    let external_packages_with_ids: Vec<(
+        biwac_base::InternedIdent,
+        biwac_base::PackageId,
+        Arc<DepMetadata>,
+    )> = external_packages
+        .into_iter()
         .enumerate()
-        .map(|(i, (_, dep))| (biwac_base::PackageId::new(i as u32 + 1), Arc::clone(dep)))
+        .map(|(i, (ident, dep))| {
+            (
+                ident,
+                biwac_base::PackageId::new(
+                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
+                ),
+                dep,
+            )
+        })
         .collect();
 
-    let hir = biwac_name_resolver::NameResolver::new(
+    load_analyze_and_codegen_single_package(
+        external_packages_with_ids,
+        &mut interner,
         &metadata,
-        external_packages,
-        package_name_interned,
-        pkg,
-    )
-    .unwrap()
-    .try_resolve(&interner)
-    .unwrap();
-
-    // Persist self package's symbol metadata to disk for dependents.
-    persist_dep_metadata(&hir, &srcs, &interner, build_dir_path.clone(), &metadata)?;
-
-    let hir =
-        biwac_type_inferrer::TyCtx::new(hir, ext_pkgs_for_ty, &mut interner).infer().unwrap();
-
-    let bin = biwac_generator::arch::typescript::generate(&hir, &interner, &srcs);
-
-    write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
+        dep_root,
+        build_dir_path,
+    )?;
 
     println!("    -> {}", "Finished!".green().bold(),);
 
@@ -281,6 +259,53 @@ fn persist_dep_metadata(
     std::fs::write(&meta_path, meta_bytes).map_err(|e| {
         eprintln!("Error: failed to write {:?}: {}", meta_path, e);
     })
+}
+
+fn load_analyze_and_codegen_single_package(
+    external_packages_with_ids: Vec<(
+        biwac_base::InternedIdent,
+        biwac_base::PackageId,
+        Arc<DepMetadata>,
+    )>,
+    interner: &mut biwac_base::IdentInterner,
+    metadata: &biwac_base::MetadataHolder,
+    pkg_root_path: PathBuf,
+    build_dir_path: PathBuf,
+) -> Result<(), ()> {
+    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> =
+        external_packages_with_ids
+            .iter()
+            .map(|(_, pkg_id, dep)| (*pkg_id, Arc::clone(dep)))
+            .collect();
+
+    let mut srcs = SourceHolder::default();
+    let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
+
+    let pkg = biwac_package_loader::Pkg::try_load(metadata, interner, &mut srcs, pkg_root_path)
+        .map_err(|e| e.print_error_messages())?;
+
+    let hir = biwac_name_resolver::NameResolver::new(
+        metadata,
+        external_packages_with_ids,
+        package_name_interned,
+        pkg,
+    )
+    .unwrap()
+    .try_resolve(interner)
+    .unwrap();
+
+    // Persist self package's symbol metadata to disk for dependents.
+    persist_dep_metadata(&hir, &srcs, interner, build_dir_path.clone(), metadata)?;
+
+    let hir = biwac_type_inferrer::TyCtx::new(hir, ext_pkgs_for_ty, interner)
+        .infer()
+        .unwrap();
+
+    let bin = biwac_generator::arch::typescript::generate(&hir, interner, &srcs);
+
+    write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
+
+    Ok(())
 }
 
 fn write_bin(

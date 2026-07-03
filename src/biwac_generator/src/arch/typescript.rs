@@ -25,12 +25,12 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
         .tys
         .iter()
         .flat_map(|(def_id, ty_impl)| match &ty_impl.ty_content {
-            TyDefKind::Struct(_) => None,
-            TyDefKind::NativeTypeAlias(native) => Some((
+            Some(TyDefKind::NativeTypeAlias(native)) => Some((
                 *def_id,
                 // 型単体をパースできないため、文にする
                 (&**native, format!("type X = {};", &native.native)),
             )),
+            _ => None,
         })
         .collect::<HashMap<TyDefId, (&_, String)>>();
 
@@ -161,7 +161,7 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
         hir.tys
             .iter()
             .flat_map(|(def_id, ty_impl)| match &ty_impl.ty_content {
-                TyDefKind::Struct(struct_) => {
+                Some(TyDefKind::Struct(struct_)) => {
                     if def_id.pkg().is_self() {
                         Some(struct_.as_oxc_global(ctx.get_type_mangled(def_id), &ctx))
                     } else {
@@ -169,12 +169,13 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
                         None
                     }
                 }
-                TyDefKind::NativeTypeAlias(_) => Some(
+                Some(TyDefKind::NativeTypeAlias(_)) => Some(
                     native_tys
                         .get(def_id)
                         .unwrap()
                         .as_oxc_global(ctx.get_type_mangled(def_id), &ctx),
                 ),
+                None => None,
             })
             .chain(hir.tys.values().flat_map(|ty_impl| {
                 ty_impl.vals.values().flat_map(|impl_list| {

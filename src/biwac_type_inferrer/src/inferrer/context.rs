@@ -38,9 +38,11 @@ impl<'a> TyCtx<'a> {
     ) -> Self {
         // self package の assoc fn を assoc_val_map に一括登録する。
         // hir.vals には top-level fn のみ存在するため、assoc fn は別途登録が必要。
+        // self package + プリミティブ型 (BUILTIN_RESERVED_PACKAGE) の assoc fn を登録する。
         let mut assoc_val_map: HashMap<ValDefId, (TyDefId, InternedIdent)> = HashMap::new();
         for (ty_def_id, ty_impl) in &hir.tys {
-            if !ty_def_id.pkg().is_self() {
+            if !ty_def_id.pkg().is_self() && ty_def_id.pkg() != PackageId::BUILTIN_RESERVED_PACKAGE
+            {
                 continue;
             }
             for (method_id, impl_list) in &ty_impl.vals {
@@ -72,7 +74,7 @@ impl<'a> TyCtx<'a> {
     /// 外部 struct をロードした際、assoc fn の ValDefId も assoc_val_map に登録する。
     /// 返す参照のライフタイムは &self と同じ。
     fn get_ty_impl(&self, def_id: &TyDefId) -> Option<&DefinedTyImpl> {
-        if def_id.pkg().is_self() {
+        if def_id.pkg().is_self() || def_id.pkg() == PackageId::BUILTIN_RESERVED_PACKAGE {
             return self.hir.tys.get(def_id);
         }
 
@@ -115,7 +117,8 @@ impl<'a> TyCtx<'a> {
     }
 
     pub(super) fn get_type_definition(&self, def_id: &TyDefId) -> Option<&TyDefKind> {
-        self.get_ty_impl(def_id).map(|di| &di.ty_content)
+        self.get_ty_impl(def_id)
+            .and_then(|di| di.ty_content.as_ref())
     }
 
     pub(super) fn get_value_definition(&self, def_id: &ValDefId) -> Option<&ValDefKind> {
@@ -185,46 +188,40 @@ impl<'a> TyCtx<'a> {
     }
 
     pub(super) fn get_method_def_id(&self, ty: &Ty, method: &Ident) -> Result<ValDefId, TyError> {
-        match &ty.kind {
-            TyKind::Defined(defined_ty) => {
-                let assoc_list = self
-                    .get_ty_impl(&defined_ty.def_id)
-                    .unwrap()
-                    .vals
-                    .get(&method.id)
-                    .ok_or(TyError::MethodNotFound {
-                        ty: Box::new(ty.clone()),
-                        method: Box::new(method.clone()),
-                    })?;
+        let not_found = || TyError::MethodNotFound {
+            ty: Box::new(ty.clone()),
+            method: Box::new(method.clone()),
+        };
 
-                let mut matched = Vec::new();
-                for (def_id, assoc) in &assoc_list.vals {
-                    if assoc.genargs.len() == defined_ty.genargs.len()
-                        && assoc
-                            .genargs
-                            .iter()
-                            .zip(defined_ty.genargs.iter())
-                            .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
-                    {
-                        matched.push(*def_id);
-                    }
-                }
+        let ty_def_id = ty.kind.def_id().ok_or_else(not_found)?;
 
-                if matched.len() == 1 {
-                    Ok(matched[0])
-                } else if matched.is_empty() {
-                    Err(TyError::MethodNotFound {
-                        ty: Box::new(ty.clone()),
-                        method: Box::new(method.clone()),
-                    })
-                } else {
-                    panic!("compiler bug: duplicated associated implementation registered")
-                }
+        let ty_genargs: &[Ty] = match &ty.kind {
+            TyKind::Defined(dt) => &dt.genargs,
+            _ => &[],
+        };
+
+        let assoc_list = self
+            .get_ty_impl(&ty_def_id)
+            .and_then(|di| di.vals.get(&method.id))
+            .ok_or_else(not_found)?;
+
+        let mut matched = Vec::new();
+        for (def_id, assoc) in &assoc_list.vals {
+            if assoc.genargs.len() == ty_genargs.len()
+                && assoc
+                    .genargs
+                    .iter()
+                    .zip(ty_genargs.iter())
+                    .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+            {
+                matched.push(*def_id);
             }
-            _ => {
-                println!("{ty:?}");
-                todo!()
-            }
+        }
+
+        match matched.as_slice() {
+            [id] => Ok(*id),
+            [] => Err(not_found()),
+            _ => panic!("compiler bug: duplicated associated implementation registered"),
         }
     }
 }

@@ -290,13 +290,13 @@ fn lower_struct_def(
         genargs,
     }));
     let fallback = DefinedTyImpl {
-        ty_content: ty_content.clone(),
+        ty_content: Some(ty_content.clone()),
         vals: HashMap::new(),
     };
     hir.tys
         .entry(ty_def_id)
         .or_insert_with(|| fallback)
-        .ty_content = ty_content;
+        .ty_content = Some(ty_content);
 }
 
 fn lower_type_alias(
@@ -361,13 +361,13 @@ fn lower_native_type_alias(hir: &mut Hir, native_def: &biwac_ast::NativeTypeAlia
         native_span: native_def.native_span.clone(),
     }));
     let fallback = DefinedTyImpl {
-        ty_content: ty_content.clone(),
+        ty_content: Some(ty_content.clone()),
         vals: HashMap::new(),
     };
     hir.tys
         .entry(ty_def_id)
         .or_insert_with(|| fallback)
-        .ty_content = ty_content;
+        .ty_content = Some(ty_content);
 }
 
 pub(super) fn lower_impl_block(
@@ -531,30 +531,45 @@ fn register_impl_val(
     match self_ty_kind {
         TyKind::Defined(defined_ty) => {
             let entry = hir.tys.get_mut(&defined_ty.def_id).unwrap();
-            let impl_list = entry.vals.entry(name).or_insert_with(|| TyValImplList {
-                vals: HashMap::new(),
-            });
-            impl_list.vals.insert(
-                def_id,
-                TyValImplGenargsContentPair {
-                    impl_block_genargs,
-                    genargs,
-                    val_content,
-                },
-            );
-        }
-        TyKind::Int | TyKind::Float | TyKind::Bool => {
-            hir.special_ty_impls
-                .entry(self_ty_kind.clone())
-                .or_insert_with(|| biwac_hir::SpecialTyImpl {
+            entry
+                .vals
+                .entry(name)
+                .or_insert_with(|| TyValImplList {
                     vals: HashMap::new(),
                 })
                 .vals
-                .entry(name)
-                .or_insert(val_content);
+                .insert(
+                    def_id,
+                    TyValImplGenargsContentPair {
+                        impl_block_genargs,
+                        genargs,
+                        val_content,
+                    },
+                );
         }
-        _ => {
-            // Void, Fn, Gen, LocGen, Infer cannot be impl targets.
+        other => {
+            if let Some(prim_def_id) = other.def_id() {
+                let entry = hir.tys.entry(prim_def_id).or_insert_with(|| DefinedTyImpl {
+                    ty_content: None,
+                    vals: HashMap::new(),
+                });
+                entry
+                    .vals
+                    .entry(name)
+                    .or_insert_with(|| TyValImplList {
+                        vals: HashMap::new(),
+                    })
+                    .vals
+                    .insert(
+                        def_id,
+                        TyValImplGenargsContentPair {
+                            impl_block_genargs,
+                            genargs,
+                            val_content,
+                        },
+                    );
+            }
+            // Fn/Gen/LocGen/Infer は impl 対象外
         }
     }
 }

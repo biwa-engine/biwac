@@ -17,7 +17,7 @@ pub(super) fn expand_aliases(hir: &mut Hir, errors: &mut Vec<ResolveError>) {
     let aliases = hir.ty_aliases.clone();
 
     for defined_ty_impl in hir.tys.values_mut() {
-        if let TyDefKind::Struct(struct_def) = &mut defined_ty_impl.ty_content {
+        if let Some(TyDefKind::Struct(struct_def)) = &mut defined_ty_impl.ty_content {
             for member_ty in struct_def.members.values_mut() {
                 *member_ty = expand_ty(member_ty.clone(), &aliases);
             }
@@ -32,12 +32,6 @@ pub(super) fn expand_aliases(hir: &mut Hir, errors: &mut Vec<ResolveError>) {
                     .collect();
                 expand_assoc_val_def_kind(&mut pair.val_content, &aliases);
             }
-        }
-    }
-
-    for special_impl in hir.special_ty_impls.values_mut() {
-        for val in special_impl.vals.values_mut() {
-            expand_assoc_val_def_kind(val, &aliases);
         }
     }
 

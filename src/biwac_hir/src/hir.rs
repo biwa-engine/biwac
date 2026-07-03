@@ -57,8 +57,7 @@ pub struct Hir {
     //      fn into(self) { self }
     //  }
     // ```
-    pub special_ty_impls: HashMap<TyKind, SpecialTyImpl>,
-
+    // pub special_ty_impls: HashMap<TyKind, SpecialTyImpl>,
     pub module_global_natives: HashMap<ModPath, Vec<NativeCode>>,
 
     // 外部パッケージのシンボルで、
@@ -68,16 +67,12 @@ pub struct Hir {
 
 #[derive(Debug, Clone)]
 pub struct DefinedTyImpl {
-    // length of genargs
-    pub ty_content: TyDefKind,
+    // None = プリミティブ型 (型情報は TyKind が持つ)
+    // Some = ユーザ定義型 (Struct / NativeTypeAlias)
+    pub ty_content: Option<TyDefKind>,
     // ある関連値名(メンバ名、関連関数名、関連定数名)と、
     // 各ジェネリック引数列に対する実装の実体、のマップ
     pub vals: HashMap<InternedIdent, TyValImplList>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SpecialTyImpl {
-    pub vals: HashMap<InternedIdent, AssocValDefKind>,
 }
 
 // ジェネリック引数列と、実体の組のリスト
@@ -117,7 +112,6 @@ impl Hir {
             vals,
             tys,
             ty_aliases,
-            special_ty_impls: HashMap::new(),
             module_global_natives: HashMap::new(),
         }
     }

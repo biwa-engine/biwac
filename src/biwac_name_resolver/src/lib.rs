@@ -12,7 +12,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use biwac_base::{IdentInterner, InternedIdent, PackageName};
+use biwac_base::{IdentInterner, InternedIdent, PackageId, PackageName};
 
 use biwac_hir::Hir;
 use biwac_package_loader::Pkg;
@@ -59,13 +59,21 @@ pub struct NameResolver {
     pkg: Pkg,
     pkg_name: InternedIdent,
     pkg_package_name: PackageName,
-    external_packages: Vec<(InternedIdent, Arc<biwac_dependency_metadata::DepMetadata>)>,
+    external_packages: Vec<(
+        InternedIdent,
+        PackageId,
+        Arc<biwac_dependency_metadata::DepMetadata>,
+    )>,
 }
 
 impl NameResolver {
     pub fn new(
         metadata: &biwac_base::MetadataHolder,
-        external_packages: Vec<(InternedIdent, Arc<biwac_dependency_metadata::DepMetadata>)>,
+        external_packages: Vec<(
+            InternedIdent,
+            PackageId,
+            Arc<biwac_dependency_metadata::DepMetadata>,
+        )>,
         pkg_name: InternedIdent,
         pkg: Pkg,
     ) -> Result<Self, ResolveError> {

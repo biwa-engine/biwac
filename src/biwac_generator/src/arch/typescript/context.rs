@@ -59,7 +59,15 @@ impl<'a> AstBuildCtx<'a> {
     }
 
     fn get_type_ident(&self, def_id: &TyDefId) -> &Ident {
-        match &self.hir.tys.get(def_id).unwrap().ty_content {
+        match self
+            .hir
+            .tys
+            .get(def_id)
+            .unwrap()
+            .ty_content
+            .as_ref()
+            .unwrap()
+        {
             TyDefKind::Struct(struct_def) => &struct_def.name,
             TyDefKind::NativeTypeAlias(alias_def) => &alias_def.name,
         }

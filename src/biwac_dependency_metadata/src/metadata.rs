@@ -84,7 +84,7 @@ impl DepMetadata {
             .iter()
             .filter(|(def_id, _)| def_id.pkg().is_self())
             .filter_map(|(def_id, def_impl)| {
-                if let TyDefKind::Struct(s) = &def_impl.ty_content {
+                if let Some(TyDefKind::Struct(s)) = &def_impl.ty_content {
                     Some(StructItem {
                         def_id: *def_id,
                         def: s.as_ref(),
@@ -719,7 +719,7 @@ impl DepMetadata {
         }
 
         Some(DefinedTyImpl {
-            ty_content: TyDefKind::Struct(Box::new(struct_def)),
+            ty_content: Some(TyDefKind::Struct(Box::new(struct_def))),
             vals,
         })
     }

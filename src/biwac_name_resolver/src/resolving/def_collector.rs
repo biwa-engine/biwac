@@ -54,7 +54,7 @@ impl DefCollector {
         &mut self,
         pkg_name: InternedIdent,
         pkg: &Pkg,
-        external_packages: Vec<(InternedIdent, Arc<DepMetadata>)>,
+        external_packages: Vec<(InternedIdent, PackageId, Arc<DepMetadata>)>,
         interner: &IdentInterner,
     ) -> Result<NameTree, Vec<ResolveError>> {
         // Step 1: assign IDs to all non-impl symbols, build module-level NameTree.
@@ -64,11 +64,10 @@ impl DefCollector {
             root_module_tree,
         };
 
-        // Assign PackageId(1..N) to external packages and build lookup maps.
+        // PackageId は driver が決定済み。そのまま lookup maps に格納する。
         let mut ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>> = HashMap::new();
         let mut ext_pkg_data: HashMap<PackageId, Arc<DepMetadata>> = HashMap::new();
-        for (i, (pkg_ident, dep_arc)) in external_packages.into_iter().enumerate() {
-            let pkg_id = PackageId::new(i as u32 + PackageId::UNRESERVED_PACKAGE_MIN);
+        for (pkg_ident, pkg_id, dep_arc) in external_packages {
             let view = DepMetadataModuleView::new_root(Arc::clone(&dep_arc), pkg_id);
             ext_pkg_views.insert(pkg_ident, Arc::new(view) as Arc<dyn PackageModuleView>);
             ext_pkg_data.insert(pkg_id, dep_arc);

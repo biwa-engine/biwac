@@ -1240,45 +1240,6 @@ impl<'a> TyCtx<'a> {
             }
         }
 
-        // 特殊型(プリミティブ型など)に対する実装(関連関数、メソッド)について
-        // 型推論し、その結果を一時的に保持
-        let mut special_impl_fn_ty_infos = vec![];
-        for (ty, ty_impl) in &self.hir.special_ty_impls {
-            for (val_name, val) in &ty_impl.vals {
-                match &val {
-                    AssocValDefKind::Fn(f) => {
-                        // 計算した型を記録
-                        special_impl_fn_ty_infos.push((
-                            ty.clone(),
-                            *val_name,
-                            self.infer_fn_body(&f.body, &f.signature)?,
-                        ));
-                    }
-                    AssocValDefKind::NativeFn(_) => {
-                        // nothing to do
-                    }
-                }
-            }
-        }
-
-        // 推論結果を hir に記録
-        for (ty, val_name, ty_info) in special_impl_fn_ty_infos {
-            let ty_impl = self
-                .hir
-                .special_ty_impls
-                .get_mut(&ty)
-                .expect("compiler bug: value not found");
-            match &mut ty_impl.vals.get_mut(&val_name).unwrap() {
-                AssocValDefKind::Fn(f) => {
-                    f.expr_tys = ty_info.expr_tys;
-                    f.var_tys = ty_info.var_tys;
-                }
-                AssocValDefKind::NativeFn(_) => {
-                    // nothing to do
-                }
-            }
-        }
-
         Ok(self.hir)
     }
 }
