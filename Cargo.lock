@@ -171,7 +171,9 @@ version = "0.1.0"
 dependencies = [
  "biwac_ast",
  "biwac_base",
+ "biwac_dependency_metadata",
  "biwac_hir",
+ "biwac_lang_item",
  "biwac_package_loader",
  "biwac_span",
  "oxc_allocator",

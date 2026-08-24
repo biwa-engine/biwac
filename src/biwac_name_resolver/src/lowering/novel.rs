@@ -25,6 +25,7 @@ pub(super) fn lower_novel_scene(
         &scene_def.args,
         &scene_def.rtype,
         None,
+        false,
         &None,
         scene_def.span.clone(),
     );

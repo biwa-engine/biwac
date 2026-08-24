@@ -51,6 +51,11 @@ impl DefId {
     }
 
     #[inline]
+    pub fn local_idx(&self) -> u32 {
+        self.local.0
+    }
+
+    #[inline]
     fn as_u64(&self) -> u64 {
         ((self.pkg.value() as u64) << 32) + self.local.0 as u64
     }

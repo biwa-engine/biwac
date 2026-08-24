@@ -137,7 +137,10 @@ impl DepsRecorder {
     }
 
     fn depends_on_defined_ty(&mut self, defined_ty: &DefinedTy) {
-        if defined_ty.def_id.pkg().is_self() {
+        // 記録するのは「他パッケージのシンボルへの依存」である。
+        // codegen はこれを import 文の生成に使うため、
+        // 自パッケージのシンボルを入れると自分自身を import してしまう。
+        if !defined_ty.def_id.pkg().is_self() {
             self.depended_tys.insert(defined_ty.def_id);
         }
 
@@ -175,7 +178,7 @@ impl DepsRecorder {
     // }
 
     pub fn depends_on_val(&mut self, vid: &ValDefId) {
-        if vid.pkg().is_self() {
+        if !vid.pkg().is_self() {
             self.depended_vals.insert(*vid);
         }
     }

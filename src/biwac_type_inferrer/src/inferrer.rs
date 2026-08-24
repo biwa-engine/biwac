@@ -1059,6 +1059,13 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     fn check_novel_call(&mut self, item: LangItem, args: &[Ty], span: &Span) -> TyResult<()> {
         let def_id = self.tctx.require_val(item)?;
 
+        // codegen はこの関数の呼び出しを出力するので import が必要になる。
+        self.tctx
+            .hir
+            .deps_recorder
+            .borrow_mut()
+            .depends_on_val(&def_id);
+
         // 署名が引けないのは依存メタデータが壊れている場合のみ。
         let callee = self
             .tctx
@@ -1126,6 +1133,19 @@ fn min_of_ty(t1: &Option<Ty>, t2: &Option<Ty>) -> TyResult<Option<Ty>> {
 impl<'a> TyCtx<'a> {
     fn infer_fn_body(&self, fn_body: &FnBody, fn_signature: &FnSignature) -> TyResult<TyInfo> {
         let mut fctx = FnTyCtx::new(self, fn_signature.rty.clone());
+
+        // シグネチャに現れる型は codegen が型注釈として出力するため、
+        // 外部パッケージのものは import が必要になる。
+        {
+            let mut deps = self.hir.deps_recorder.borrow_mut();
+            if let Some(ty) = &fn_signature.self_ty {
+                deps.depends_on_ty(ty);
+            }
+            for arg in &fn_signature.args {
+                deps.depends_on_ty(&arg.ty);
+            }
+            deps.depends_on_ty(&fn_signature.rty);
+        }
 
         if let Some(ty) = &fn_signature.self_ty {
             fctx.vars.insert(VarId::SELF_VARIABLE, ty.clone());

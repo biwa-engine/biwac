@@ -16,6 +16,20 @@ impl ModPath {
         }
     }
 
+    /// [`Self::file_name`] の逆変換。
+    ///
+    /// 依存パッケージのメタデータはモジュールをファイル名で持つため、
+    /// そこから ModPath を復元するのに使う。
+    pub fn from_file_name(file_name: &str) -> Option<Self> {
+        let stem = file_name.strip_suffix(&format!(".{BIWA_EXTENSION}"))?;
+
+        match stem {
+            "main" => Some(Self::Main),
+            "lib" => Some(Self::Lib),
+            _ => Some(Self::Mod(stem.split('/').map(|s| s.to_string()).collect())),
+        }
+    }
+
     pub fn push(self, child: String) -> Self {
         match self {
             Self::Main => Self::Mod([child].into()),

@@ -717,6 +717,29 @@ impl DepMetadata {
         self.strings.get(offset)
     }
 
+    /// 外部パッケージのシンボル 1 つについて、名前とモジュールパスを返す。
+    ///
+    /// codegen のシンボル名マングリングに使う。
+    /// HIR 側に復元したシンボルの span はダミーであり
+    /// (get_ext_ty_impl / get_ext_val_kind を参照)、
+    /// モジュールを特定できないため、メタデータから直接引く必要がある。
+    pub fn symbol_mangling_info(&self, sym_idx: u32) -> Option<(&str, biwac_base::ModPath)> {
+        let body = self.get_symbol_body(sym_idx as usize).ok()?;
+
+        let (name, name_span) = match body {
+            SymbolBody::Struct(d) => (d.name, d.name_span),
+            SymbolBody::Fn(d) => (d.name, d.name_span),
+            SymbolBody::NativeTypeAlias(d) => (d.name, d.name_span),
+            SymbolBody::Mod(d) => (d.name, d.name_span),
+        };
+
+        let name = self.get_str(name).ok()?;
+        let file = self.source_files.get(name_span.file.0).ok()?;
+        let modu = biwac_base::ModPath::from_file_name(self.get_str(file.file_path).ok()?)?;
+
+        Some((name, modu))
+    }
+
     /// このパッケージが定義した lang item を `(LangItem, DefId)` として列挙する。
     ///
     /// `pkg_id` は依存側が割り当てたパッケージ ID。

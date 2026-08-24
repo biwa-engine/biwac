@@ -1,6 +1,8 @@
 use std::cell::Cell;
 
 use biwac_hir::{Primary, Stmt};
+use biwac_lang_item::LangItem;
+use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, AsOxcLocal, Mangled, span};
 
@@ -145,7 +147,61 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                    ctx.allocator,
                 ))
             }
-            Self::NovelWrite(_) |Self::NovelWait(_) => todo!()
+            // scene 内の novel statement は lang item の関数呼び出しに展開する。
+            //
+            // どの関数に落とすかはコンパイラだけが知っており、
+            // ユーザは名前でこれらを呼ぶことを想定されていない。
+            // 呼び出し先の import は型推論時に deps_recorder へ記録済み。
+            Stmt::NovelWrite(write) => novel_call(
+                ctx,
+                LangItem::Write,
+                [oxc_ast::ast::Argument::StringLiteral(
+                    oxc_allocator::Box::new_in(
+                        oxc_ast::ast::StringLiteral {
+                            span: span(),
+                            value: oxc_ast::ast::Atom::from_in(write.msg.as_str(), ctx.allocator),
+                            raw: None,
+                            lone_surrogates: false,
+                        },
+                        ctx.allocator,
+                    ),
+                )],
+            ),
+            Stmt::NovelWait(_) => novel_call(ctx, LangItem::Wait, []),
         }
     }
+}
+
+/// novel statement を lang item の関数呼び出し文に展開する。
+fn novel_call<'a, const N: usize>(
+    ctx: &'a super::AstBuildCtx<'a>,
+    item: LangItem,
+    args: [oxc_ast::ast::Argument<'a>; N],
+) -> oxc_ast::ast::Statement<'a> {
+    oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
+        oxc_ast::ast::ExpressionStatement {
+            span: span(),
+            expression: oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
+                oxc_ast::ast::CallExpression {
+                    span: span(),
+                    callee: oxc_ast::ast::Expression::Identifier(oxc_allocator::Box::new_in(
+                        oxc_ast::ast::IdentifierReference {
+                            span: span(),
+                            name: oxc_span::Ident::new_const(
+                                ctx.allocator.alloc_str(&ctx.lang_item_fn_mangled(item)),
+                            ),
+                            reference_id: Cell::new(None),
+                        },
+                        ctx.allocator,
+                    )),
+                    type_arguments: None,
+                    arguments: oxc_allocator::Vec::from_iter_in(args, ctx.allocator),
+                    optional: false,
+                    pure: false,
+                },
+                ctx.allocator,
+            )),
+        },
+        ctx.allocator,
+    ))
 }

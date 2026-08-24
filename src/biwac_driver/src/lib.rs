@@ -81,17 +81,23 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
             if !batches.is_empty() {
                 println!("{}", "Compiling dependencies...".green().bold(),);
             }
+            let mut built_deps: Vec<String> = Vec::new();
             for batch in &batches {
                 // TODO: parallelize within batch using tokio
 
                 for dep_name in batch {
                     let dep_root = packages_dir.join(dep_name);
                     build_single_dep(dep_root, dep_name)?;
+                    built_deps.push(dep_name.clone());
                 }
             }
             if !batches.is_empty() {
                 println!("{}", "Compiling dependencies finished!".green().bold(),);
             }
+
+            // 生成物は import 文が `./<package>.ts` を指すため、
+            // 自パッケージと推移的依存の .ts が同じディレクトリに並んでいる必要がある。
+            collect_dep_bins(&built_deps, &packages_dir, &build_dir_path)?;
 
             // Load .biwameta for direct (root-level) dependencies only.
             let mut ext_pkgs = Vec::new();
@@ -168,6 +174,10 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
 
     // build directory preparation
     let build_dir_path = dep_root.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
+    std::fs::create_dir_all(&build_dir_path).map_err(|e| {
+        eprintln!("Error: failed to create {:?}: {}", build_dir_path, e);
+        biwac_base::print_error_finish_message(1);
+    })?;
 
     // Dependency building via DepGraph (BFS discovery + Kahn's topological batching)
     //
@@ -312,11 +322,22 @@ fn load_analyze_and_codegen_single_package(
         metadata,
     )?;
 
-    let hir = biwac_type_inferrer::TyCtx::new(hir, lang_items, ext_pkgs_for_ty, interner)
-        .infer()
-        .unwrap();
+    let hir =
+        biwac_type_inferrer::TyCtx::new(hir, lang_items.clone(), ext_pkgs_for_ty.clone(), interner)
+            .infer()
+            .unwrap();
 
-    let bin = biwac_generator::arch::typescript::generate(&hir, interner, &srcs);
+    // codegen も lang item を使う。
+    // novel statement を std の関数呼び出しに展開するため。
+    // 外部パッケージのメタデータはシンボル名のマングリングに使う
+    // (外部シンボルは HIR に無く span もダミーのため)。
+    let bin = biwac_generator::arch::typescript::generate(
+        &hir,
+        interner,
+        &srcs,
+        &ext_pkgs_for_ty,
+        &lang_items,
+    );
 
     write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
 
@@ -365,6 +386,45 @@ fn print_errors<E: biwac_base::BiwacError>(
         e.print_error_message(&ctx);
     }
     biwac_base::print_error_finish_message(errors.len());
+}
+
+/// 依存パッケージの生成物を自パッケージの出力ディレクトリに集める。
+///
+/// 各パッケージは自分の .biwa_build/typescript/<name>.ts に出力するが、
+/// codegen が生成する import は `./<package>.ts` という相対パスなので、
+/// ルートパッケージの出力ディレクトリに推移的依存も含めて並べる必要がある。
+fn collect_dep_bins(
+    dep_names: &[String],
+    packages_dir: &Path,
+    build_dir_path: &Path,
+) -> Result<(), ()> {
+    if !cfg!(feature = "typescript") {
+        return Ok(());
+    }
+
+    let dst_dir = build_dir_path.join("typescript");
+    if dep_names.is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&dst_dir).map_err(|e| {
+        eprintln!("Error: failed to create {:?}: {}", dst_dir, e);
+    })?;
+
+    for dep_name in dep_names {
+        let file_name = format!("{}.ts", dep_name);
+        let src = packages_dir
+            .join(dep_name)
+            .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+            .join("typescript")
+            .join(&file_name);
+        let dst = dst_dir.join(&file_name);
+
+        std::fs::copy(&src, &dst).map_err(|e| {
+            eprintln!("Error: failed to copy {:?} to {:?}: {}", src, dst, e);
+        })?;
+    }
+
+    Ok(())
 }
 
 fn write_bin(

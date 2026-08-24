@@ -13,10 +13,20 @@ use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
 use super::{ExprLowerCtx, expressions::lower_expr, statements::lower_stmt, ty_from_typ_repr};
 
+/// 関数シグネチャを HIR に落とす。
+///
+/// `self_ty` は `Self` を型として解決するために使う。
+/// impl block の中であれば関連関数にもメソッドにも必要になる。
+///
+/// 一方 `has_self` はレシーバを取るか (メソッドか) を表し、
+/// `FnSignature::self_ty` に反映される。
+/// この 2 つを混同すると関連関数にもレシーバがあることになり、
+/// codegen が余分な第一引数を出力してしまう。
 pub(super) fn build_fn_signature(
     args: &ArgDeclList,
     rtype: &RetTypRepr,
     self_ty: Option<TyKind>,
+    has_self: bool,
     genargs_decl: &Option<biwac_ast::symbols::globals::GenArgsDecl<LocalGenDefId>>,
     span: Span,
 ) -> FnSignature {
@@ -57,7 +67,9 @@ pub(super) fn build_fn_signature(
         })
         .unwrap_or_default();
 
-    let self_ty_hir = self_ty.map(|k| Ty::new(k, span.clone()));
+    let self_ty_hir = self_ty
+        .filter(|_| has_self)
+        .map(|k| Ty::new(k, span.clone()));
 
     FnSignature {
         args: hir_args,
@@ -183,6 +195,7 @@ pub(super) fn lower_fn_def(
         &fn_def.args,
         &fn_def.rtype,
         None,
+        false,
         &fn_def.genargs,
         fn_def.span.clone(),
     );
@@ -222,6 +235,7 @@ pub(super) fn lower_native_fn_def(
         &fn_def.args,
         &fn_def.rtype,
         None,
+        false,
         &fn_def.genargs,
         fn_def.span.clone(),
     );
@@ -401,6 +415,7 @@ pub(super) fn lower_impl_block(
             &fn_def.args,
             &fn_def.rtype,
             Some(self_ty_kind.clone()),
+            false,
             &fn_def.genargs,
             fn_def.span.clone(),
         );
@@ -439,6 +454,7 @@ pub(super) fn lower_impl_block(
             &args_list,
             &method_def.rtype,
             Some(self_ty_kind.clone()),
+            true,
             &method_def.genargs,
             method_def.span.clone(),
         );
@@ -473,6 +489,7 @@ pub(super) fn lower_impl_block(
             &fn_def.args,
             &fn_def.rtype,
             Some(self_ty_kind.clone()),
+            false,
             &fn_def.genargs,
             fn_def.span.clone(),
         );
@@ -504,6 +521,7 @@ pub(super) fn lower_impl_block(
             &args_list,
             &method_def.rtype,
             Some(self_ty_kind.clone()),
+            true,
             &method_def.genargs,
             method_def.span.clone(),
         );

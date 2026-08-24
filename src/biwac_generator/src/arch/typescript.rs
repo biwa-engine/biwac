@@ -16,9 +16,18 @@ use crate::arch::typescript::{
     globals::native_code_as_oxc,
 };
 
-pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> String {
+pub fn generate(
+    hir: &Hir,
+    interner: &IdentInterner,
+    srcs: &SourceHolder,
+    ext_pkgs: &[(
+        biwac_base::PackageId,
+        std::sync::Arc<biwac_dependency_metadata::DepMetadata>,
+    )],
+    lang_items: &biwac_lang_item::LangItemTable,
+) -> String {
     let allocator = oxc_allocator::Allocator::default();
-    let ctx = AstBuildCtx::new(hir, interner, srcs, &allocator);
+    let ctx = AstBuildCtx::new(hir, interner, srcs, ext_pkgs, lang_items, &allocator);
 
     // ライフタイムが長い必要がある
     let native_tys = hir
@@ -206,7 +215,11 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
                     ValDefKind::Native(f) => Some(f.as_oxc_global(id, &ctx)),
                     ValDefKind::NovelScene(n) => Some(n.as_oxc_global(id, &ctx)),
                 }
-            })),
+            }))
+            // パッケージごとに 1 つの TS モジュールを出力し、
+            // 相互参照は import で解決する。
+            // そのためトップレベルの定義はすべて export する必要がある。
+            .map(|stmt| export_declaration(stmt, &allocator)),
         &allocator,
     ));
 
@@ -228,6 +241,24 @@ pub fn generate(hir: &Hir, interner: &IdentInterner, srcs: &SourceHolder) -> Str
 
 fn span() -> oxc_span::Span {
     oxc_span::Span::new(0, 0)
+}
+
+/// トップレベル宣言を `export` 付きにする。
+fn export_declaration<'a>(
+    stmt: oxc_ast::ast::Statement<'a>,
+    allocator: &'a oxc_allocator::Allocator,
+) -> oxc_ast::ast::Statement<'a> {
+    oxc_ast::ast::Statement::ExportNamedDeclaration(oxc_allocator::Box::new_in(
+        oxc_ast::ast::ExportNamedDeclaration {
+            span: span(),
+            declaration: Some(stmt.into_declaration()),
+            specifiers: oxc_allocator::Vec::new_in(allocator),
+            source: None,
+            export_kind: oxc_ast::ast::ImportOrExportKind::Value,
+            with_clause: None,
+        },
+        allocator,
+    ))
 }
 
 trait AsOxcGlobal<'a, O> {

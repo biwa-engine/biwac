@@ -310,19 +310,21 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                         span: span(),
                         kind: oxc_ast::ast::FormalParameterKind::FormalParameter,
                         items: oxc_allocator::Vec::from_iter_in(
+                            // メソッドの場合、レシーバを第一引数として明示する。
+                            // ネイティブ実装の本文は引数を書かれたままの名前で参照するので
+                            // (他の引数も str_of で生の名前を使っている)、
+                            // レシーバも `self` という名前で受ける。
                             self.signature
-                                .args
+                                .self_ty
                                 .iter()
-                                .map(|arg| oxc_ast::ast::FormalParameter {
+                                .map(|ty| oxc_ast::ast::FormalParameter {
                                     span: span(),
                                     decorators: oxc_allocator::Vec::new_in(ctx.allocator),
                                     pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
                                         oxc_allocator::Box::new_in(
                                             oxc_ast::ast::BindingIdentifier {
                                                 span: span(),
-                                                name: oxc_span::Ident::new_const(
-                                                    ctx.allocator.alloc_str(ctx.str_of(&arg.id.id)),
-                                                ),
+                                                name: oxc_span::Ident::new_const("self"),
                                                 symbol_id: Cell::new(None),
                                             },
                                             ctx.allocator,
@@ -331,7 +333,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                                     type_annotation: Some(oxc_allocator::Box::new_in(
                                         oxc_ast::ast::TSTypeAnnotation {
                                             span: span(),
-                                            type_annotation: arg.ty.kind.as_oxc(ctx),
+                                            type_annotation: ty.kind.as_oxc(ctx),
                                         },
                                         ctx.allocator,
                                     )),
@@ -340,7 +342,38 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                                     accessibility: None,
                                     readonly: false,
                                     r#override: false,
-                                }),
+                                })
+                                .chain(self.signature.args.iter().map(|arg| {
+                                    oxc_ast::ast::FormalParameter {
+                                        span: span(),
+                                        decorators: oxc_allocator::Vec::new_in(ctx.allocator),
+                                        pattern: oxc_ast::ast::BindingPattern::BindingIdentifier(
+                                            oxc_allocator::Box::new_in(
+                                                oxc_ast::ast::BindingIdentifier {
+                                                    span: span(),
+                                                    name: oxc_span::Ident::new_const(
+                                                        ctx.allocator
+                                                            .alloc_str(ctx.str_of(&arg.id.id)),
+                                                    ),
+                                                    symbol_id: Cell::new(None),
+                                                },
+                                                ctx.allocator,
+                                            ),
+                                        ),
+                                        type_annotation: Some(oxc_allocator::Box::new_in(
+                                            oxc_ast::ast::TSTypeAnnotation {
+                                                span: span(),
+                                                type_annotation: arg.ty.kind.as_oxc(ctx),
+                                            },
+                                            ctx.allocator,
+                                        )),
+                                        initializer: None,
+                                        optional: false,
+                                        accessibility: None,
+                                        readonly: false,
+                                        r#override: false,
+                                    }
+                                })),
                             ctx.allocator,
                         ),
                         rest: None,
