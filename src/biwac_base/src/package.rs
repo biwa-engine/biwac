@@ -13,6 +13,13 @@ pub struct PackageMetadata {
     pub version: PackageVersion,
     pub description: Option<String>,
     pub dependencies: Vec<DependedPackage>,
+
+    /// このパッケージが std に依存しないこと。
+    ///
+    /// std 自身は自分に依存できないため std は真になる。
+    /// 真のパッケージは lang item の提供元となるため、
+    /// ビルド時に全 lang item が揃っていることを検証する。
+    pub no_std: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

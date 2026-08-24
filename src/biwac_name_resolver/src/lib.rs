@@ -17,7 +17,7 @@ use biwac_base::{IdentInterner, InternedIdent, PackageId, PackageName};
 use biwac_hir::Hir;
 use biwac_package_loader::Pkg;
 
-use crate::resolving::resolve_in_self_package;
+use crate::resolving::{lang_item_collector::collect_lang_items, resolve_in_self_package};
 
 // このcrate biwac_name_resolver は、
 // package内のあらゆる名前の解決をすることを目指す。
@@ -55,10 +55,22 @@ impl<T> ResolveErrorHandler for Result<T, ResolveError> {
     }
 }
 
+/// 名前解決パスの成果物。
+///
+/// lang item テーブルは Hir とは別に持つ。
+/// Hir は「lowering されたプログラム本体」であり、
+/// lang item はパッケージ横断のメタ情報だからである。
+/// (rustc が lang_items を HIR の外の TyCtxt クエリとして置くのと同じ)
+pub struct ResolveOutput {
+    pub hir: Hir,
+    pub lang_items: biwac_lang_item::LangItemTable,
+}
+
 pub struct NameResolver {
     pkg: Pkg,
     pkg_name: InternedIdent,
     pkg_package_name: PackageName,
+    no_std: bool,
     external_packages: Vec<(
         InternedIdent,
         PackageId,
@@ -82,11 +94,12 @@ impl NameResolver {
             pkg,
             pkg_name,
             pkg_package_name,
+            no_std: metadata.metadata.no_std,
             external_packages,
         })
     }
 
-    pub fn try_resolve(self, interner: &IdentInterner) -> Result<Hir, Vec<ResolveError>> {
+    pub fn try_resolve(self, interner: &IdentInterner) -> Result<ResolveOutput, Vec<ResolveError>> {
         let mut pkg_names = self
             .external_packages
             .iter()
@@ -96,8 +109,21 @@ impl NameResolver {
 
         // definition collection (package internal + external package ID assignment)
         let mut def_collector = resolving::def_collector::DefCollector::new();
-        let name_tree =
-            def_collector.collect(self.pkg_name, &self.pkg, self.external_packages, interner)?;
+        let name_tree = def_collector.collect(
+            self.pkg_name,
+            &self.pkg,
+            self.external_packages.clone(),
+            interner,
+        )?;
+
+        // lang item collection
+        //
+        // def collection の直後に行う。
+        // DefId は AST の OnceCell に入っているのでここで読める。
+        // 名前解決より前でよい: lang item は名前解決に関与せず、
+        // 逆に名前解決が lang item を必要とすることもない。
+        let lang_items =
+            collect_lang_items(&self.pkg, &self.external_packages, self.no_std, interner)?;
 
         // TODO: cache on disk
         // def_collector
@@ -113,11 +139,13 @@ impl NameResolver {
         // symbol signature
 
         // lowering to HIR
-        lowering::lower(
+        let hir = lowering::lower(
             self.pkg_package_name,
             self.pkg,
             pkg_names,
             &def_collector.impl_collector,
-        )
+        )?;
+
+        Ok(ResolveOutput { hir, lang_items })
     }
 }

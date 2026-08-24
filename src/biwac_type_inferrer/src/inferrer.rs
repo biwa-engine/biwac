@@ -9,7 +9,8 @@ use biwac_hir::{
     FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Primary, Stmt, StructLiteral, Ty, TyDefKind,
     TyKind, TyVar, ValDefKind, VarIdKind,
 };
-use biwac_span::{GenDefId, LocalGenDefId, TyDefId, VarId};
+use biwac_lang_item::LangItem;
+use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, VarId};
 
 use crate::{
     TyCtx, TyError, TyResult,
@@ -670,19 +671,10 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span())),
                 // Literal::Float(_) => Ok(Ty::Float),
                 Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span())),
-                Literal::String(_) => Ok(Ty::new(
-                    TyKind::Defined(DefinedTy {
-                        // def_id: TyDefId::new(
-                        //     PkgId::new(PackageName::from_str("std").unwrap()),
-                        //     vec!["types".into(), "string".into()],
-                        //     "String".into(),
-                        // ),
-                        // TODO:
-                        def_id: todo!(),
-                        genargs: Vec::new(),
-                    }),
-                    primary.span(),
-                )),
+                // 文字列リテラルの型は lang item `string` が指す型である。
+                // コンパイラは std::types::string::String というパスを知らず、
+                // std 側が [[lang="string"]] で名乗り出たものを使う。
+                Literal::String(_) => self.tctx.lang_item_ty(LangItem::String, primary.span()),
                 Literal::Struct(struct_literal) => {
                     self.infer_struct_literal(&struct_literal.tid, struct_literal)
                 }
@@ -1039,13 +1031,52 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                 Ok(None)
             }
-            Stmt::NovelWrite(_) | Stmt::NovelWait(_) => {
-                // TODO: NovelWrite/NovelWait 型推論未実装。
-                // 将来的に Rust の lang item に相当する概念を導入し、std のシンボルの一部を
-                // コンパイラのビルトイン (lang item) として解決・利用できるようにする際に実装する。
+            // scene 内の novel statement は、
+            // コンパイラのみが知っている lang item の関数呼び出しとして扱う。
+            // ユーザはこの関数を名前で呼ぶことを想定されていない。
+            Stmt::NovelWrite(write) => {
+                let msg = self
+                    .tctx
+                    .lang_item_ty(LangItem::String, write.span.clone())?;
+                self.check_novel_call(LangItem::Write, &[msg], &write.span)?;
+
+                Ok(None)
+            }
+            Stmt::NovelWait(wait) => {
+                self.check_novel_call(LangItem::Wait, &[], &wait.span)?;
+
                 Ok(None)
             }
         }
+    }
+
+    /// novel statement が展開される先の lang item 関数を、
+    /// 実引数の型と突き合わせる。
+    ///
+    /// 呼び出し式そのものは HIR にまだ存在せず (Stmt::NovelWrite のまま)、
+    /// codegen が lang item を引いて実際の呼び出しを生成する。
+    /// ここでは「その関数が存在し、想定した引数を取る」ことだけを確かめる。
+    fn check_novel_call(&mut self, item: LangItem, args: &[Ty], span: &Span) -> TyResult<()> {
+        let def_id = self.tctx.require_val(item)?;
+
+        // 署名が引けないのは依存メタデータが壊れている場合のみ。
+        let callee = self
+            .tctx
+            .get_value_ty(&def_id)
+            .ok_or(TyError::MissingLangItem { item })?;
+
+        let expected = Ty::new(
+            TyKind::Fn(FnTy {
+                args: args.to_vec(),
+                rty: Box::new(Ty::new(TyKind::Void, span.clone())),
+                genargs: Vec::new(),
+            }),
+            span.clone(),
+        );
+
+        self.unify(callee, expected)?;
+
+        Ok(())
     }
 
     fn infer_block_stmt(&mut self, block: &BlockStmt) -> TyResult<Option<Ty>> {

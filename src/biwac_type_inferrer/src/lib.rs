@@ -71,6 +71,15 @@ pub enum TyError {
         ty: Box<Ty>,
         method: Box<Ident>,
     },
+
+    /// コンパイラが必要とする lang item が定義されていない。
+    ///
+    /// no_std パッケージのビルドでは回収パスが完全性を検証するため、
+    /// ここに到達するのは依存パッケージが lang item を提供していない場合
+    /// (例: std に依存していない、または推移的依存の先にしか std がない) である。
+    MissingLangItem {
+        item: biwac_lang_item::LangItem,
+    },
 }
 
 pub type TyResult<T> = Result<T, TyError>;

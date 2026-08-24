@@ -2,7 +2,7 @@ use std::cell::OnceCell;
 
 use biwac_span::{GenDefId, ImplId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
 
-use crate::{CompilerFlag, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
+use crate::{Attrs, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
 #[derive(Debug, Clone)]
 pub struct GenArgDeclItem<I> {
@@ -22,6 +22,7 @@ pub struct StructDef {
     pub def_id: OnceCell<TyDefId>,
     pub members: Vec<(Ident, TypRepr)>,
     pub genargs: Option<GenArgsDecl<GenDefId>>,
+    pub attrs: Attrs,
 }
 
 //  type alias
@@ -37,6 +38,7 @@ pub struct TypeAlias {
     pub def_id: OnceCell<TyDefId>,
     pub genargs: Option<GenArgsDecl<GenDefId>>,
     pub right: TypRepr,
+    pub attrs: Attrs,
 }
 
 //  native type alias
@@ -52,6 +54,7 @@ pub struct NativeTypeAlias {
     pub genargs: Option<GenArgsDecl<GenDefId>>,
     pub native: String,
     pub native_span: Span,
+    pub attrs: Attrs,
 }
 
 #[derive(Debug)]
@@ -81,7 +84,7 @@ pub struct FnDef {
     pub expr: Option<Exprs>,
     pub rtype: RetTypRepr,
     pub span: Span,
-    pub flags: Vec<CompilerFlag>,
+    pub attrs: Attrs,
     pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
@@ -94,7 +97,7 @@ pub struct NativeFnDef {
     pub native: String,
     pub native_span: Span,
     pub span: Span,
-    pub flags: Vec<CompilerFlag>,
+    pub attrs: Attrs,
     pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
@@ -128,7 +131,7 @@ pub struct MethodDef {
     pub expr: Option<Exprs>,
     pub rtype: RetTypRepr,
     pub span: Span,
-    pub flags: Vec<CompilerFlag>,
+    pub attrs: Attrs,
     pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
@@ -141,7 +144,7 @@ pub struct NativeMethodDef {
     pub native: String,
     pub native_span: Span,
     pub span: Span,
-    pub flags: Vec<CompilerFlag>,
+    pub attrs: Attrs,
     pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
 }
 
@@ -185,7 +188,7 @@ pub enum TypeDef {
 pub struct NativeCode {
     pub native: String,
     pub native_span: Span,
-    pub flags: Vec<CompilerFlag>,
+    pub attrs: Attrs,
 }
 
 // biwa言語がノベルゲーム記述用言語であるための
@@ -214,5 +217,5 @@ pub struct NovelScene {
     pub rtype: RetTypRepr,
     pub stmts: Vec<NovelStmt>,
     pub span: Span,
-    pub flags: Vec<CompilerFlag>,
+    pub attrs: Attrs,
 }

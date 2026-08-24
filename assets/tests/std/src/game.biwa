@@ -12,6 +12,7 @@ import window::Position;
 //    - states.likeabilities.akane でakaneというキャラクターのプレイヤーへの好感度にアクセスできる
 //    - states.game_difficulty でゲームの難易度にアクセスできる
 //    というようにユーザが定義
+[[lang="game"]]
 struct Game[C, S] {
   name: String, // ゲームの名前
   characters: C,
@@ -23,6 +24,7 @@ struct Game[C, S] {
 // キャラクターを表す構造体
 // P: 個々のキャラクターが持つ特有のプロパティを格納するcustom properties
 //    ゲーム開発者が必要に応じて定義する
+[[lang="character"]]
 struct Character[P] {
   name: String,
   display_name: String,

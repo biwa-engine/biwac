@@ -248,12 +248,13 @@ fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> Result<DepMetadata, ()>
 // Persist self package's symbol metadata to disk for dependents.
 fn persist_dep_metadata(
     hir: &biwac_hir::Hir,
+    lang_items: &biwac_lang_item::LangItemTable,
     srcs: &biwac_base::SourceHolder,
     interner: &biwac_base::IdentInterner,
     build_dir_path: PathBuf,
     metadata: &biwac_base::MetadataHolder,
 ) -> Result<(), ()> {
-    let dep_meta = DepMetadata::new(hir, srcs, interner);
+    let dep_meta = DepMetadata::new(hir, srcs, interner, lang_items);
     let meta_bytes = dep_meta.encode_file();
     let meta_path = build_dir_path.join(format!("{}.biwameta", metadata.metadata.name.value()));
     std::fs::write(&meta_path, meta_bytes).map_err(|e| {
@@ -284,20 +285,34 @@ fn load_analyze_and_codegen_single_package(
     let pkg = biwac_package_loader::Pkg::try_load(metadata, interner, &mut srcs, pkg_root_path)
         .map_err(|e| e.print_error_messages())?;
 
-    let hir = biwac_name_resolver::NameResolver::new(
-        metadata,
-        external_packages_with_ids,
-        package_name_interned,
-        pkg,
-    )
-    .unwrap()
-    .try_resolve(interner)
-    .unwrap();
+    // Attribute check: AST から HIR への lowering の前に、
+    // 既知の属性か / キー・値型 / 付与対象を検証する。
+    // 後段の lang item 回収はこれを通過していることを前提にできる。
+    check_attributes(&pkg, interner, &srcs, metadata)?;
+
+    let biwac_name_resolver::ResolveOutput { hir, lang_items } =
+        biwac_name_resolver::NameResolver::new(
+            metadata,
+            external_packages_with_ids,
+            package_name_interned,
+            pkg,
+        )
+        .unwrap()
+        .try_resolve(interner)
+        .map_err(|errs| print_errors(&errs, interner, &srcs, metadata))?;
 
     // Persist self package's symbol metadata to disk for dependents.
-    persist_dep_metadata(&hir, &srcs, interner, build_dir_path.clone(), metadata)?;
+    // lang item テーブルも書き出すので、依存側はこれを読んで復元する。
+    persist_dep_metadata(
+        &hir,
+        &lang_items,
+        &srcs,
+        interner,
+        build_dir_path.clone(),
+        metadata,
+    )?;
 
-    let hir = biwac_type_inferrer::TyCtx::new(hir, ext_pkgs_for_ty, interner)
+    let hir = biwac_type_inferrer::TyCtx::new(hir, lang_items, ext_pkgs_for_ty, interner)
         .infer()
         .unwrap();
 
@@ -306,6 +321,50 @@ fn load_analyze_and_codegen_single_package(
     write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
 
     Ok(())
+}
+
+/// パッケージ内の全モジュールに属性検証パスを走らせる。
+///
+/// モジュール木の走査はここが持つ。
+/// biwac_attribute は biwac_ast までしか知らない
+/// (biwac_package_loader は biwac_parser に依存しており、
+///  そこに依存させると循環する)。
+fn check_attributes(
+    pkg: &biwac_package_loader::Pkg,
+    interner: &biwac_base::IdentInterner,
+    srcs: &biwac_base::SourceHolder,
+    metadata: &biwac_base::MetadataHolder,
+) -> Result<(), ()> {
+    let mut errors = Vec::new();
+    pkg.walk_modules(|module| {
+        biwac_attribute::check_mod_ast(&module.ast, interner, &mut errors);
+    });
+
+    if errors.is_empty() {
+        return Ok(());
+    }
+
+    print_errors(&errors, interner, srcs, metadata);
+
+    Err(())
+}
+
+/// 収集済みのエラーをまとめて表示する。
+fn print_errors<E: biwac_base::BiwacError>(
+    errors: &[E],
+    interner: &biwac_base::IdentInterner,
+    srcs: &biwac_base::SourceHolder,
+    metadata: &biwac_base::MetadataHolder,
+) {
+    let ctx = biwac_base::ErrorContext {
+        metadata,
+        srcs,
+        interner,
+    };
+    for e in errors {
+        e.print_error_message(&ctx);
+    }
+    biwac_base::print_error_finish_message(errors.len());
 }
 
 fn write_bin(

@@ -32,10 +32,27 @@ pub enum PackageKind {
     Bin,
 }
 
+impl LoadedModule {
+    /// 自身と全子孫モジュールを深さ優先で走査する。
+    pub fn walk(&self, f: &mut impl FnMut(&LoadedModule)) {
+        f(self);
+        for child in self.children.values() {
+            child.walk(f);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Pkg {
     pub pkg_kind: PackageKind,
     pub root_module: LoadedModule,
+}
+
+impl Pkg {
+    /// パッケージ内の全モジュールを深さ優先で走査する。
+    pub fn walk_modules(&self, mut f: impl FnMut(&LoadedModule)) {
+        self.root_module.walk(&mut f);
+    }
 }
 
 impl Pkg {

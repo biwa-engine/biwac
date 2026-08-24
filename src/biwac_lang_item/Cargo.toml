@@ -1,10 +1,8 @@
 [package]
-name = "biwac_dependency_metadata"
+name = "biwac_lang_item"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
-biwac_hir = { path = "../biwac_hir"}
-biwac_lang_item = { path = "../biwac_lang_item"}
 biwac_span = { path = "../biwac_span"}

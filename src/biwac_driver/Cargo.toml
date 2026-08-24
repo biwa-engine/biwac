@@ -7,6 +7,8 @@ edition.workspace = true
 biwac_base = { path = "../biwac_base"}
 biwac_metadata_loader = { path = "../biwac_metadata_loader"}
 biwac_package_loader = { path = "../biwac_package_loader"}
+biwac_attribute = { path = "../biwac_attribute"}
+biwac_lang_item = { path = "../biwac_lang_item"}
 biwac_hir = { path = "../biwac_hir"}
 biwac_dependency_metadata = { path = "../biwac_dependency_metadata"}
 biwac_name_resolver = { path = "../biwac_name_resolver"}

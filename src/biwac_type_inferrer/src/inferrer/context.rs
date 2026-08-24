@@ -8,13 +8,19 @@ use biwac_hir::{
     AssocValDefKind, DefinedTyImpl, ExprId, Hir, Ident, InferTy, Ty, TyDefKind, TyKind, TyVar,
     ValDefKind,
 };
+use biwac_lang_item::{LangItem, LangItemKind, LangItemTable};
 use biwac_span::{TyDefId, ValDefId, VarId};
 
-use crate::TyError;
+use crate::{TyError, TyResult};
 
 pub struct TyCtx<'a> {
     pub(super) hir: Hir,
     pub(super) ext_pkgs: Vec<(PackageId, Arc<DepMetadata>)>,
+    /// lang item テーブル。
+    /// 名前解決パスが構築したものをそのまま持つ。
+    /// Hir の外に置くのは、これがプログラム本体ではなく
+    /// パッケージ横断のメタ情報だからである。
+    pub(super) lang_items: LangItemTable,
     /// &'a mut IdentInterner を RefCell でラップして &self メソッドから変更可能にする。
     /// interner は borrow_mut() で短時間だけ借用し、返却後に解放する。
     pub(super) interner: RefCell<&'a mut IdentInterner>,
@@ -30,16 +36,53 @@ pub struct TyCtx<'a> {
 impl<'a> TyCtx<'a> {
     pub fn new(
         hir: Hir,
+        lang_items: LangItemTable,
         ext_pkgs: Vec<(PackageId, Arc<DepMetadata>)>,
         interner: &'a mut IdentInterner,
     ) -> Self {
         Self {
             hir,
             ext_pkgs,
+            lang_items,
             interner: RefCell::new(interner),
             ext_ty_cache: RefCell::new(HashMap::new()),
             ext_assoc_val_map: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// 型の lang item の DefId を引く。
+    ///
+    /// rustc の `tcx.require_lang_item` に相当する。
+    /// 種別 (型 / 関数) は回収時に検証済みなので、
+    /// ここで取り違えることはない。
+    pub(super) fn require_ty(&self, item: LangItem) -> Result<TyDefId, TyError> {
+        debug_assert_eq!(item.kind(), LangItemKind::Ty);
+        self.lang_items
+            .get(&item)
+            .map(TyDefId::new)
+            .ok_or(TyError::MissingLangItem { item })
+    }
+
+    /// 値 (関数) の lang item の DefId を引く。
+    pub(super) fn require_val(&self, item: LangItem) -> Result<ValDefId, TyError> {
+        debug_assert_eq!(item.kind(), LangItemKind::Fn);
+        self.lang_items
+            .get(&item)
+            .map(ValDefId::new)
+            .ok_or(TyError::MissingLangItem { item })
+    }
+
+    /// lang item で指定された型を `Ty` として組み立てる。
+    ///
+    /// ジェネリクスを取らない lang item 型 (`string` など) 専用。
+    pub(super) fn lang_item_ty(&self, item: LangItem, span: biwac_span::Span) -> TyResult<Ty> {
+        Ok(Ty::new(
+            TyKind::Defined(biwac_hir::DefinedTy {
+                def_id: self.require_ty(item)?,
+                genargs: Vec::new(),
+            }),
+            span,
+        ))
     }
 
     /// 外部パッケージに対応する DepMetadata を PackageId で引く。

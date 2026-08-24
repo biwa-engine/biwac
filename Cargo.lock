@@ -122,6 +122,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "biwac_attribute"
+version = "0.1.0"
+dependencies = [
+ "biwac_ast",
+ "biwac_base",
+ "biwac_span",
+]
+
+[[package]]
 name = "biwac_base"
 version = "0.1.0"
 dependencies = [
@@ -135,6 +144,7 @@ version = "0.1.0"
 dependencies = [
  "biwac_base",
  "biwac_hir",
+ "biwac_lang_item",
  "biwac_span",
 ]
 
@@ -142,10 +152,12 @@ dependencies = [
 name = "biwac_driver"
 version = "0.1.0"
 dependencies = [
+ "biwac_attribute",
  "biwac_base",
  "biwac_dependency_metadata",
  "biwac_generator",
  "biwac_hir",
+ "biwac_lang_item",
  "biwac_metadata_loader",
  "biwac_name_resolver",
  "biwac_package_loader",
@@ -186,6 +198,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "biwac_lang_item"
+version = "0.1.0"
+dependencies = [
+ "biwac_base",
+ "biwac_span",
+]
+
+[[package]]
 name = "biwac_lexer"
 version = "0.1.0"
 dependencies = [
@@ -210,9 +230,11 @@ version = "0.1.0"
 dependencies = [
  "ariadne",
  "biwac_ast",
+ "biwac_attribute",
  "biwac_base",
  "biwac_dependency_metadata",
  "biwac_hir",
+ "biwac_lang_item",
  "biwac_lexer",
  "biwac_metadata_loader",
  "biwac_package_loader",
@@ -247,6 +269,7 @@ version = "0.1.0"
 dependencies = [
  "ariadne",
  "biwac_ast",
+ "biwac_attribute",
  "biwac_base",
  "biwac_lexer",
  "biwac_novel_parser",
@@ -269,6 +292,7 @@ dependencies = [
  "biwac_base",
  "biwac_dependency_metadata",
  "biwac_hir",
+ "biwac_lang_item",
  "biwac_metadata_loader",
  "biwac_name_resolver",
  "biwac_package_loader",

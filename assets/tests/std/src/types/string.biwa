@@ -1,3 +1,4 @@
+[[lang="string"]]
 [[native(arch="typescript")]]
 type String = {{
   string

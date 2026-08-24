@@ -135,6 +135,7 @@ impl DepMetadataModuleView {
                 SymbolBody::Fn(fn_data) => (fn_data.name, ExternalChildKind::Val),
                 SymbolBody::Struct(struct_data) => (struct_data.name, ExternalChildKind::Ty),
                 SymbolBody::Mod(mod_data) => (mod_data.name, ExternalChildKind::Mod),
+                SymbolBody::NativeTypeAlias(alias) => (alias.name, ExternalChildKind::Ty),
             };
             let name_str = match self.dep.strings.get(name_offset) {
                 Ok(s) => s.to_string(),

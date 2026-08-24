@@ -8,6 +8,9 @@ use crate::AssocNameTreeItem;
 
 #[derive(Debug)]
 pub enum ResolveError {
+    /// lang item の回収時に検出したエラー。
+    LangItem(biwac_lang_item::LangItemError),
+
     // module 側から既存の symbol との重複を検知した場合
     DuplicatedSymbolAndModuleName {
         name: InternedIdent,
@@ -112,6 +115,11 @@ pub enum ResolveError {
 impl BiwacError for ResolveError {
     fn print_error_message(&self, ctx: &biwac_base::ErrorContext) {
         match self {
+            // TODO: 他の変種と同様、ariadne によるソース抜粋付きの表示は未実装。
+            Self::LangItem(e) => {
+                eprintln!("Error: {}", e.message());
+            }
+
             Self::DuplicatedSymbolAndModuleName {
                 name,
                 mod_id,

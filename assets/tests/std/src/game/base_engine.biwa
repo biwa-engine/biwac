@@ -1,7 +1,7 @@
 [[native(arch="typescript")]]
 {{
   import { createImage } from "../engine/api/image.ts";
-  import { showMessage } from "../engine/api/message.ts";
+  import { showMessage, waitForClick } from "../engine/api/message.ts";
 }}
 
 import package::types::string::String;
@@ -14,7 +14,19 @@ fn create_image(path: String, x: Int, y: Int) {{
   });
 }}
 
+// scene 内で直接記述されたテキスト (novel statement) の展開先。
+// コンパイラのみが呼び出すことを想定しており、
+// ゲーム開発者やサードパーティが直接呼ぶことは想定していない。
+[[lang="write"]]
 [[native(arch="typescript")]]
 fn write(msg: String) {{
   showMessage(msg);
+}}
+
+// novel statement の待機 (クリック待ち) の展開先。
+// write と同じくコンパイラのみが呼び出す。
+[[lang="wait"]]
+[[native(arch="typescript")]]
+fn wait() {{
+  waitForClick();
 }}

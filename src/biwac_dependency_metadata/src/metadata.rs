@@ -1,6 +1,7 @@
 mod body;
 mod codec;
 mod format;
+mod lang_item;
 pub mod module_view;
 mod table;
 
@@ -15,6 +16,7 @@ use format::{
     DiskFileIndex, DiskSourceInfo, DiskSpan, DiskSymbolHeader, DiskSymbolIndex, DiskSymbolKind,
     DiskTy, DiskTyHeader, DiskTyKind, DiskVisibility,
 };
+use lang_item::DiskLangItem;
 use table::{LazyDiskVec, SourceFileTable, StringTable};
 
 /// ロード済みの依存パッケージメタデータ。
@@ -28,6 +30,9 @@ pub struct DepMetadata {
     pub strings: StringTable,
     /// ルートモジュール (lib モジュール) のシンボルインデックス
     pub root_sym_idx: u32,
+    /// このパッケージが定義した lang item。
+    /// 依存側はこれを使って lang item テーブルを復元する。
+    pub lang_items: Vec<DiskLangItem>,
 }
 
 impl DepMetadata {
@@ -35,12 +40,15 @@ impl DepMetadata {
         hir: &biwac_hir::Hir,
         source_holder: &biwac_base::SourceHolder,
         interner: &biwac_base::IdentInterner,
+        lang_item_table: &biwac_lang_item::LangItemTable,
     ) -> Self {
         use biwac_base::ModPath;
         use biwac_hir::{AssocValDefKind, TyDefKind, ValDefKind};
         use biwac_span::{GenDefId, LocalGenDefId, TyDefId, ValDefId};
         use codec::DiskVec;
-        use format::{DiskGenArg, DiskModData, DiskStructData, DiskStructMember};
+        use format::{
+            DiskGenArg, DiskModData, DiskNativeTypeAliasData, DiskStructData, DiskStructMember,
+        };
 
         // ====================================================
         // Phase 1: source file table (自パッケージのモジュール)
@@ -70,7 +78,7 @@ impl DepMetadata {
 
         // ====================================================
         // Phase 2: シンボルインデックスの割り当て
-        //   [struct類][assoc fn類][top-level fn類][mod類]
+        //   [struct類][native type alias類][assoc fn類][top-level fn類][mod類]
         // ====================================================
 
         // --- struct ---
@@ -97,9 +105,42 @@ impl DepMetadata {
             .collect();
         struct_items.sort_by_key(|i| i.def_id.value());
 
+        // --- native type alias ---
+        //
+        // struct と同じくパッケージ外から参照される型定義である。
+        // これを書き出さないと、依存側で `fn write(msg: String)` の引数型や
+        // `struct Game { name: String }` のメンバ型が
+        // ty_to_sym の引きに失敗してシンボル 0 番に退避してしまう。
+        struct AliasItem<'h> {
+            def_id: TyDefId,
+            def: &'h biwac_hir::NativeTypeAliasDef,
+            def_impl: &'h biwac_hir::DefinedTyImpl,
+        }
+        let mut alias_items: Vec<AliasItem> = hir
+            .tys
+            .iter()
+            .filter(|(def_id, _)| def_id.pkg().is_self())
+            .filter_map(|(def_id, def_impl)| {
+                if let Some(TyDefKind::NativeTypeAlias(a)) = &def_impl.ty_content {
+                    Some(AliasItem {
+                        def_id: *def_id,
+                        def: a.as_ref(),
+                        def_impl,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        alias_items.sort_by_key(|i| i.def_id.value());
+
         let mut ty_to_sym: HashMap<TyDefId, DiskSymbolIndex> = HashMap::new();
         let mut next_idx = 0u32;
         for item in &struct_items {
+            ty_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
+            next_idx += 1;
+        }
+        for item in &alias_items {
             ty_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
             next_idx += 1;
         }
@@ -113,8 +154,15 @@ impl DepMetadata {
             parent_ty_def_id: TyDefId,
         }
         let mut assoc_fn_items: Vec<AssocFnItem> = Vec::new();
-        for item in &struct_items {
-            for impl_list in item.def_impl.vals.values() {
+        // struct と native type alias のどちらも impl block を持てる
+        // (`impl String { fn concat(..) }`)。
+        let assoc_parents: Vec<(TyDefId, &biwac_hir::DefinedTyImpl)> = struct_items
+            .iter()
+            .map(|i| (i.def_id, i.def_impl))
+            .chain(alias_items.iter().map(|i| (i.def_id, i.def_impl)))
+            .collect();
+        for (parent_ty_def_id, parent_impl) in &assoc_parents {
+            for impl_list in parent_impl.vals.values() {
                 for (val_def_id, pair) in &impl_list.vals {
                     let (name, sig, ig) = match &pair.val_content {
                         AssocValDefKind::Fn(f) => {
@@ -129,7 +177,7 @@ impl DepMetadata {
                         name,
                         signature: sig,
                         impl_genargs: ig,
-                        parent_ty_def_id: item.def_id,
+                        parent_ty_def_id: *parent_ty_def_id,
                     });
                 }
             }
@@ -205,6 +253,16 @@ impl DepMetadata {
 
         // struct を所属モジュールに登録
         for item in &struct_items {
+            let mod_id = item.def.name.span.module();
+            if let Some(ms) = source_holder.mods.get(&mod_id)
+                && let Some(&sym) = ty_to_sym.get(&item.def_id)
+            {
+                mod_children.entry(ms.modu.clone()).or_default().push(sym);
+            }
+        }
+
+        // native type alias を所属モジュールに登録
+        for item in &alias_items {
             let mod_id = item.def.name.span.module();
             if let Some(ms) = source_holder.mods.get(&mod_id)
                 && let Some(&sym) = ty_to_sym.get(&item.def_id)
@@ -347,6 +405,50 @@ impl DepMetadata {
             );
         }
 
+        // --- native type alias ボディ ---
+        for item in &alias_items {
+            let name_str = interner.get_str(&item.def.name.id).unwrap_or("");
+            let disk_name = strings.push(name_str);
+            let name_span = impl_to_disk_span(&item.def.name.span, &mod_to_file_idx);
+
+            let disk_native = strings.push(&item.def.native);
+            let native_span = impl_to_disk_span(&item.def.native_span, &mod_to_file_idx);
+
+            // native type alias は genarg の名前を HIR に保持している
+            let disk_genargs = DiskVec(
+                item.def
+                    .genargs
+                    .iter()
+                    .map(|g| DiskGenArg {
+                        name: strings.push(interner.get_str(&g.id).unwrap_or("")),
+                        name_span: impl_to_disk_span(&g.span, &mod_to_file_idx),
+                    })
+                    .collect(),
+            );
+
+            let assoc_syms: Vec<DiskSymbolIndex> = assoc_fn_items
+                .iter()
+                .filter(|af| af.parent_ty_def_id == item.def_id)
+                .filter_map(|af| val_to_sym.get(&af.val_def_id).copied())
+                .collect();
+
+            let body = SymbolBody::NativeTypeAlias(DiskNativeTypeAliasData {
+                name: disk_name,
+                name_span,
+                native: disk_native,
+                native_span,
+                genargs: disk_genargs,
+                assoc_symbols: DiskVec(assoc_syms),
+            });
+            push_body(
+                &mut body_builder,
+                &mut sym_hdrs,
+                &mut cache,
+                DiskSymbolKind::NativeTypeAlias,
+                body,
+            );
+        }
+
         // --- assoc fn ボディ ---
         for item in &assoc_fn_items {
             let fn_data = impl_encode_fn_data(
@@ -424,12 +526,38 @@ impl DepMetadata {
         let sym_body_bytes = body_builder.finish();
         let sym_bodies = LazyDiskVec::from_cache(sym_body_bytes, cache);
 
+        // lang item: DefId をこのファイル内のシンボルインデックスに変換する。
+        //
+        // DepMetadata::new はシンボルを 0 から振り直すため、
+        // 自パッケージでの PackageLocalDefId とは一致しない。
+        // 一方で依存側がこのファイルを読むときは
+        // sym_idx がそのまま PackageLocalDefId になる
+        // (module_view::ExternalChildRef::as_ty_def_id を参照)。
+        let mut lang_items: Vec<DiskLangItem> = lang_item_table
+            .iter()
+            .filter(|(_, def_id)| def_id.pkg().is_self())
+            .filter_map(|(item, def_id)| {
+                let sym_idx = match item.kind() {
+                    biwac_lang_item::LangItemKind::Ty => {
+                        ty_to_sym.get(&TyDefId::new(def_id)).copied()
+                    }
+                    biwac_lang_item::LangItemKind::Fn => {
+                        val_to_sym.get(&ValDefId::new(def_id)).copied()
+                    }
+                }?;
+                Some(DiskLangItem::new(item, sym_idx))
+            })
+            .collect();
+        // 決定論的な順序にする
+        lang_items.sort_by_key(|li| li.lang_item);
+
         Self {
             sym_hdrs,
             sym_bodies,
             source_files,
             strings,
             root_sym_idx,
+            lang_items,
         }
     }
 
@@ -504,6 +632,17 @@ impl DepMetadata {
             });
         }
         let strings = StringTable::new(data[pos..str_end].to_vec());
+        pos = str_end;
+
+        // lang_item_table: [count: u32][DiskLangItem; count]
+        let (lang_item_count, n) = u32::decode(&data[pos..])?;
+        pos += n;
+        let mut lang_items = Vec::with_capacity(lang_item_count as usize);
+        for _ in 0..lang_item_count {
+            let (li, n) = DiskLangItem::decode(&data[pos..])?;
+            pos += n;
+            lang_items.push(li);
+        }
 
         Ok(Self {
             sym_hdrs,
@@ -511,6 +650,7 @@ impl DepMetadata {
             source_files,
             strings,
             root_sym_idx,
+            lang_items,
         })
     }
 
@@ -554,6 +694,12 @@ impl DepMetadata {
         (str_data.len() as u32).encode(&mut buf);
         buf.extend_from_slice(str_data);
 
+        // lang_item_table
+        (self.lang_items.len() as u32).encode(&mut buf);
+        for li in &self.lang_items {
+            li.encode(&mut buf);
+        }
+
         buf
     }
 
@@ -569,6 +715,27 @@ impl DepMetadata {
 
     pub fn get_str(&self, offset: format::DiskStringOffset) -> Result<&str, DepMetadataError> {
         self.strings.get(offset)
+    }
+
+    /// このパッケージが定義した lang item を `(LangItem, DefId)` として列挙する。
+    ///
+    /// `pkg_id` は依存側が割り当てたパッケージ ID。
+    /// メタデータ上の sym_idx は消費側から見た `PackageLocalDefId` と一致するため
+    /// (module_view::ExternalChildRef::as_ty_def_id と同じ規約)、
+    /// そのまま DefId を組み立てられる。
+    ///
+    /// フォーマットバージョンが一致していれば未知の discriminant は現れないが、
+    /// 現れた場合はその項目を黙って飛ばす。
+    pub fn lang_items(
+        &self,
+        pkg_id: biwac_base::PackageId,
+    ) -> impl Iterator<Item = (biwac_lang_item::LangItem, biwac_span::DefId)> + '_ {
+        self.lang_items.iter().filter_map(move |li| {
+            let item = li.lang_item()?;
+            let def_id =
+                biwac_span::DefId::new(pkg_id, biwac_span::PackageLocalDefId::new(li.sym_idx.0));
+            Some((item, def_id))
+        })
     }
 
     /// 外部パッケージの fn シンボル1つを ValDefKind に変換する。
@@ -587,66 +754,32 @@ impl DepMetadata {
         Some(sig)
     }
 
-    /// 外部パッケージの struct シンボル1つを DefinedTyImpl に変換する。
-    /// TyCtx の遅延ロードから呼ばれる。struct のメンバ型と assoc fns を含む。
-    pub fn get_ext_ty_impl(
+    /// 外部パッケージの型に紐づく assoc fn 群を vals マップに復元する。
+    ///
+    /// struct と native type alias で共通の処理。
+    /// `owner_genarg_count` は所有する型のジェネリクス個数。
+    fn impl_load_ext_assoc_vals(
         &self,
-        struct_sym_idx: u32,
+        assoc_symbols: &[DiskSymbolIndex],
+        owner_genarg_count: usize,
         pkg_id: biwac_base::PackageId,
         interner: &mut biwac_base::IdentInterner,
-    ) -> Option<biwac_hir::DefinedTyImpl> {
+    ) -> std::collections::HashMap<biwac_base::InternedIdent, biwac_hir::TyValImplList> {
         use biwac_hir::{
-            AssocValDefKind, DefinedTyImpl, Ident, NativeFnDef, StructDef, TyDefKind,
-            TyValImplGenargsContentPair, TyValImplList,
+            AssocValDefKind, Ident, NativeFnDef, TyValImplGenargsContentPair, TyValImplList,
         };
-        use biwac_span::{DefId, GenDefId, LocalGenDefId, PackageLocalDefId, Span, ValDefId};
+        use biwac_span::{DefId, LocalGenDefId, PackageLocalDefId, Span, ValDefId};
 
-        let body = self.get_symbol_body(struct_sym_idx as usize).ok()?;
-        let SymbolBody::Struct(struct_data) = body else {
-            return None;
-        };
-
-        // struct のジェネリクス引数 GenDefId を割り当て
-        let genargs: Vec<GenDefId> = (0..struct_data.genargs.0.len())
-            .map(|i| {
-                GenDefId::new(DefId::new(
-                    pkg_id,
-                    PackageLocalDefId::new(ext_gen_id(struct_sym_idx, i as u32)),
-                ))
-            })
-            .collect();
-
-        // メンバを変換
-        let mut members = std::collections::HashMap::new();
-        for m in &struct_data.members.0 {
-            let name_str = self.get_str(m.name).unwrap_or("");
-            let name_id = interner.get_or_insert(name_str);
-            let ty = self.impl_disk_ty_to_ty(&m.ty, pkg_id, Some(struct_sym_idx), None);
-            members.insert(name_id, ty);
-        }
-
-        let struct_name_str = self.get_str(struct_data.name).unwrap_or("");
-        let struct_name_id = interner.get_or_insert(struct_name_str);
-        let struct_def = StructDef {
-            name: Ident {
-                id: struct_name_id,
-                span: Span::dummy(),
-            },
-            members,
-            genargs,
-        };
-
-        let struct_genarg_count = struct_data.genargs.0.len();
         let mut vals: std::collections::HashMap<biwac_base::InternedIdent, TyValImplList> =
             std::collections::HashMap::new();
 
         // assoc fns を vals に登録する。
         // NOTE: disk format にはimpl genargs とfn genargs の境界が記録されていないため、
-        //       struct のジェネリクス数を上限として先頭から impl genargs とみなす。
+        //       所有する型のジェネリクス数を上限として先頭から impl genargs とみなす。
         //       impl[T] Foo[T] のような標準的なパターンは正しく再現できる。
         //       TODO: impl Foo[Int] { ... } のように特殊化されたimplの場合は
         //             disk format に impl_target_genargs を追加することで解決する。
-        for &assoc_sym_idx_disk in &struct_data.assoc_symbols.0 {
+        for &assoc_sym_idx_disk in assoc_symbols {
             let assoc_sym_idx = assoc_sym_idx_disk.0;
             let Ok(assoc_body) = self.get_symbol_body(assoc_sym_idx as usize) else {
                 continue;
@@ -658,7 +791,7 @@ impl DepMetadata {
             let val_def_id =
                 ValDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(assoc_sym_idx)));
 
-            let impl_genarg_count = struct_genarg_count.min(fn_data.genargs.0.len());
+            let impl_genarg_count = owner_genarg_count.min(fn_data.genargs.0.len());
             let impl_genarg_pattern: Vec<biwac_hir::Ty> = (0..impl_genarg_count)
                 .map(|i| {
                     let lgid = LocalGenDefId::new(DefId::new(
@@ -716,6 +849,129 @@ impl DepMetadata {
                 .vals
                 .insert(val_def_id, pair);
         }
+
+        vals
+    }
+
+    /// 外部パッケージの型シンボル1つを DefinedTyImpl に変換する。
+    /// TyCtx の遅延ロードから呼ばれる。
+    /// struct はメンバ型を、native type alias は native 本体を、
+    /// どちらも assoc fns を含む。
+    pub fn get_ext_ty_impl(
+        &self,
+        ty_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::DefinedTyImpl> {
+        match self.get_symbol_body(ty_sym_idx as usize).ok()? {
+            SymbolBody::Struct(_) => self.impl_get_ext_struct_ty_impl(ty_sym_idx, pkg_id, interner),
+            SymbolBody::NativeTypeAlias(_) => {
+                self.impl_get_ext_native_alias_ty_impl(ty_sym_idx, pkg_id, interner)
+            }
+            _ => None,
+        }
+    }
+
+    /// native type alias (`type String = {{ string }};`) を復元する。
+    /// メンバを持たないため、名前・genarg 名・native 本体と assoc fns だけを持つ。
+    fn impl_get_ext_native_alias_ty_impl(
+        &self,
+        alias_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::DefinedTyImpl> {
+        use biwac_hir::{DefinedTyImpl, Ident, NativeTypeAliasDef, TyDefKind};
+        use biwac_span::Span;
+
+        let body = self.get_symbol_body(alias_sym_idx as usize).ok()?;
+        let SymbolBody::NativeTypeAlias(alias_data) = body else {
+            return None;
+        };
+
+        let name_id = interner.get_or_insert(self.get_str(alias_data.name).unwrap_or(""));
+        let genargs: Vec<Ident> = alias_data
+            .genargs
+            .0
+            .iter()
+            .map(|g| Ident {
+                id: interner.get_or_insert(self.get_str(g.name).unwrap_or("")),
+                span: Span::dummy(),
+            })
+            .collect();
+
+        let vals = self.impl_load_ext_assoc_vals(
+            &alias_data.assoc_symbols.0,
+            genargs.len(),
+            pkg_id,
+            interner,
+        );
+
+        let alias_def = NativeTypeAliasDef {
+            name: Ident {
+                id: name_id,
+                span: Span::dummy(),
+            },
+            genargs,
+            native: self.get_str(alias_data.native).unwrap_or("").to_string(),
+            native_span: Span::dummy(),
+        };
+
+        Some(DefinedTyImpl {
+            ty_content: Some(TyDefKind::NativeTypeAlias(Box::new(alias_def))),
+            vals,
+        })
+    }
+
+    fn impl_get_ext_struct_ty_impl(
+        &self,
+        struct_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::DefinedTyImpl> {
+        use biwac_hir::{DefinedTyImpl, Ident, StructDef, TyDefKind};
+        use biwac_span::{DefId, GenDefId, PackageLocalDefId, Span};
+
+        let body = self.get_symbol_body(struct_sym_idx as usize).ok()?;
+        let SymbolBody::Struct(struct_data) = body else {
+            return None;
+        };
+
+        // struct のジェネリクス引数 GenDefId を割り当て
+        let genargs: Vec<GenDefId> = (0..struct_data.genargs.0.len())
+            .map(|i| {
+                GenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_gen_id(struct_sym_idx, i as u32)),
+                ))
+            })
+            .collect();
+
+        // メンバを変換
+        let mut members = std::collections::HashMap::new();
+        for m in &struct_data.members.0 {
+            let name_str = self.get_str(m.name).unwrap_or("");
+            let name_id = interner.get_or_insert(name_str);
+            let ty = self.impl_disk_ty_to_ty(&m.ty, pkg_id, Some(struct_sym_idx), None);
+            members.insert(name_id, ty);
+        }
+
+        let struct_name_str = self.get_str(struct_data.name).unwrap_or("");
+        let struct_name_id = interner.get_or_insert(struct_name_str);
+        let struct_def = StructDef {
+            name: Ident {
+                id: struct_name_id,
+                span: Span::dummy(),
+            },
+            members,
+            genargs,
+        };
+
+        let vals = self.impl_load_ext_assoc_vals(
+            &struct_data.assoc_symbols.0,
+            struct_data.genargs.0.len(),
+            pkg_id,
+            interner,
+        );
 
         Some(DefinedTyImpl {
             ty_content: Some(TyDefKind::Struct(Box::new(struct_def))),

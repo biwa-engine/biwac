@@ -9,11 +9,12 @@
 ///   [source_file_count: u32][DiskSourceInfo; source_file_count]
 ///   [string_table_total_bytes: u32][string_data: string_table_total_bytes B]
 ///     └─ 各文字列: null 終端 UTF-8
+///   [lang_item_count: u32][DiskLangItem; lang_item_count]
 use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 1;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 2;
 
 // --- インデックス / オフセット型 ---
 
@@ -46,6 +47,7 @@ pub enum DiskSymbolKind {
     Mod = 0,
     Struct = 1,
     Fn = 2,
+    NativeTypeAlias = 3,
 }
 
 impl TryFrom<u32> for DiskSymbolKind {
@@ -55,6 +57,7 @@ impl TryFrom<u32> for DiskSymbolKind {
             0 => Ok(Self::Mod),
             1 => Ok(Self::Struct),
             2 => Ok(Self::Fn),
+            3 => Ok(Self::NativeTypeAlias),
             _ => Err(DepMetadataError::UnknownSymbolKind(v)),
         }
     }
@@ -512,6 +515,66 @@ impl DiskEncode for DiskStructData {
         self.def_span.encode(buf);
         self.genargs.encode(buf);
         self.members.encode(buf);
+        self.assoc_symbols.encode(buf);
+    }
+}
+
+// --- DiskNativeTypeAliasData ---
+//
+// native type alias (`type String = {{ string }};`) のボディ。
+//
+// struct と同じくパッケージ外から参照される型定義であり、
+// impl block を持てる (`impl String { fn concat(..) }`) ため
+// assoc_symbols を持つ。
+
+#[derive(Debug)]
+pub struct DiskNativeTypeAliasData {
+    pub name: DiskStringOffset,
+    pub name_span: DiskSpan,
+    /// `{{ ... }}` の中身 (ターゲット言語のコード)
+    pub native: DiskStringOffset,
+    pub native_span: DiskSpan,
+    pub genargs: DiskVec<DiskGenArg>,
+    /// 関連関数・メソッドのシンボルインデックス
+    pub assoc_symbols: DiskVec<DiskSymbolIndex>,
+}
+
+impl DiskDecode for DiskNativeTypeAliasData {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (name, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (name_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (native, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (native_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (genargs, n) = DiskVec::<DiskGenArg>::decode(&bytes[pos..])?;
+        pos += n;
+        let (assoc_symbols, n) = DiskVec::<DiskSymbolIndex>::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                name,
+                name_span,
+                native,
+                native_span,
+                genargs,
+                assoc_symbols,
+            },
+            pos,
+        ))
+    }
+}
+
+impl DiskEncode for DiskNativeTypeAliasData {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.name.encode(buf);
+        self.name_span.encode(buf);
+        self.native.encode(buf);
+        self.native_span.encode(buf);
+        self.genargs.encode(buf);
         self.assoc_symbols.encode(buf);
     }
 }

@@ -137,6 +137,13 @@ macro_rules! impl_typed_def_id {
                 self.0.pkg
             }
 
+            /// 型付けを外した生の [`DefId`]。
+            /// lang item テーブルのように種別を問わず DefId を扱う箇所で使う。
+            #[inline]
+            pub fn def_id(&self) -> DefId {
+                self.0
+            }
+
             #[inline]
             pub fn value(&self) -> u64 {
                 self.0.as_u64()

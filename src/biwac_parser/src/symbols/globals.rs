@@ -4,9 +4,9 @@ use biwac_lexer::{TkKindName, token::TkKind};
 use biwac_span::Span;
 
 use biwac_ast::{
-    ArgDecl, ArgDeclList, CompilerFlag, FnDef, Globals, Ident, ImplBlock, ImportDecl,
-    MethodArgDeclList, MethodDef, NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias,
-    NovelScene, RetTypRepr, StructDef, TypeAlias, TypeDef,
+    ArgDecl, ArgDeclList, Attrs, FnDef, Globals, Ident, ImplBlock, ImportDecl, MethodArgDeclList,
+    MethodDef, NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, RetTypRepr,
+    StructDef, TypeAlias, TypeDef,
 };
 
 use crate::{ExprOrStmt, ParseError, TokenStream};
@@ -42,7 +42,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
 
     fn consume_function(
         &mut self,
-        flags: Vec<CompilerFlag>,
+        attrs: Attrs,
     ) -> Result<CodeOrNative<FnDef, NativeFnDef>, ParseError<'src>> {
         let begin = self.must_consume_next(vec![TkKindName::KwFn])?.span.clone();
 
@@ -50,11 +50,9 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
 
         let genargs = self.opt_consume_generic_argument_declaration()?;
 
-        let interned_str_native = self.interner.get_or_insert("native");
-
         let args = self.consume_argsdec()?;
         let rtype = self.consume_return_type(&args.span)?;
-        if flags.iter().any(|f| f.flag.id == interned_str_native) {
+        if self.has_native_attr(&attrs) {
             if let Some(t) = self.next() {
                 if let TkKind::DslLiteral(str) = t.kind {
                     Ok(CodeOrNative::Native(NativeFnDef {
@@ -65,7 +63,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         rtype,
                         span: Span::merge(&begin, &t.span),
                         native_span: t.span.clone(),
-                        flags,
+                        attrs,
                         genargs,
                     }))
                 } else {
@@ -96,7 +94,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 expr,
                 rtype,
                 span: Span::merge(&begin, &end),
-                flags,
+                attrs,
                 genargs,
             }))
         }
@@ -104,7 +102,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
 
     fn consume_function_or_method_definition(
         &mut self,
-        flags: Vec<CompilerFlag>,
+        attrs: Attrs,
     ) -> Result<
         FnOrMethod<CodeOrNative<FnDef, NativeFnDef>, CodeOrNative<MethodDef, NativeMethodDef>>,
         ParseError<'src>,
@@ -115,12 +113,10 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
 
         let genargs = self.opt_consume_generic_argument_declaration()?;
 
-        let interned_str_native = self.interner.get_or_insert("native");
-
         match self.consume_method_argsdec()? {
             FnOrMethod::Fn(args) => {
                 let rtype = self.consume_return_type(&args.span)?;
-                if flags.iter().any(|f| f.flag.id == interned_str_native) {
+                if self.has_native_attr(&attrs) {
                     if let Some(t) = self.next() {
                         if let TkKind::DslLiteral(str) = t.kind {
                             Ok(FnOrMethod::Fn(CodeOrNative::Native(NativeFnDef {
@@ -131,7 +127,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                 rtype,
                                 span: Span::merge(&begin, &t.span),
                                 native_span: t.span.clone(),
-                                flags,
+                                attrs,
                                 genargs,
                             })))
                         } else {
@@ -162,14 +158,14 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         expr,
                         rtype,
                         span: Span::merge(&begin, &end),
-                        flags,
+                        attrs,
                         genargs,
                     })))
                 }
             }
             FnOrMethod::Method(args) => {
                 let rtype = self.consume_return_type(&args.span)?;
-                if flags.iter().any(|f| f.flag.id == interned_str_native) {
+                if self.has_native_attr(&attrs) {
                     if let Some(t) = self.next() {
                         if let TkKind::DslLiteral(str) = t.kind {
                             Ok(FnOrMethod::Method(CodeOrNative::Native(NativeMethodDef {
@@ -180,7 +176,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                 native: str.to_string(),
                                 native_span: t.span.clone(),
                                 span: Span::merge(&begin, &t.span),
-                                flags,
+                                attrs,
                                 genargs,
                             })))
                         } else {
@@ -210,7 +206,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         expr,
                         rtype,
                         span: Span::merge(&begin, &end),
-                        flags,
+                        attrs,
                         genargs,
                     })))
                 }
@@ -222,7 +218,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
         &mut self,
     ) -> Result<Option<Globals>, ParseError<'src>> {
         let mod_id = self.mod_id;
-        let flags = self.consume_compiler_flags()?;
+        let attrs = self.consume_attributes()?;
 
         if let Some(t) = self.peek() {
             match t.kind {
@@ -240,7 +236,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         span: Span::merge(&begin, &end),
                     })))
                 }
-                TkKind::KwFn => Ok(match self.consume_function(flags)? {
+                TkKind::KwFn => Ok(match self.consume_function(attrs)? {
                     CodeOrNative::Code(f) => Some(Globals::FnDef(f)),
                     CodeOrNative::Native(f) => Some(Globals::NativeFnDef(f)),
                 }),
@@ -269,6 +265,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                 def_id: OnceCell::new(),
                                 members,
                                 genargs,
+                                attrs,
                             }))));
                         } else {
                             let t = self
@@ -304,6 +301,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                             def_id: OnceCell::new(),
                                             members,
                                             genargs,
+                                            attrs,
                                         },
                                     ))));
                                 }
@@ -317,8 +315,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     }
                 }
                 TkKind::KwType => {
-                    let interned_str_native = self.interner.get_or_insert("native");
-                    if flags.iter().any(|f| f.flag.id == interned_str_native) {
+                    if self.has_native_attr(&attrs) {
                         // "type" <identifier> ( <generic-argument-declaration> )?
                         //     "=" {{
                         //         native type implementation
@@ -349,6 +346,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                     genargs,
                                     native,
                                     native_span,
+                                    attrs,
                                 },
                             ))))
                         } else {
@@ -376,6 +374,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                             def_id: OnceCell::new(),
                             genargs,
                             right,
+                            attrs,
                         }))))
                     }
                 }
@@ -410,8 +409,8 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                 self_typ,
                             })));
                         } else {
-                            let flags = self.consume_compiler_flags()?;
-                            let f = self.consume_function_or_method_definition(flags)?;
+                            let attrs = self.consume_attributes()?;
+                            let f = self.consume_function_or_method_definition(attrs)?;
 
                             match f {
                                 FnOrMethod::Fn(CodeOrNative::Code(f)) => {
@@ -438,7 +437,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     Ok(Some(Globals::NativeCode(NativeCode {
                         native,
                         native_span,
-                        flags,
+                        attrs,
                     })))
                 }
                 TkKind::KwScene => {
@@ -483,7 +482,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                             rtype,
                             stmts: novel_stmts,
                             span: Span::merge(&begin, &end),
-                            flags,
+                            attrs,
                         })))
                     } else {
                         Err(ParseError::InvalidEOF {

@@ -1,8 +1,8 @@
-pub mod macros;
+pub mod attribute;
 pub mod symbols;
 pub mod types;
 
-pub use macros::{CompilerFlag, CompilerFlagArg, CompilerFlagLiteral};
+pub use attribute::{AttrArg, AttrBody, AttrValue, Attribute, Attrs};
 pub use symbols::{
     AbsolutePathHeader, Ident, ModAst, Path, PathSegment, PathSegmentResolution, SelfTypHeader,
     expressions::{

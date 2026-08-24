@@ -1,7 +1,7 @@
 use super::{
     DiskEncode,
     codec::DiskDecode,
-    format::{DiskFnData, DiskModData, DiskStructData, DiskSymbolKind},
+    format::{DiskFnData, DiskModData, DiskNativeTypeAliasData, DiskStructData, DiskSymbolKind},
 };
 use crate::error::DepMetadataError;
 
@@ -12,6 +12,7 @@ pub enum SymbolBody {
     Mod(DiskModData),
     Struct(DiskStructData),
     Fn(DiskFnData),
+    NativeTypeAlias(DiskNativeTypeAliasData),
 }
 
 impl SymbolBody {
@@ -30,6 +31,10 @@ impl SymbolBody {
                 let (data, _) = DiskFnData::decode(bytes)?;
                 Ok(SymbolBody::Fn(data))
             }
+            DiskSymbolKind::NativeTypeAlias => {
+                let (data, _) = DiskNativeTypeAliasData::decode(bytes)?;
+                Ok(SymbolBody::NativeTypeAlias(data))
+            }
         }
     }
 }
@@ -40,6 +45,7 @@ impl DiskEncode for SymbolBody {
             Self::Mod(module) => module.encode(buf),
             Self::Struct(struct_) => struct_.encode(buf),
             Self::Fn(fn_) => fn_.encode(buf),
+            Self::NativeTypeAlias(alias) => alias.encode(buf),
         }
     }
 }

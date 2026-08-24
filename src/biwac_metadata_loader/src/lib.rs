@@ -32,8 +32,11 @@ pub fn try_load_package_metadata(
                 column: e.column(),
             })?;
 
+        let no_std = m.no_std;
+
         Ok(MetadataHolder {
             metadata: PackageMetadata {
+                no_std,
                 name: PackageName::from_str(&m.name)
                     .map_err(PkgMetadataLoadError::PackageNameError)?,
                 version: PackageVersion::from_str(m.version.as_str())
@@ -69,6 +72,10 @@ struct PkgMetadata {
     version: String,
     description: Option<String>,
     dependencies: Vec<DependedPkg>,
+
+    /// 省略時は false。std のみが真になる想定。
+    #[serde(default)]
+    no_std: bool,
 }
 
 #[derive(Debug, Deserialize)]

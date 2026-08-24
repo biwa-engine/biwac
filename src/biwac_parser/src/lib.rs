@@ -1,5 +1,5 @@
+mod attribute;
 mod error;
-pub mod macros;
 pub mod symbols;
 pub mod types;
 
