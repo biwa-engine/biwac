@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use biwac_ast::{Attrs, Globals, ImplBlock, ModAst, TypeDef};
-use biwac_base::{IdentInterner, PackageId};
-use biwac_dependency_metadata::DepMetadata;
+use biwac_base::IdentInterner;
+use biwac_dependency_metadata::ExternalPackage;
 use biwac_lang_item::{LangItem, LangItemKind, LangItemTable};
 use biwac_package_loader::Pkg;
 use biwac_span::{DefId, Span};
@@ -31,7 +29,7 @@ use crate::ResolveError;
 /// 「ユーザに lang item を定義させない」ための追加の防御は要らない。
 pub(crate) fn collect_lang_items(
     pkg: &Pkg,
-    external_packages: &[(biwac_base::InternedIdent, PackageId, Arc<DepMetadata>)],
+    external_packages: &[ExternalPackage],
     no_std: bool,
     interner: &IdentInterner,
 ) -> Result<LangItemTable, Vec<ResolveError>> {
@@ -39,8 +37,13 @@ pub(crate) fn collect_lang_items(
     let mut errors = Vec::new();
 
     // 依存パッケージが定義した lang item を先に取り込む。
-    for (_, pkg_id, dep) in external_packages {
-        for (item, def_id) in dep.lang_items(*pkg_id) {
+    //
+    // 直接依存に限らず推移閉包すべてを見る。
+    // 各パッケージの .biwameta には自分が定義した lang item しか載らないので
+    // (DepMetadata::new が is_self() で絞っている)、重複登録にはならない。
+    for p in external_packages {
+        let (pkg_id, dep) = (p.pkg_id, &p.meta);
+        for (item, def_id) in dep.lang_items(pkg_id) {
             // 依存側は自身のビルド時に検証済みであり、
             // またここには AST が無いため種別・ジェネリクスは再検証できない。
             if let Err(e) = table.set(item, def_id, Span::dummy()) {

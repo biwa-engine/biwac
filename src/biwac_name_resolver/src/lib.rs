@@ -10,9 +10,10 @@ pub use name_tree::{
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use biwac_base::{IdentInterner, InternedIdent, PackageId, PackageName};
+use biwac_dependency_metadata::ExternalPackage;
 
 use biwac_hir::Hir;
 use biwac_package_loader::Pkg;
@@ -71,21 +72,16 @@ pub struct NameResolver {
     pkg_name: InternedIdent,
     pkg_package_name: PackageName,
     no_std: bool,
-    external_packages: Vec<(
-        InternedIdent,
-        PackageId,
-        Arc<biwac_dependency_metadata::DepMetadata>,
-    )>,
+    /// 依存グラフの推移閉包すべて。
+    /// import の根になれるのは `direct` なものだけだが、
+    /// シンボルの解決にはすべてが要る。
+    external_packages: Vec<ExternalPackage>,
 }
 
 impl NameResolver {
     pub fn new(
         metadata: &biwac_base::MetadataHolder,
-        external_packages: Vec<(
-            InternedIdent,
-            PackageId,
-            Arc<biwac_dependency_metadata::DepMetadata>,
-        )>,
+        external_packages: Vec<ExternalPackage>,
         pkg_name: InternedIdent,
         pkg: Pkg,
     ) -> Result<Self, ResolveError> {
@@ -100,10 +96,12 @@ impl NameResolver {
     }
 
     pub fn try_resolve(self, interner: &IdentInterner) -> Result<ResolveOutput, Vec<ResolveError>> {
+        // codegen がマングリングでパッケージ名を引くので、
+        // 直接依存かどうかにかかわらず推移閉包すべてを入れる。
         let mut pkg_names = self
             .external_packages
             .iter()
-            .map(|(interned, pkg_id, _)| (*pkg_id, *interned))
+            .map(|p| (p.pkg_id, p.ident))
             .collect::<HashMap<_, _>>();
         pkg_names.insert(PackageId::SELF_PACKAGE, self.pkg_name);
 

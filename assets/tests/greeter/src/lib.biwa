@@ -1,0 +1,34 @@
+// 依存パッケージの型を公開 API に露出させるライブラリ。
+//
+// 意図: シグニチャや struct メンバに *依存パッケージで定義された型* が現れたとき、
+// .biwameta がそれを外部シンボル参照 (DiskTyKind::ExternalDefined) として書き出し、
+// 依存元がそれを復元できることを確認する。
+// 以前は自パッケージのシンボル表しか引けず、外部の型は黙ってシンボル 0 番に化けていた。
+
+// 引数も戻り値も std で定義された型。
+fn greet(name: std::types::string::String) -> std::types::string::String {
+  return name.concat("!");
+}
+
+// struct のメンバが依存パッケージの型。
+struct Greeting {
+  message: std::types::string::String,
+}
+
+impl Greeting {
+  fn new(message: std::types::string::String) -> Self {
+    Self {
+      message = message,
+    }
+  }
+
+  fn message(self) -> std::types::string::String {
+    self.message
+  }
+}
+
+// 戻り値が color の型。
+// greeter を使う側から見ると、color は推移的な依存になる。
+fn theme() -> color::Rgb {
+  return color::Rgb::white();
+}

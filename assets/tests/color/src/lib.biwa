@@ -1,0 +1,27 @@
+// std に依存するだけの小さなライブラリ。
+//
+// 意図: greeter からは直接依存、test1 からは *推移的な* 依存になる。
+// test1 は依存に color を書いていないので `color::Rgb` と名前で書くことはできないが、
+// greeter のシグニチャ経由で color の型が test1 に流れ込む。
+// これを解決するには、依存グラフの推移閉包すべてに PackageId を振って
+// .biwameta をロードしている必要がある。
+
+struct Rgb {
+  r: Int,
+  g: Int,
+  b: Int,
+}
+
+impl Rgb {
+  fn new(r: Int, g: Int, b: Int) -> Self {
+    Self {
+      r = r,
+      g = g,
+      b = b,
+    }
+  }
+
+  fn white() -> Self {
+    Rgb::new(255, 255, 255)
+  }
+}

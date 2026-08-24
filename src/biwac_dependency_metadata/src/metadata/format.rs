@@ -10,11 +10,13 @@
 ///   [string_table_total_bytes: u32][string_data: string_table_total_bytes B]
 ///     └─ 各文字列: null 終端 UTF-8
 ///   [lang_item_count: u32][DiskLangItem; lang_item_count]
+///   [dep_pkg_count: u32][DiskPackageDep; dep_pkg_count]
+///   [ext_sym_count: u32][DiskExternalSymbol; ext_sym_count]
 use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 3;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 4;
 
 // --- インデックス / オフセット型 ---
 
@@ -34,10 +36,20 @@ pub struct DiskFileIndex(pub u32);
 #[derive(Debug, Clone, Copy)]
 pub struct DiskSymbolIndex(pub u32);
 
+/// dep_pkg_table 内のインデックス。
+///
+/// ファイルローカルな「パッケージ id」である。
+/// セッションをまたいで安定な id ではないので、
+/// 実体の [`biwac_base::PackageId`] への束縛はロード時に名前で行う
+/// (`DepMetadata::decode_file` を参照)。
+#[derive(Debug, Clone, Copy)]
+pub struct DiskPackageIndex(pub u32);
+
 impl_u32_newtype_codec!(DiskBodyOffset);
 impl_u32_newtype_codec!(DiskStringOffset);
 impl_u32_newtype_codec!(DiskFileIndex);
 impl_u32_newtype_codec!(DiskSymbolIndex);
+impl_u32_newtype_codec!(DiskPackageIndex);
 
 // --- DiskSymbolKind ---
 
@@ -190,6 +202,16 @@ pub enum DiskTyKind {
     Gen = 5,     // struct/type 定義のジェネリクス引数 (sym_id = 宣言シンボル)
     LocGen = 6,  // fn/impl のローカルジェネリクス引数 (sym_id = 宣言シンボル)
     Fn = 7,      // 関数型 (genargs はないが args + rty が続く)
+    /// 依存パッケージで定義された型。
+    ///
+    /// `Defined` の `sym_id` が「このファイル内の」シンボルインデックスなのに対し、
+    /// こちらの `sym_id` は **ext_sym_table のインデックス** である。
+    /// そこから `(DiskPackageIndex, DiskSymbolIndex)` を引く。
+    ///
+    /// `DiskTyHeader` は `sym_id` を u32 1 個しか持てず、
+    /// `(パッケージ, シンボル)` の組を直接埋め込むと固定長 20B が崩れるため、
+    /// 表を 1 段挟んでいる。同じ外部シンボルへの複数の参照が 1 エントリを共有できる利点もある。
+    ExternalDefined = 8,
 }
 
 impl TryFrom<u32> for DiskTyKind {
@@ -204,6 +226,7 @@ impl TryFrom<u32> for DiskTyKind {
             5 => Ok(Self::Gen),
             6 => Ok(Self::LocGen),
             7 => Ok(Self::Fn),
+            8 => Ok(Self::ExternalDefined),
             _ => Err(DepMetadataError::UnknownTyKind(v)),
         }
     }
@@ -213,8 +236,14 @@ impl TryFrom<u32> for DiskTyKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DiskTyHeader {
-    pub kind: u32,               // DiskTyKind として解釈
-    pub sym_id: DiskSymbolIndex, // Defined/Gen/LocGen で有効、それ以外は 0
+    pub kind: u32, // DiskTyKind として解釈
+    // 意味は kind ごとに異なる:
+    //   Defined         → このファイル内のシンボルインデックス
+    //   ExternalDefined → ext_sym_table のインデックス
+    //   Gen / LocGen    → 宣言側の genargs 内での序数
+    //   Fn              → 引数の数
+    //   それ以外        → 0
+    pub sym_id: DiskSymbolIndex,
     pub span: DiskSpan,
 }
 
@@ -627,6 +656,79 @@ impl DiskEncode for DiskModData {
         self.name.encode(buf);
         self.name_span.encode(buf);
         self.children.encode(buf);
+    }
+}
+
+// --- DiskPackageDep (固定長 4B): 依存パッケージ表のエントリ ---
+//
+// このファイルが外部シンボルを参照している依存パッケージ 1 件。
+// 索引 (DiskPackageIndex) がファイルローカルな「パッケージ id」になる。
+//
+// ここに `PackageId` の生値を焼かないのは、
+// PackageId がビルドごとの連番であり、
+// .biwameta はビルド間でキャッシュされ、
+// 別のルートパッケージからも読まれるためである。
+// 名前で持っておき、ロード時に今回の採番へ束縛する。
+
+#[derive(Debug, Clone, Copy)]
+pub struct DiskPackageDep {
+    pub name: DiskStringOffset,
+}
+
+impl DiskPackageDep {
+    pub const BYTE_SIZE: usize = 4;
+}
+
+impl DiskDecode for DiskPackageDep {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let (name, n) = DiskStringOffset::decode(bytes)?;
+        Ok((Self { name }, n))
+    }
+}
+
+impl DiskEncode for DiskPackageDep {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.name.encode(buf);
+    }
+}
+
+// --- DiskExternalSymbol (固定長 8B): 外部シンボル表のエントリ ---
+//
+// 依存パッケージのシンボル 1 件への参照。
+// `DiskTyKind::ExternalDefined` の sym_id がこの表を指す。
+//
+// `sym` は **相手の .biwameta 内での** シンボルインデックスである。
+// したがって依存が再ビルドされて採番が変わると、
+// このファイルの外部参照は無効になる。
+// 「更新されたパッケージに依存するパッケージ群を再ビルドする」規則は
+// 最適化ではなく正しさの要件である。
+// (再ビルド判定自体はインクリメンタルビルドの作業で、まだ実装されていない)
+
+#[derive(Debug, Clone, Copy)]
+pub struct DiskExternalSymbol {
+    pub pkg: DiskPackageIndex,
+    pub sym: DiskSymbolIndex,
+}
+
+impl DiskExternalSymbol {
+    pub const BYTE_SIZE: usize = 8;
+}
+
+impl DiskDecode for DiskExternalSymbol {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (pkg, n) = DiskPackageIndex::decode(&bytes[pos..])?;
+        pos += n;
+        let (sym, n) = DiskSymbolIndex::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((Self { pkg, sym }, pos))
+    }
+}
+
+impl DiskEncode for DiskExternalSymbol {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.pkg.encode(buf);
+        self.sym.encode(buf);
     }
 }
 

@@ -27,6 +27,26 @@ fn native_add(x: Int, y: Int) -> Int {{
   return x + y;
 }}
 
+// 依存パッケージ greeter の API を使う。
+//
+// greeter のシグニチャには greeter 自身ではなく
+// その依存 (std, color) で定義された型が現れる。
+// これらが .biwameta 越しに正しく復元できるかの検証。
+fn greeting_demo() {
+  // 引数・戻り値の型は greeter から見て外部の型 (std の String)。
+  let msg = greeter::greet("Hello");
+
+  // struct のメンバの型も std の String。
+  let g = greeter::Greeting::new(msg);
+  let m = g.message();
+
+  // 戻り値は color の型。test1 は color に依存していないので
+  // `color::Rgb` と名前で書くことはできないが、型としては流れてくる。
+  // 解決には推移的依存のメタデータがロードされている必要がある。
+  let c = greeter::theme();
+  let red = c.r;
+}
+
 struct MyGameState {}
 
 struct MyGameCharacters {}

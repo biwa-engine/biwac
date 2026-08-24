@@ -1,19 +1,25 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use biwac_base::{BiwacError, ErrorContext};
+use biwac_dependency_metadata::ExternalPackage;
 
 use crate::NameResolver;
 
 /// Loads a .biwameta file from a built dependency's build directory.
-fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> biwac_dependency_metadata::DepMetadata {
+fn load_dep_metadata(
+    dep_root: &Path,
+    dep_name: &str,
+    pkg_ids: &HashMap<String, biwac_base::PackageId>,
+) -> biwac_dependency_metadata::DepMetadata {
     let meta_path = dep_root
         .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
         .join(format!("{}.biwameta", dep_name));
     let data = std::fs::read(&meta_path).unwrap();
-    biwac_dependency_metadata::DepMetadata::decode_file(&data).unwrap()
+    biwac_dependency_metadata::DepMetadata::decode_file(&data, pkg_ids).unwrap()
 }
 
 #[test]
@@ -47,39 +53,32 @@ fn test1() {
         .map(|d| d.name.value().to_string())
         .collect();
 
-    let external_packages: Vec<(
-        biwac_base::InternedIdent,
-        Arc<biwac_dependency_metadata::DepMetadata>,
-    )> = if !root_dep_names.is_empty() {
-        // Load .biwameta for direct (root-level) dependencies only.
-        let mut ext_pkgs = Vec::new();
-        for dep_name in &root_dep_names {
-            let dep_root = packages_dir.join(dep_name);
-            let dep_meta = load_dep_metadata(&dep_root, dep_name);
-            let dep_ident = interner.get_or_insert(dep_name);
-            ext_pkgs.push((dep_ident, Arc::new(dep_meta)));
-        }
-        ext_pkgs
-    } else {
-        Vec::new()
-    };
-
-    // PackageId を driver が単一の割り当て元として決定する。
-    let external_packages_with_ids: Vec<(
-        biwac_base::InternedIdent,
-        biwac_base::PackageId,
-        Arc<biwac_dependency_metadata::DepMetadata>,
-    )> = external_packages
-        .into_iter()
+    // std は依存を持たないので、ここは常に空になる。
+    // driver と違って推移閉包は辿らず、直接依存だけを見る簡易版である。
+    let pkg_ids: HashMap<String, biwac_base::PackageId> = root_dep_names
+        .iter()
         .enumerate()
-        .map(|(i, (ident, dep))| {
+        .map(|(i, name)| {
             (
-                ident,
+                name.clone(),
                 biwac_base::PackageId::new(
                     i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
                 ),
-                dep,
             )
+        })
+        .collect();
+
+    let external_packages: Vec<ExternalPackage> = root_dep_names
+        .iter()
+        .map(|dep_name| {
+            let dep_root = packages_dir.join(dep_name);
+            let dep_meta = load_dep_metadata(&dep_root, dep_name, &pkg_ids);
+            ExternalPackage {
+                ident: interner.get_or_insert(dep_name),
+                pkg_id: pkg_ids[dep_name],
+                meta: Arc::new(dep_meta),
+                direct: true,
+            }
         })
         .collect();
 
@@ -91,7 +90,7 @@ fn test1() {
     )
     .unwrap();
 
-    let _hir = NameResolver::new(&metadata, external_packages_with_ids, pkg_name, pkg)
+    let _hir = NameResolver::new(&metadata, external_packages, pkg_name, pkg)
         .unwrap()
         .try_resolve(&interner)
         .map_err(|errors| {

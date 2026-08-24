@@ -1,17 +1,48 @@
 #[derive(Debug)]
 pub enum DepMetadataError {
-    UnexpectedEnd { needed: usize, available: usize },
+    UnexpectedEnd {
+        needed: usize,
+        available: usize,
+    },
     InvalidMagic,
-    InvalidVersion { got: u32 },
+    InvalidVersion {
+        got: u32,
+    },
     UnknownSymbolKind(u32),
     UnknownVisibility(u32),
     UnknownTyKind(u32),
-    StringOffsetOutOfBounds { offset: u32, table_len: u32 },
-    NulTerminatorNotFound { offset: u32 },
+    StringOffsetOutOfBounds {
+        offset: u32,
+        table_len: u32,
+    },
+    NulTerminatorNotFound {
+        offset: u32,
+    },
     InvalidUtf8,
-    SymbolIndexOutOfBounds { index: u32, sym_count: u32 },
-    FileIndexOutOfBounds { index: u32, file_count: u32 },
-    BodySizeMismatch { declared: u32, available: usize },
+    SymbolIndexOutOfBounds {
+        index: u32,
+        sym_count: u32,
+    },
+    FileIndexOutOfBounds {
+        index: u32,
+        file_count: u32,
+    },
+    BodySizeMismatch {
+        declared: u32,
+        available: usize,
+    },
+    /// 依存パッケージ表に載っている名前が、
+    /// 今回のビルドで採番されたパッケージのどれとも一致しなかった。
+    ///
+    /// driver は依存グラフの推移閉包すべてに id を振ってから
+    /// .biwameta をロードするので、通常は起こらない。
+    /// 起きた場合はグラフの構築漏れか、.biwameta の破損である。
+    UnknownDependencyPackage(String),
+    /// 外部シンボル表のエントリが依存パッケージ表の範囲外を指している。
+    DependencyPackageIndexOutOfBounds {
+        index: u32,
+        dep_count: u32,
+    },
 }
 
 impl std::fmt::Display for DepMetadataError {
@@ -59,6 +90,18 @@ impl std::fmt::Display for DepMetadataError {
                 write!(
                     f,
                     "body size {declared} exceeds available bytes {available}"
+                )
+            }
+            Self::UnknownDependencyPackage(name) => {
+                write!(
+                    f,
+                    "this .biwameta refers to a package `{name}` that is not in the dependency graph"
+                )
+            }
+            Self::DependencyPackageIndexOutOfBounds { index, dep_count } => {
+                write!(
+                    f,
+                    "dependency package index {index} out of bounds (dep count: {dep_count})"
                 )
             }
         }

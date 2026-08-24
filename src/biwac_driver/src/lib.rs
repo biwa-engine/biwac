@@ -2,13 +2,14 @@ mod dep_graph;
 
 use colored::Colorize;
 use std::{
+    collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use biwac_base::{IdentInterner, PackageName, SourceHolder};
-use biwac_dependency_metadata::DepMetadata;
+use biwac_dependency_metadata::{DepMetadata, ExternalPackage};
 
 use dep_graph::DepGraph;
 
@@ -64,75 +65,47 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
         .map(|d| d.name.value().to_string())
         .collect();
 
-    let external_packages: Vec<(biwac_base::InternedIdent, Arc<DepMetadata>)> =
-        if !root_dep_names.is_empty() {
-            let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
+    let external_packages = if root_dep_names.is_empty() {
+        Vec::new()
+    } else {
+        let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
 
-            // Discover full transitive dependency graph.
-            let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
-                biwac_base::print_error_finish_message(1);
-            })?;
+        // Discover full transitive dependency graph.
+        let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
+            biwac_base::print_error_finish_message(1);
+        })?;
 
-            // Build in topological order (leaves = no deps first).
-            // Items within the same batch are independent and can be parallelized (future tokio).
-            let batches = dep_graph.topo_batches().map_err(|_| {
-                biwac_base::print_error_finish_message(1);
-            })?;
-            if !batches.is_empty() {
-                println!("{}", "Compiling dependencies...".green().bold(),);
-            }
-            let mut built_deps: Vec<String> = Vec::new();
-            for batch in &batches {
-                // TODO: parallelize within batch using tokio
+        // Build in topological order (leaves = no deps first).
+        // Items within the same batch are independent and can be parallelized (future tokio).
+        let batches = dep_graph.topo_batches().map_err(|_| {
+            biwac_base::print_error_finish_message(1);
+        })?;
+        if !batches.is_empty() {
+            println!("{}", "Compiling dependencies...".green().bold(),);
+        }
+        let mut built_deps: Vec<String> = Vec::new();
+        for batch in &batches {
+            // TODO: parallelize within batch using tokio
 
-                for dep_name in batch {
-                    let dep_root = packages_dir.join(dep_name);
-                    build_single_dep(dep_root, dep_name)?;
-                    built_deps.push(dep_name.clone());
-                }
-            }
-            if !batches.is_empty() {
-                println!("{}", "Compiling dependencies finished!".green().bold(),);
-            }
-
-            // 生成物は import 文が `./<package>.ts` を指すため、
-            // 自パッケージと推移的依存の .ts が同じディレクトリに並んでいる必要がある。
-            collect_dep_bins(&built_deps, &packages_dir, &build_dir_path)?;
-
-            // Load .biwameta for direct (root-level) dependencies only.
-            let mut ext_pkgs = Vec::new();
-            for dep_name in &root_dep_names {
+            for dep_name in batch {
                 let dep_root = packages_dir.join(dep_name);
-                let dep_meta = load_dep_metadata(&dep_root, dep_name)?;
-                let dep_ident = interner.get_or_insert(dep_name);
-                ext_pkgs.push((dep_ident, Arc::new(dep_meta)));
+                build_single_dep(dep_root, dep_name)?;
+                built_deps.push(dep_name.clone());
             }
-            ext_pkgs
-        } else {
-            Vec::new()
-        };
+        }
+        if !batches.is_empty() {
+            println!("{}", "Compiling dependencies finished!".green().bold(),);
+        }
 
-    // PackageId を driver が単一の割り当て元として決定する。
-    let external_packages_with_ids: Vec<(
-        biwac_base::InternedIdent,
-        biwac_base::PackageId,
-        Arc<DepMetadata>,
-    )> = external_packages
-        .into_iter()
-        .enumerate()
-        .map(|(i, (ident, dep))| {
-            (
-                ident,
-                biwac_base::PackageId::new(
-                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
-                ),
-                dep,
-            )
-        })
-        .collect();
+        // 生成物は import 文が `./<package>.ts` を指すため、
+        // 自パッケージと推移的依存の .ts が同じディレクトリに並んでいる必要がある。
+        collect_dep_bins(&built_deps, &packages_dir, &build_dir_path)?;
+
+        load_external_packages(&dep_graph, &root_dep_names, &packages_dir, &mut interner)?
+    };
 
     load_analyze_and_codegen_single_package(
-        external_packages_with_ids,
+        external_packages,
         &mut interner,
         &metadata,
         pkg_root_path,
@@ -195,42 +168,23 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
         .map(|d| d.name.value().to_string())
         .collect();
 
-    let external_packages: Vec<(biwac_base::InternedIdent, Arc<DepMetadata>)> =
-        if !root_dep_names.is_empty() {
-            // Load .biwameta for direct (root-level) dependencies only.
-            let mut ext_pkgs = Vec::new();
-            for dep_name in &root_dep_names {
-                let dep_root = packages_dir.join(dep_name);
-                let dep_meta = load_dep_metadata(&dep_root, dep_name)?;
-                let dep_ident = interner.get_or_insert(dep_name);
-                ext_pkgs.push((dep_ident, Arc::new(dep_meta)));
-            }
-            ext_pkgs
-        } else {
-            Vec::new()
-        };
+    let external_packages = if root_dep_names.is_empty() {
+        Vec::new()
+    } else {
+        // このパッケージの依存はトポロジカル順で既にビルド済みなので、ロードするだけでよい。
+        // ただしグラフは自分で引き直す:
+        // 直接依存の .biwameta が、さらにその依存の型を参照している可能性があり、
+        // それを解決するには推移閉包すべての ID とメタデータが要る。
+        let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
+        let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
+            biwac_base::print_error_finish_message(1);
+        })?;
 
-    // PackageId を driver が単一の割り当て元として決定する。
-    let external_packages_with_ids: Vec<(
-        biwac_base::InternedIdent,
-        biwac_base::PackageId,
-        Arc<DepMetadata>,
-    )> = external_packages
-        .into_iter()
-        .enumerate()
-        .map(|(i, (ident, dep))| {
-            (
-                ident,
-                biwac_base::PackageId::new(
-                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
-                ),
-                dep,
-            )
-        })
-        .collect();
+        load_external_packages(&dep_graph, &root_dep_names, &packages_dir, &mut interner)?
+    };
 
     load_analyze_and_codegen_single_package(
-        external_packages_with_ids,
+        external_packages,
         &mut interner,
         &metadata,
         dep_root,
@@ -242,16 +196,69 @@ fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
     Ok(())
 }
 
+/// 依存グラフの推移閉包すべてに PackageId を振り、`.biwameta` をロードする。
+///
+/// 直接依存だけでは足りない。依存の `.biwameta` に載っているシグニチャが
+/// さらにその依存の型を参照していることがあり
+/// (`greeter::theme() -> color::Rgb`)、
+/// その参照を DefId に復元するには相手の ID とメタデータが要るからである。
+/// 名前で引ける (= import できる) のは直接依存だけなので、
+/// [`ExternalPackage::direct`] で区別する。
+///
+/// PackageId はここが単一の割り当て元である。
+/// 名前順に振るので、同じグラフからは常に同じ採番になる。
+fn load_external_packages(
+    dep_graph: &DepGraph,
+    root_dep_names: &[String],
+    packages_dir: &Path,
+    interner: &mut IdentInterner,
+) -> Result<Vec<ExternalPackage>, ()> {
+    let all_names = dep_graph.all_packages();
+
+    let pkg_ids: HashMap<String, biwac_base::PackageId> = all_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            (
+                name.clone(),
+                biwac_base::PackageId::new(
+                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
+                ),
+            )
+        })
+        .collect();
+
+    let mut packages = Vec::with_capacity(all_names.len());
+    for name in &all_names {
+        let dep_root = packages_dir.join(name);
+        let meta = load_dep_metadata(&dep_root, name, &pkg_ids)?;
+        packages.push(ExternalPackage {
+            ident: interner.get_or_insert(name),
+            pkg_id: pkg_ids[name],
+            meta: Arc::new(meta),
+            direct: root_dep_names.iter().any(|d| d == name),
+        });
+    }
+
+    Ok(packages)
+}
+
 /// Loads a .biwameta file from a built dependency's build directory.
-fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> Result<DepMetadata, ()> {
+///
+/// `pkg_ids` はファイル内の依存パッケージ表を今回の採番へ束縛するために使う。
+fn load_dep_metadata(
+    dep_root: &Path,
+    dep_name: &str,
+    pkg_ids: &HashMap<String, biwac_base::PackageId>,
+) -> Result<DepMetadata, ()> {
     let meta_path = dep_root
         .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
         .join(format!("{}.biwameta", dep_name));
     let data = std::fs::read(&meta_path).map_err(|e| {
         eprintln!("Error: failed to read {:?}: {}", meta_path, e);
     })?;
-    DepMetadata::decode_file(&data).map_err(|e| {
-        eprintln!("Error: failed to decode {:?}: {:?}", meta_path, e);
+    DepMetadata::decode_file(&data, pkg_ids).map_err(|e| {
+        eprintln!("Error: failed to decode {:?}: {}", meta_path, e);
     })
 }
 
@@ -273,21 +280,18 @@ fn persist_dep_metadata(
 }
 
 fn load_analyze_and_codegen_single_package(
-    external_packages_with_ids: Vec<(
-        biwac_base::InternedIdent,
-        biwac_base::PackageId,
-        Arc<DepMetadata>,
-    )>,
+    external_packages: Vec<ExternalPackage>,
     interner: &mut biwac_base::IdentInterner,
     metadata: &biwac_base::MetadataHolder,
     pkg_root_path: PathBuf,
     build_dir_path: PathBuf,
 ) -> Result<(), ()> {
-    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> =
-        external_packages_with_ids
-            .iter()
-            .map(|(_, pkg_id, dep)| (*pkg_id, Arc::clone(dep)))
-            .collect();
+    // 型推論と codegen は「名前で引けるか」を問わないので、
+    // direct かどうかを落として推移閉包すべてを渡す。
+    let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
+        .iter()
+        .map(|p| (p.pkg_id, Arc::clone(&p.meta)))
+        .collect();
 
     let mut srcs = SourceHolder::default();
     let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
@@ -306,7 +310,7 @@ fn load_analyze_and_codegen_single_package(
     let biwac_name_resolver::ResolveOutput { hir, lang_items } =
         biwac_name_resolver::NameResolver::new(
             metadata,
-            external_packages_with_ids,
+            external_packages,
             package_name_interned,
             pkg,
         )

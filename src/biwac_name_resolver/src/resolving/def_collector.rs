@@ -6,7 +6,9 @@ use std::{
 
 use biwac_ast::{PathSegmentResolution, TypReprVal};
 use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
-use biwac_dependency_metadata::{DepMetadata, DepMetadataModuleView, PackageModuleView};
+use biwac_dependency_metadata::{
+    DepMetadata, DepMetadataModuleView, ExternalPackage, PackageModuleView,
+};
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::{DefId, DefIdKind, ImplId, PackageLocalDefId, Span, TyDefId, ValDefId};
@@ -56,7 +58,7 @@ impl DefCollector {
         &mut self,
         pkg_name: InternedIdent,
         pkg: &Pkg,
-        external_packages: Vec<(InternedIdent, PackageId, Arc<DepMetadata>)>,
+        external_packages: Vec<ExternalPackage>,
         interner: &IdentInterner,
     ) -> Result<NameTree, Vec<ResolveError>> {
         // Step 1: assign IDs to all non-impl symbols, build module-level NameTree.
@@ -67,12 +69,19 @@ impl DefCollector {
         };
 
         // PackageId は driver が決定済み。そのまま lookup maps に格納する。
+        //
+        // 名前で引ける (= import の根になれる) のは直接依存だけである。
+        // 推移的な依存はパスに書けないが、
+        // 直接依存のシグニチャがその型を参照しうるのでデータは保持する。
+        // (Rust の extern prelude と同じ区別)
         let mut ext_pkg_views: HashMap<InternedIdent, Arc<dyn PackageModuleView>> = HashMap::new();
         let mut ext_pkg_data: HashMap<PackageId, Arc<DepMetadata>> = HashMap::new();
-        for (pkg_ident, pkg_id, dep_arc) in external_packages {
-            let view = DepMetadataModuleView::new_root(Arc::clone(&dep_arc), pkg_id);
-            ext_pkg_views.insert(pkg_ident, Arc::new(view) as Arc<dyn PackageModuleView>);
-            ext_pkg_data.insert(pkg_id, dep_arc);
+        for p in external_packages {
+            if p.direct {
+                let view = DepMetadataModuleView::new_root(Arc::clone(&p.meta), p.pkg_id);
+                ext_pkg_views.insert(p.ident, Arc::new(view) as Arc<dyn PackageModuleView>);
+            }
+            ext_pkg_data.insert(p.pkg_id, p.meta);
         }
 
         let mut packages = HashMap::new();

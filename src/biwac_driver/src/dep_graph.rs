@@ -109,11 +109,13 @@ impl DepGraph {
         }
     }
 
-    /// パッケージの直接依存名リストを返す。
-    pub fn direct_deps(&self, pkg_name: &str) -> &[String] {
-        self.adjacency
-            .get(pkg_name)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+    /// グラフに含まれる全パッケージ名を、名前順にソートして返す。
+    ///
+    /// ルートから到達できる推移閉包そのものである。
+    /// PackageId の採番に使うので、順序が決定論的であることが要る。
+    pub fn all_packages(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.adjacency.keys().cloned().collect();
+        names.sort();
+        names
     }
 }

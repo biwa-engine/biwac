@@ -13,8 +13,9 @@ use body::SymbolBody;
 use codec::{DiskDecode, DiskEncode};
 use format::{
     BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION, BIWAC_DEPENDENCY_METADATA_MAGIC, DiskBodyOffset,
-    DiskFileIndex, DiskSourceInfo, DiskSpan, DiskSymbolHeader, DiskSymbolIndex, DiskSymbolKind,
-    DiskTy, DiskTyHeader, DiskTyKind, DiskVisibility,
+    DiskExternalSymbol, DiskFileIndex, DiskPackageDep, DiskPackageIndex, DiskSourceInfo, DiskSpan,
+    DiskSymbolHeader, DiskSymbolIndex, DiskSymbolKind, DiskTy, DiskTyHeader, DiskTyKind,
+    DiskVisibility,
 };
 use lang_item::DiskLangItem;
 use table::{LazyDiskVec, SourceFileTable, StringTable};
@@ -33,6 +34,18 @@ pub struct DepMetadata {
     /// このパッケージが定義した lang item。
     /// 依存側はこれを使って lang item テーブルを復元する。
     pub lang_items: Vec<DiskLangItem>,
+    /// このファイルが外部シンボルを参照している依存パッケージの一覧。
+    /// 索引がファイルローカルな「パッケージ id」 ([`DiskPackageIndex`]) になる。
+    pub dep_packages: Vec<DiskPackageDep>,
+    /// 依存パッケージのシンボルへの参照の一覧。
+    /// [`DiskTyKind::ExternalDefined`] の sym_id がここを指す。
+    pub ext_syms: Vec<DiskExternalSymbol>,
+    /// `dep_packages` の索引 → 今回のビルドで割り当てられた [`biwac_base::PackageId`]。
+    ///
+    /// ファイルには名前しか書かれていないので、ロード時にここへ束縛する
+    /// ([`DepMetadata::decode_file`] を参照)。
+    /// これがあることで、外部シンボルへの参照を `DefId` に復元できる。
+    resolved_pkg_ids: Vec<biwac_base::PackageId>,
 }
 
 impl DepMetadata {
@@ -302,6 +315,22 @@ impl DepMetadata {
         // ====================================================
         // Phase 4: ボディのエンコード
         // ====================================================
+
+        // シグニチャやメンバ型に依存パッケージの型が現れたら、
+        // ここに登録して ExternalDefined として書き出す。
+        // 名前は hir.packages から引く (依存グラフの推移閉包が入っている)。
+        let mut ext_syms = ExtSymBuilder::new(
+            hir.packages
+                .iter()
+                .map(|(pkg_id, ident)| {
+                    (
+                        *pkg_id,
+                        interner.get_str(ident).unwrap_or_default().to_string(),
+                    )
+                })
+                .collect(),
+        );
+
         let mut body_builder = BodyBuilder::new();
         let mut sym_hdrs: Vec<DiskSymbolHeader> = Vec::with_capacity(total_syms);
         let mut cache: Vec<OnceLock<SymbolBody>> = Vec::with_capacity(total_syms);
@@ -373,8 +402,14 @@ impl DepMetadata {
                     let mem_name_off = strings.push(mem_name);
                     // メンバ名 span は HIR に存在しないので型の span で代替
                     let mem_name_span = impl_to_disk_span(&ty.span, &mod_to_file_idx);
-                    let disk_ty =
-                        impl_encode_ty(ty, &ty_to_sym, &gen_ord, &empty_loc_gen, &mod_to_file_idx);
+                    let disk_ty = impl_encode_ty(
+                        ty,
+                        &ty_to_sym,
+                        &gen_ord,
+                        &empty_loc_gen,
+                        &mod_to_file_idx,
+                        &mut ext_syms,
+                    );
                     DiskStructMember {
                         name: mem_name_off,
                         name_span: mem_name_span,
@@ -465,6 +500,7 @@ impl DepMetadata {
                 source_holder,
                 &mut strings,
                 interner,
+                &mut ext_syms,
             );
             let body = SymbolBody::Fn(fn_data);
             push_body(
@@ -488,6 +524,7 @@ impl DepMetadata {
                 source_holder,
                 &mut strings,
                 interner,
+                &mut ext_syms,
             );
             let body = SymbolBody::Fn(fn_data);
             push_body(
@@ -557,6 +594,10 @@ impl DepMetadata {
         // 決定論的な順序にする
         lang_items.sort_by_key(|li| li.lang_item);
 
+        // 外部シンボル表を確定させる。
+        // 依存パッケージ名を文字列テーブルに載せるので、strings の最後の変更になる。
+        let (dep_packages, ext_sym_entries, resolved_pkg_ids) = ext_syms.finish(&mut strings);
+
         Self {
             sym_hdrs,
             sym_bodies,
@@ -564,12 +605,27 @@ impl DepMetadata {
             strings,
             root_sym_idx,
             lang_items,
+            dep_packages,
+            ext_syms: ext_sym_entries,
+            resolved_pkg_ids,
         }
     }
 
     // --- Decode ---
 
-    pub fn decode_file(data: &[u8]) -> Result<Self, DepMetadataError> {
+    /// `.biwameta` を読む。
+    ///
+    /// `pkg_ids` は今回のビルドで採番した「パッケージ名 → [`biwac_base::PackageId`]」表。
+    /// ファイル内の依存パッケージ表は名前しか持たないので、
+    /// ここで今回の採番へ束縛する。
+    /// これがないと外部シンボルへの参照を `DefId` に復元できない。
+    ///
+    /// driver は依存グラフの推移閉包すべてに id を振ってから呼ぶ必要がある。
+    /// 表に無い名前が現れたら [`DepMetadataError::UnknownDependencyPackage`]。
+    pub fn decode_file(
+        data: &[u8],
+        pkg_ids: &HashMap<String, biwac_base::PackageId>,
+    ) -> Result<Self, DepMetadataError> {
         let mut pos = 0;
 
         // ヘッダ (magic + version)
@@ -650,6 +706,37 @@ impl DepMetadata {
             lang_items.push(li);
         }
 
+        // dep_pkg_table: [count: u32][DiskPackageDep; count]
+        let (dep_pkg_count, n) = u32::decode(&data[pos..])?;
+        pos += n;
+        let mut dep_packages = Vec::with_capacity(dep_pkg_count as usize);
+        for _ in 0..dep_pkg_count {
+            let (dep, n) = DiskPackageDep::decode(&data[pos..])?;
+            pos += n;
+            dep_packages.push(dep);
+        }
+
+        // ext_sym_table: [count: u32][DiskExternalSymbol; count]
+        let (ext_sym_count, n) = u32::decode(&data[pos..])?;
+        pos += n;
+        let mut ext_syms = Vec::with_capacity(ext_sym_count as usize);
+        for _ in 0..ext_sym_count {
+            let (e, n) = DiskExternalSymbol::decode(&data[pos..])?;
+            pos += n;
+            ext_syms.push(e);
+        }
+
+        // ファイルローカルなパッケージ索引を今回の採番へ束縛する。
+        let mut resolved_pkg_ids = Vec::with_capacity(dep_packages.len());
+        for dep in &dep_packages {
+            let name = strings.get(dep.name)?;
+            let pkg_id = pkg_ids
+                .get(name)
+                .copied()
+                .ok_or_else(|| DepMetadataError::UnknownDependencyPackage(name.to_string()))?;
+            resolved_pkg_ids.push(pkg_id);
+        }
+
         Ok(Self {
             sym_hdrs,
             sym_bodies,
@@ -657,6 +744,9 @@ impl DepMetadata {
             strings,
             root_sym_idx,
             lang_items,
+            dep_packages,
+            ext_syms,
+            resolved_pkg_ids,
         })
     }
 
@@ -706,7 +796,28 @@ impl DepMetadata {
             li.encode(&mut buf);
         }
 
+        // dep_pkg_table
+        (self.dep_packages.len() as u32).encode(&mut buf);
+        for dep in &self.dep_packages {
+            dep.encode(&mut buf);
+        }
+
+        // ext_sym_table
+        (self.ext_syms.len() as u32).encode(&mut buf);
+        for e in &self.ext_syms {
+            e.encode(&mut buf);
+        }
+
         buf
+    }
+
+    /// 外部シンボル表のエントリ 1 件を `(PackageId, シンボルインデックス)` に解決する。
+    ///
+    /// 依存パッケージ表の束縛は decode 時に済んでいるので、ここでは索引を引くだけ。
+    fn resolve_ext_sym(&self, ext_sym_idx: u32) -> Option<(biwac_base::PackageId, u32)> {
+        let entry = self.ext_syms.get(ext_sym_idx as usize)?;
+        let pkg_id = self.resolved_pkg_ids.get(entry.pkg.0 as usize)?;
+        Some((*pkg_id, entry.sym.0))
     }
 
     pub fn get_symbol_body(&self, sym_idx: usize) -> Result<&SymbolBody, DepMetadataError> {
@@ -1130,6 +1241,36 @@ impl DepMetadata {
                     genargs,
                 })
             }
+            DiskTyKind::ExternalDefined => {
+                // sym_id は ext_sym_table の索引。
+                // そこから (依存パッケージ, 相手のシンボルインデックス) を引く。
+                //
+                // ジェネリック引数は「このファイルの」型なので、
+                // 序数解決のコンテキスト (struct_gen_sym_idx / fn_loc_gen_sym_idx) は
+                // そのまま引き継ぐ。切り替えるのは Defined の所属パッケージだけである。
+                let genargs = disk_ty
+                    .genargs
+                    .iter()
+                    .map(|g| {
+                        self.impl_disk_ty_to_ty(g, pkg_id, struct_gen_sym_idx, fn_loc_gen_sym_idx)
+                    })
+                    .collect();
+
+                let Some((ext_pkg_id, ext_sym_idx)) = self.resolve_ext_sym(disk_ty.hdr.sym_id.0)
+                else {
+                    // decode 時に束縛済みなのでここは通らない。
+                    debug_assert!(false, "compiler bug: unresolved external symbol reference");
+                    return biwac_hir::Ty::new(TyKind::Void, Span::dummy());
+                };
+
+                TyKind::Defined(DefinedTy {
+                    def_id: TyDefId::new(DefId::new(
+                        ext_pkg_id,
+                        PackageLocalDefId::new(ext_sym_idx),
+                    )),
+                    genargs,
+                })
+            }
             DiskTyKind::Gen => {
                 // sym_id = struct genargs 内の ordinal (0-base)
                 let ordinal = disk_ty.hdr.sym_id.0;
@@ -1188,6 +1329,97 @@ fn ext_gen_id(struct_sym_idx: u32, ordinal: u32) -> u32 {
 /// 外部パッケージの fn ローカルジェネリクス引数 ID エンコード。
 fn ext_loc_gen_id(fn_sym_idx: u32, ordinal: u32) -> u32 {
     (fn_sym_idx << 10) | ordinal
+}
+
+/// 外部シンボル表 (dep_pkg_table + ext_sym_table) の組み立て。
+///
+/// エンコード中に依存パッケージのシンボルが現れるたびに [`Self::intern`] を呼び、
+/// 返ってきた索引を `DiskTyKind::ExternalDefined` の sym_id に入れる。
+///
+/// パッケージも個々のシンボル参照も登場順に採番し、重複は共有する。
+/// 呼び出し側 (`DepMetadata::new`) が決定論的な順序で走査しているので、
+/// 同じ入力からは同じ表ができる。
+struct ExtSymBuilder {
+    /// PackageId → パッケージ名。`hir.packages` から作る。
+    names: HashMap<biwac_base::PackageId, String>,
+    /// PackageId → dep_pkg_table 索引
+    pkg_index: HashMap<biwac_base::PackageId, u32>,
+    /// dep_pkg_table 索引順のパッケージ (名前, PackageId)
+    deps: Vec<(String, biwac_base::PackageId)>,
+    /// (dep 索引, 相手のシンボルインデックス) → ext_sym_table 索引
+    entry_index: HashMap<(u32, u32), u32>,
+    entries: Vec<DiskExternalSymbol>,
+}
+
+impl ExtSymBuilder {
+    fn new(names: HashMap<biwac_base::PackageId, String>) -> Self {
+        Self {
+            names,
+            pkg_index: HashMap::new(),
+            deps: Vec::new(),
+            entry_index: HashMap::new(),
+            entries: Vec::new(),
+        }
+    }
+
+    /// 外部シンボルを登録し、ext_sym_table のインデックスを返す。
+    fn intern(&mut self, pkg_id: biwac_base::PackageId, sym_idx: u32) -> u32 {
+        let dep_idx = match self.pkg_index.get(&pkg_id) {
+            Some(i) => *i,
+            None => {
+                // 名前が引けないのはコンパイラバグ
+                // (hir.packages は依存グラフ全体を持っているはず)。
+                // 黙って別のパッケージを指すよりは、
+                // 読み込み側で UnknownDependencyPackage として落ちるほうがよい。
+                debug_assert!(
+                    self.names.contains_key(&pkg_id),
+                    "compiler bug: package id {} has no name in hir.packages",
+                    pkg_id.value()
+                );
+                let name = self
+                    .names
+                    .get(&pkg_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("<unknown package {}>", pkg_id.value()));
+                let i = self.deps.len() as u32;
+                self.deps.push((name, pkg_id));
+                self.pkg_index.insert(pkg_id, i);
+                i
+            }
+        };
+
+        let key = (dep_idx, sym_idx);
+        if let Some(i) = self.entry_index.get(&key) {
+            return *i;
+        }
+        let i = self.entries.len() as u32;
+        self.entries.push(DiskExternalSymbol {
+            pkg: DiskPackageIndex(dep_idx),
+            sym: DiskSymbolIndex(sym_idx),
+        });
+        self.entry_index.insert(key, i);
+        i
+    }
+
+    /// 依存パッケージ名を文字列テーブルに載せ、2 つの表と束縛済み PackageId を返す。
+    fn finish(
+        self,
+        strings: &mut StringTable,
+    ) -> (
+        Vec<DiskPackageDep>,
+        Vec<DiskExternalSymbol>,
+        Vec<biwac_base::PackageId>,
+    ) {
+        let mut dep_packages = Vec::with_capacity(self.deps.len());
+        let mut resolved = Vec::with_capacity(self.deps.len());
+        for (name, pkg_id) in &self.deps {
+            dep_packages.push(DiskPackageDep {
+                name: strings.push(name),
+            });
+            resolved.push(*pkg_id);
+        }
+        (dep_packages, self.entries, resolved)
+    }
 }
 
 // --- BodyBuilder: encode 時にシンボルボディを sym_body_bytes に追記するヘルパー ---
@@ -1252,6 +1484,7 @@ fn impl_encode_ty(
     gen_ord: &HashMap<biwac_span::GenDefId, u32>,
     loc_gen_ord: &HashMap<biwac_span::LocalGenDefId, u32>,
     mod_to_file_idx: &HashMap<biwac_base::ModId, DiskFileIndex>,
+    ext: &mut ExtSymBuilder,
 ) -> DiskTy {
     use biwac_hir::TyKind;
     let span = impl_to_disk_span(&ty.span, mod_to_file_idx);
@@ -1289,18 +1522,42 @@ fn impl_encode_ty(
             genargs: vec![],
         },
         TyKind::Defined(dt) => {
-            let sym_id = ty_to_sym
-                .get(&dt.def_id)
-                .copied()
-                .unwrap_or(DiskSymbolIndex(0));
-            let genargs = dt
+            let genargs: Vec<DiskTy> = dt
                 .genargs
                 .iter()
-                .map(|t| impl_encode_ty(t, ty_to_sym, gen_ord, loc_gen_ord, mod_to_file_idx))
+                .map(|t| impl_encode_ty(t, ty_to_sym, gen_ord, loc_gen_ord, mod_to_file_idx, ext))
                 .collect();
+
+            // 名前ツリー上のどこにいるかで書き分ける。
+            //
+            //   予約済み (Int/Float/Bool/Void) → プリミティブに正規化する
+            //   自パッケージ                   → Defined + このファイルのシンボル索引
+            //   依存パッケージ                 → ExternalDefined + 外部シンボル表の索引
+            let pkg = dt.def_id.pkg();
+            let (kind, sym_id) = if let Some(prim) = reserved_prim_disk_kind(dt.def_id) {
+                // 型としてのプリミティブは通常 TyKind::Int 等になるので普段ここは通らないが、
+                // 予約 TyDefId を持つ Defined が紛れ込んでも
+                // シンボル索引として誤解釈しないようにしておく。
+                (prim, DiskSymbolIndex(0))
+            } else if pkg.is_self() {
+                let sym_id = ty_to_sym.get(&dt.def_id).copied().unwrap_or_else(|| {
+                    // 自パッケージの型はすべて Phase 2 で採番済みのはず。
+                    debug_assert!(
+                        false,
+                        "compiler bug: self-package type {:?} is missing from the symbol table",
+                        dt.def_id
+                    );
+                    DiskSymbolIndex(0)
+                });
+                (DiskTyKind::Defined, sym_id)
+            } else {
+                let idx = ext.intern(pkg, dt.def_id.local_idx());
+                (DiskTyKind::ExternalDefined, DiskSymbolIndex(idx))
+            };
+
             DiskTy {
                 hdr: DiskTyHeader {
-                    kind: DiskTyKind::Defined as u32,
+                    kind: kind as u32,
                     sym_id,
                     span,
                 },
@@ -1334,7 +1591,7 @@ fn impl_encode_ty(
             let mut genargs: Vec<DiskTy> = ft
                 .args
                 .iter()
-                .map(|a| impl_encode_ty(a, ty_to_sym, gen_ord, loc_gen_ord, mod_to_file_idx))
+                .map(|a| impl_encode_ty(a, ty_to_sym, gen_ord, loc_gen_ord, mod_to_file_idx, ext))
                 .collect();
             genargs.push(impl_encode_ty(
                 &ft.rty,
@@ -1342,6 +1599,7 @@ fn impl_encode_ty(
                 gen_ord,
                 loc_gen_ord,
                 mod_to_file_idx,
+                ext,
             ));
             DiskTy {
                 hdr: DiskTyHeader {
@@ -1360,6 +1618,26 @@ fn impl_encode_ty(
             },
             genargs: vec![],
         },
+    }
+}
+
+/// 予約済みの [`biwac_span::TyDefId`] に対応するプリミティブの [`DiskTyKind`]。
+///
+/// プリミティブ型は名前ツリーのどのパッケージにも属さないので、
+/// シンボル索引ではなく専用の kind として書き出す。
+fn reserved_prim_disk_kind(def_id: biwac_span::TyDefId) -> Option<DiskTyKind> {
+    use biwac_span::TyDefId;
+
+    if def_id == TyDefId::INT_TY_DEF_ID {
+        Some(DiskTyKind::Int)
+    } else if def_id == TyDefId::FLOAT_TY_DEF_ID {
+        Some(DiskTyKind::Float)
+    } else if def_id == TyDefId::BOOL_TY_DEF_ID {
+        Some(DiskTyKind::Bool)
+    } else if def_id == TyDefId::VOID_TY_DEF_ID {
+        Some(DiskTyKind::Void)
+    } else {
+        None
     }
 }
 
@@ -1405,6 +1683,7 @@ fn impl_encode_fn_data(
     source_holder: &biwac_base::SourceHolder,
     strings: &mut StringTable,
     interner: &biwac_base::IdentInterner,
+    ext: &mut ExtSymBuilder,
 ) -> format::DiskFnData {
     use biwac_span::LocalGenDefId;
     use codec::DiskVec;
@@ -1468,6 +1747,7 @@ fn impl_encode_fn_data(
                     &empty_gen_ord,
                     &loc_gen_ord,
                     mod_to_file_idx,
+                    ext,
                 );
                 DiskArg {
                     name: arg_name_off,
@@ -1484,11 +1764,21 @@ fn impl_encode_fn_data(
         &empty_gen_ord,
         &loc_gen_ord,
         mod_to_file_idx,
+        ext,
     );
 
     let disk_impl_self_ty = DiskVec(
         impl_self_ty
-            .map(|ty| impl_encode_ty(ty, ty_to_sym, &empty_gen_ord, &loc_gen_ord, mod_to_file_idx))
+            .map(|ty| {
+                impl_encode_ty(
+                    ty,
+                    ty_to_sym,
+                    &empty_gen_ord,
+                    &loc_gen_ord,
+                    mod_to_file_idx,
+                    ext,
+                )
+            })
             .into_iter()
             .collect(),
     );

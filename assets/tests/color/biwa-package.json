@@ -1,0 +1,14 @@
+{
+  "name": "color",
+  "version": "0.1.0",
+  "description": "test fixture: a library that test1 depends on only transitively",
+  "dependencies": [
+    {
+      "name": "std",
+      "version": {
+        "min": "0.1.0",
+        "max": "0.2.0"
+      }
+    }
+  ]
+}
