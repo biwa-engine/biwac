@@ -152,6 +152,9 @@ impl DepMetadata {
             signature: &'h biwac_hir::FnSignature,
             impl_genargs: &'h [(biwac_hir::Ident, LocalGenDefId)],
             parent_ty_def_id: TyDefId,
+            /// impl の self 型。所属する型と、その impl 対象ジェネリック引数から組む。
+            /// マングリングとメソッド解決の両方で「どの impl か」を決めるのに使う。
+            impl_self_ty: biwac_hir::Ty,
         }
         let mut assoc_fn_items: Vec<AssocFnItem> = Vec::new();
         // struct と native type alias のどちらも impl block を持てる
@@ -178,6 +181,7 @@ impl DepMetadata {
                         signature: sig,
                         impl_genargs: ig,
                         parent_ty_def_id: *parent_ty_def_id,
+                        impl_self_ty: impl_self_ty_of(*parent_ty_def_id, &pair.genargs, &name.span),
                     });
                 }
             }
@@ -455,6 +459,7 @@ impl DepMetadata {
                 item.name,
                 item.signature,
                 item.impl_genargs,
+                Some(&item.impl_self_ty),
                 &ty_to_sym,
                 &mod_to_file_idx,
                 source_holder,
@@ -477,6 +482,7 @@ impl DepMetadata {
                 item.name,
                 item.signature,
                 item.impl_genargs,
+                None,
                 &ty_to_sym,
                 &mod_to_file_idx,
                 source_holder,
@@ -777,14 +783,42 @@ impl DepMetadata {
         Some(sig)
     }
 
+    /// 関連関数・メソッドの impl self 型を復元する。
+    /// トップレベル関数なら `None`。
+    fn impl_decode_impl_self_ty(
+        &self,
+        fn_data: &format::DiskFnData,
+        fn_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+    ) -> Option<biwac_hir::Ty> {
+        let disk_ty = fn_data.impl_self_ty.0.first()?;
+
+        // self 型に現れる LocGen は impl ブロックのジェネリック引数であり、
+        // fn の combined genargs の先頭に並んでいるので、
+        // その序数解決に fn 自身のシンボルインデックスを使う。
+        Some(self.impl_disk_ty_to_ty(disk_ty, pkg_id, None, Some(fn_sym_idx)))
+    }
+
+    /// 外部パッケージの関連関数・メソッドの impl self 型を返す。
+    /// codegen のシンボル名マングリングから呼ばれる。
+    pub fn assoc_impl_self_ty(
+        &self,
+        sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+    ) -> Option<biwac_hir::Ty> {
+        let SymbolBody::Fn(fn_data) = self.get_symbol_body(sym_idx as usize).ok()? else {
+            return None;
+        };
+
+        self.impl_decode_impl_self_ty(fn_data, sym_idx, pkg_id)
+    }
+
     /// 外部パッケージの型に紐づく assoc fn 群を vals マップに復元する。
     ///
     /// struct と native type alias で共通の処理。
-    /// `owner_genarg_count` は所有する型のジェネリクス個数。
     fn impl_load_ext_assoc_vals(
         &self,
         assoc_symbols: &[DiskSymbolIndex],
-        owner_genarg_count: usize,
         pkg_id: biwac_base::PackageId,
         interner: &mut biwac_base::IdentInterner,
     ) -> std::collections::HashMap<biwac_base::InternedIdent, biwac_hir::TyValImplList> {
@@ -797,11 +831,8 @@ impl DepMetadata {
             std::collections::HashMap::new();
 
         // assoc fns を vals に登録する。
-        // NOTE: disk format にはimpl genargs とfn genargs の境界が記録されていないため、
-        //       所有する型のジェネリクス数を上限として先頭から impl genargs とみなす。
-        //       impl[T] Foo[T] のような標準的なパターンは正しく再現できる。
-        //       TODO: impl Foo[Int] { ... } のように特殊化されたimplの場合は
-        //             disk format に impl_target_genargs を追加することで解決する。
+        // impl の対象ジェネリック引数は DiskFnData::impl_self_ty に記録済みなので、
+        // `impl Foo[Int] { ... }` のように特殊化された impl も正確に復元できる。
         for &assoc_sym_idx_disk in assoc_symbols {
             let assoc_sym_idx = assoc_sym_idx_disk.0;
             let Ok(assoc_body) = self.get_symbol_body(assoc_sym_idx as usize) else {
@@ -814,16 +845,16 @@ impl DepMetadata {
             let val_def_id =
                 ValDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(assoc_sym_idx)));
 
-            let impl_genarg_count = owner_genarg_count.min(fn_data.genargs.0.len());
-            let impl_genarg_pattern: Vec<biwac_hir::Ty> = (0..impl_genarg_count)
-                .map(|i| {
-                    let lgid = LocalGenDefId::new(DefId::new(
-                        pkg_id,
-                        PackageLocalDefId::new(ext_loc_gen_id(assoc_sym_idx, i as u32)),
-                    ));
-                    biwac_hir::Ty::new(biwac_hir::TyKind::LocGen(lgid), Span::dummy())
+            // impl 対象のジェネリック引数は self 型の genargs そのもの。
+            let impl_genarg_pattern: Vec<biwac_hir::Ty> = self
+                .impl_decode_impl_self_ty(fn_data, assoc_sym_idx, pkg_id)
+                .map(|ty| match ty.kind {
+                    biwac_hir::TyKind::Defined(dt) => dt.genargs,
+                    // プリミティブ型の impl はジェネリック引数を取らない
+                    _ => Vec::new(),
                 })
-                .collect();
+                .unwrap_or_default();
+            let impl_genarg_count = impl_genarg_pattern.len();
 
             let impl_block_genargs: std::collections::HashMap<_, _> = (0..impl_genarg_count)
                 .map(|i| {
@@ -922,12 +953,7 @@ impl DepMetadata {
             })
             .collect();
 
-        let vals = self.impl_load_ext_assoc_vals(
-            &alias_data.assoc_symbols.0,
-            genargs.len(),
-            pkg_id,
-            interner,
-        );
+        let vals = self.impl_load_ext_assoc_vals(&alias_data.assoc_symbols.0, pkg_id, interner);
 
         let alias_def = NativeTypeAliasDef {
             name: Ident {
@@ -989,12 +1015,7 @@ impl DepMetadata {
             genargs,
         };
 
-        let vals = self.impl_load_ext_assoc_vals(
-            &struct_data.assoc_symbols.0,
-            struct_data.genargs.0.len(),
-            pkg_id,
-            interner,
-        );
+        let vals = self.impl_load_ext_assoc_vals(&struct_data.assoc_symbols.0, pkg_id, interner);
 
         Some(DefinedTyImpl {
             ty_content: Some(TyDefKind::Struct(Box::new(struct_def))),
@@ -1343,10 +1364,42 @@ fn impl_encode_ty(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// 所属する型と impl 対象ジェネリック引数から impl の self 型を組み立てる。
+///
+/// 予約済みの [`TyDefId`] (Int/Float/Bool/Void) はプリミティブなので、
+/// 対応する [`TyKind`] にそのまま戻す。
+fn impl_self_ty_of(
+    parent_ty_def_id: biwac_span::TyDefId,
+    impl_genargs: &[biwac_hir::Ty],
+    span: &biwac_span::Span,
+) -> biwac_hir::Ty {
+    use biwac_hir::{DefinedTy, TyKind};
+    use biwac_span::TyDefId;
+
+    let kind = if parent_ty_def_id == TyDefId::INT_TY_DEF_ID {
+        TyKind::Int
+    } else if parent_ty_def_id == TyDefId::FLOAT_TY_DEF_ID {
+        TyKind::Float
+    } else if parent_ty_def_id == TyDefId::BOOL_TY_DEF_ID {
+        TyKind::Bool
+    } else if parent_ty_def_id == TyDefId::VOID_TY_DEF_ID {
+        TyKind::Void
+    } else {
+        TyKind::Defined(DefinedTy {
+            def_id: parent_ty_def_id,
+            genargs: impl_genargs.to_vec(),
+        })
+    };
+
+    biwac_hir::Ty::new(kind, span.clone())
+}
+
 fn impl_encode_fn_data(
     name: &biwac_hir::Ident,
     signature: &biwac_hir::FnSignature,
     impl_genargs: &[(biwac_hir::Ident, biwac_span::LocalGenDefId)],
+    // 関連関数・メソッドなら impl の self 型。トップレベル関数なら None。
+    impl_self_ty: Option<&biwac_hir::Ty>,
     ty_to_sym: &HashMap<biwac_span::TyDefId, DiskSymbolIndex>,
     mod_to_file_idx: &HashMap<biwac_base::ModId, DiskFileIndex>,
     source_holder: &biwac_base::SourceHolder,
@@ -1433,6 +1486,13 @@ fn impl_encode_fn_data(
         mod_to_file_idx,
     );
 
+    let disk_impl_self_ty = DiskVec(
+        impl_self_ty
+            .map(|ty| impl_encode_ty(ty, ty_to_sym, &empty_gen_ord, &loc_gen_ord, mod_to_file_idx))
+            .into_iter()
+            .collect(),
+    );
+
     format::DiskFnData {
         name: disk_name,
         name_span,
@@ -1441,5 +1501,6 @@ fn impl_encode_fn_data(
         genargs: disk_genargs,
         args: disk_args,
         rty,
+        impl_self_ty: disk_impl_self_ty,
     }
 }

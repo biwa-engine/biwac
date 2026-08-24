@@ -11,6 +11,8 @@ fn native_sqrt(x: Int) -> Float {{
   return Math.sqrt(x);
 }}
 
+// NOTE: プリミティブ型への実装は、将来stdに限定される予定。
+// その際にはエラーになるべき。
 impl Int {
   fn sqrt(self) -> Float {
     native_sqrt(self)

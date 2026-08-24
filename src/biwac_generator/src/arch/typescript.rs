@@ -7,7 +7,7 @@ mod types;
 use std::{cell::Cell, collections::HashMap};
 
 use biwac_base::{IdentInterner, SourceHolder};
-use biwac_hir::{AssocValDefKind, Hir, TyDefKind, TyKind, ValDefKind};
+use biwac_hir::{AssocValDefKind, Hir, TyDefKind, ValDefKind};
 use biwac_span::{TyDefId, ValDefId};
 use oxc_allocator::FromIn;
 
@@ -286,23 +286,5 @@ impl Mangled for ValDefId {
 impl Mangled for TyDefId {
     fn mangled(&self, ctx: &AstBuildCtx) -> String {
         ctx.get_type_mangled(self)
-    }
-}
-
-impl Mangled for (&TyKind, &str) {
-    fn mangled(&self, _ctx: &AstBuildCtx) -> String {
-        match self.0 {
-            TyKind::Infer(_) => panic!("compiler bug: failed to infer type of expression"),
-            TyKind::Void => panic!("compiler bug: Void cannot be implemented method"),
-            TyKind::Fn(_) => panic!("compiler bug: function cannot be implemented method"),
-            TyKind::Gen(_) => panic!(""),    // ローカルに出現し得ない
-            TyKind::LocGen(_) => panic!(""), // ローカルなジェネリック型のメソッドの有効性は判断できないため、呼ばれることはない
-            TyKind::Int => format!("_ZN3Int{}{}E", self.1.len(), &self.1,),
-            TyKind::Float => format!("_ZN5Float{}{}E", self.1.len(), &self.1,),
-            TyKind::Bool => format!("_ZN4Bool{}{}E", self.1.len(), &self.1,),
-            TyKind::Defined(_) => {
-                panic!("compiler bug: must use (&TyDefId, &str, &ImplValId)")
-            }
-        }
     }
 }

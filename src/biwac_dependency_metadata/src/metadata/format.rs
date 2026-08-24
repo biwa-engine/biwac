@@ -14,7 +14,7 @@ use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 2;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 3;
 
 // --- インデックス / オフセット型 ---
 
@@ -415,6 +415,15 @@ pub struct DiskFnData {
     pub genargs: DiskVec<DiskGenArg>,
     pub args: DiskVec<DiskArg>,
     pub rty: DiskTy,
+    /// impl の self 型。トップレベル関数なら空、関連関数・メソッドなら 1 要素。
+    ///
+    /// `impl Pair[Int, Int]` なら Defined(Pair) + genargs [Int, Int] になる。
+    /// DiskTy はプリミティブも定義された型も表現できるので、
+    /// 「どの型の impl か」と「impl の対象ジェネリック引数」をこれ 1 つで運べる。
+    ///
+    /// codegen のシンボル名マングリングと、
+    /// 特殊化された impl のメソッド解決に使う。
+    pub impl_self_ty: DiskVec<DiskTy>,
 }
 
 impl DiskDecode for DiskFnData {
@@ -434,6 +443,8 @@ impl DiskDecode for DiskFnData {
         pos += n;
         let (rty, n) = DiskTy::decode(&bytes[pos..])?;
         pos += n;
+        let (impl_self_ty, n) = DiskVec::<DiskTy>::decode(&bytes[pos..])?;
+        pos += n;
         Ok((
             Self {
                 name,
@@ -443,6 +454,7 @@ impl DiskDecode for DiskFnData {
                 genargs,
                 args,
                 rty,
+                impl_self_ty,
             },
             pos,
         ))
@@ -458,6 +470,7 @@ impl DiskEncode for DiskFnData {
         self.genargs.encode(buf);
         self.args.encode(buf);
         self.rty.encode(buf);
+        self.impl_self_ty.encode(buf);
     }
 }
 

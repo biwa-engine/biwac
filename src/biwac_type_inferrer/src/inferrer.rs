@@ -690,6 +690,13 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             }
             Primary::FnCall(c) => match &c.callee {
                 Callee::Fn(def_id) => {
+                    // codegen が呼び出しを出力するので、外部パッケージなら import が要る
+                    self.tctx
+                        .hir
+                        .deps_recorder
+                        .borrow_mut()
+                        .depends_on_val(def_id);
+
                     // let callee_ty = self.tctx.hir.get_fn_sign(vid).unwrap().as_ty();
                     let callee_ty = self.tctx.get_value_ty(def_id).unwrap();
 
@@ -778,6 +785,14 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
                 let def_id = self.tctx.get_method_def_id(&left, &m.method)?;
                 m.def_id.set(def_id).unwrap();
+
+                // 同上
+                self.tctx
+                    .hir
+                    .deps_recorder
+                    .borrow_mut()
+                    .depends_on_val(&def_id);
+
                 let callee_ty = self.tctx.get_value_ty(&def_id).unwrap();
 
                 let args = m
