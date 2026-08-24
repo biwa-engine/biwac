@@ -300,6 +300,9 @@ fn load_analyze_and_codegen_single_package(
     // 後段の lang item 回収はこれを通過していることを前提にできる。
     check_attributes(&pkg, interner, &srcs, metadata)?;
 
+    let pkg_kind = pkg.pkg_kind;
+    let root_mod_id = pkg.root_module.mod_id;
+
     let biwac_name_resolver::ResolveOutput { hir, lang_items } =
         biwac_name_resolver::NameResolver::new(
             metadata,
@@ -309,6 +312,12 @@ fn load_analyze_and_codegen_single_package(
         )
         .unwrap()
         .try_resolve(interner)
+        .map_err(|errs| print_errors(&errs, interner, &srcs, metadata))?;
+
+    // Scene contract check: scene のシグネチャと、
+    // playable package のエントリポイント (scene main) の存在を検証する。
+    // シグネチャは名前解決の時点で確定しているので型推論より前に走らせる。
+    let well_known_scenes = biwac_scene::check(&hir, &lang_items, pkg_kind, root_mod_id, interner)
         .map_err(|errs| print_errors(&errs, interner, &srcs, metadata))?;
 
     // Persist self package's symbol metadata to disk for dependents.
@@ -337,6 +346,7 @@ fn load_analyze_and_codegen_single_package(
         &srcs,
         &ext_pkgs_for_ty,
         &lang_items,
+        &well_known_scenes,
     );
 
     write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();

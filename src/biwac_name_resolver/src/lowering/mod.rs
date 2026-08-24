@@ -10,7 +10,7 @@ pub(crate) use expressions::ExprLowerCtx;
 
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
 use biwac_base::{InternedIdent, PackageId, PackageName};
-use biwac_hir::{DefinedTy, DefinedTyImpl, Hir, Ty, TyKind, ValDefKind};
+use biwac_hir::{DefinedTy, DefinedTyImpl, Hir, Ty, TyKind, TypeAliasDef, ValDefKind};
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId, ValDefId};
 
@@ -25,15 +25,11 @@ pub(crate) fn lower(
     let mut errors = Vec::new();
 
     // Pass 1: register all type definitions so impl blocks can reference them.
-    let mut tys = lower_module_types(&pkg.root_module, &mut errors)
-        .into_iter()
-        .map(|(def_id, ty)| (def_id, ty))
-        .collect();
-
-    // NOTE: maybe unnecessary because alias expanded (and cycle detected) in resolving path.
-    //
-    // // Pass 2: expand type aliases recursively, detect cycles.
-    // alias_expansion::expand_aliases(&mut hir, &mut errors);
+    let mut ty_list = Vec::new();
+    let mut alias_list = Vec::new();
+    lower_module_types(&pkg.root_module, &mut ty_list, &mut alias_list, &mut errors);
+    let mut tys: HashMap<TyDefId, DefinedTyImpl> = ty_list.into_iter().collect();
+    let ty_aliases: HashMap<TyDefId, TypeAliasDef> = alias_list.into_iter().collect();
 
     // Pass 2: lower impl blocks
     lower_impl_blocks(&mut tys, &pkg.root_module, impl_collector, &mut errors);
@@ -47,8 +43,21 @@ pub(crate) fn lower(
     // Pass 4: lower native codes
     let native_codes = lower_native_codes(&pkg.root_module);
 
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    let mut hir = Hir::new(pkg_name, pkg_names, tys, vals, ty_aliases, native_codes);
+
+    // Pass 5: 型 alias を右辺で置き換える。
+    //
+    // 名前解決は alias をその場で canonical な TyDefId に潰さない
+    // (潰すと `type MyGame = Game[A, B]` の [A, B] が失われるため)。
+    // 代わりにここで、すべての型・値を lower し終えたあとに一括で展開する。
+    alias_expansion::expand_aliases(&mut hir, &mut errors);
+
     if errors.is_empty() {
-        Ok(Hir::new(pkg_name, pkg_names, tys, vals, native_codes))
+        Ok(hir)
     } else {
         Err(errors)
     }
@@ -56,20 +65,18 @@ pub(crate) fn lower(
 
 fn lower_module_types(
     module: &LoadedModule,
+    tys: &mut Vec<(TyDefId, DefinedTyImpl)>,
+    aliases: &mut Vec<(TyDefId, TypeAliasDef)>,
     errors: &mut Vec<ResolveError>,
-) -> Vec<(TyDefId, DefinedTyImpl)> {
-    let mut tys = Vec::new();
-
+) {
     for g in &module.ast.globals {
         if let biwac_ast::Globals::TypeDef(type_def) = g {
-            tys.extend(globals::lower_type_def(type_def, errors));
+            globals::lower_type_def(type_def, tys, aliases, errors);
         }
     }
     for child in module.children.values() {
-        tys.extend(lower_module_types(child, errors));
+        lower_module_types(child, tys, aliases, errors);
     }
-
-    tys
 }
 
 fn lower_impl_blocks(

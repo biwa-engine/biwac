@@ -8,7 +8,7 @@ fn add(x: Int, y: Int) -> Int {
     return x + y;
 }
 
-fn main() {
+fn foo() {
   let x = add(3, 2);
   let y = math::fact(x);
   let l = math::line::Line{
@@ -31,9 +31,9 @@ struct MyGameState {}
 
 struct MyGameCharacters {}
 
-scene scene1(
-    g: std::game::Game[MyGameCharacters, MyGameState]
-  ) -> std::game::Game[MyGameCharacters, MyGameState] {{
+type MyGame = std::game::Game[MyGameCharacters, MyGameState];
+
+scene main(g: MyGame) -> MyGame {{
   Hello, World!
   #let x = native_add(1, 2)
   #if x > 2 {

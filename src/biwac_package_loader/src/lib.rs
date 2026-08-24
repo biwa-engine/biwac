@@ -16,7 +16,7 @@ use biwac_ast::ModAst;
 use biwac_base::{
     BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME, BIWA_EXTENSION, BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME,
     ErrorContext, ErrorHolder, IdentInterner, InternedIdent, MetadataHolder, ModId, ModPath,
-    ModSource, PackageId, SourceHolder,
+    ModSource, PackageId, PackageKind, SourceHolder,
 };
 
 #[derive(Debug)]
@@ -24,12 +24,6 @@ pub struct LoadedModule {
     pub mod_id: ModId,
     pub ast: ModAst,
     pub children: HashMap<InternedIdent, LoadedModule>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PackageKind {
-    Lib,
-    Bin,
 }
 
 impl LoadedModule {

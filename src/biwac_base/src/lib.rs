@@ -8,8 +8,8 @@ pub use error::{BiwacError, ErrorContext, ErrorHolder, print_error_finish_messag
 pub use ident::{IdentInterner, InternedIdent};
 pub use module::ModPath;
 pub use package::{
-    DependedPackage, MetadataHolder, PackageId, PackageMetadata, PackageName, PackageNameError,
-    PackageVersion, PackageVersionError,
+    DependedPackage, MetadataHolder, PackageId, PackageKind, PackageMetadata, PackageName,
+    PackageNameError, PackageVersion, PackageVersionError,
 };
 pub use src::{ModId, ModSource, SourceHolder};
 

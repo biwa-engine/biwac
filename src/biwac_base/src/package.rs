@@ -7,6 +7,23 @@ pub struct MetadataHolder {
     pub src: String, // metadata file string content
 }
 
+/// パッケージが実行可能 (playable) かライブラリか。
+///
+/// `main.biwa` があれば playable、`lib.biwa` があれば library。
+/// playable package はエントリポイント (`scene main`) を持たなければならない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageKind {
+    Lib,
+    /// Rust でいう binary package。ゲームとして遊べる成果物になる。
+    Bin,
+}
+
+impl PackageKind {
+    pub fn is_playable(&self) -> bool {
+        matches!(self, Self::Bin)
+    }
+}
+
 #[derive(Debug)]
 pub struct PackageMetadata {
     pub name: PackageName,

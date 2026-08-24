@@ -2,7 +2,9 @@ use std::path::Path;
 
 use biwac_base::{IdentInterner, SourceHolder};
 
-use crate::{PackageKind, Pkg};
+use biwac_base::PackageKind;
+
+use crate::Pkg;
 
 #[test]
 fn test1() {

@@ -91,9 +91,9 @@ impl Hir {
         pkg_names: HashMap<PackageId, InternedIdent>,
         tys: HashMap<TyDefId, DefinedTyImpl>,
         vals: HashMap<ValDefId, ValDefKind>,
+        ty_aliases: HashMap<TyDefId, TypeAliasDef>,
         native_codes: Vec<NativeCode>,
     ) -> Self {
-        let ty_aliases = HashMap::new();
         let mut assoc_val_map = HashMap::new();
         for (ty_def_id, ty_impl) in &tys {
             if !ty_def_id.pkg().is_self() && ty_def_id.pkg() != PackageId::BUILTIN_RESERVED_PACKAGE

@@ -329,7 +329,7 @@ fn resolve_path_in_module(
     let segment = &path.segments[depth];
     match module.children.get(&segment.ident.id) {
         Some(item) => {
-            let def_id_kind = module_item_to_def_id_kind(item, ty_index);
+            let def_id_kind = module_item_to_def_id_kind(item);
             segment
                 .resolved_id
                 .set(PathSegmentResolution::Ok(def_id_kind))
@@ -420,22 +420,20 @@ fn resolve_path_in_ty(
     }
 }
 
-fn module_item_to_def_id_kind(
-    item: &ModuleNameTreeItem,
-    ty_index: &HashMap<TyDefId, &TyNameTree>,
-) -> DefIdKind {
+fn module_item_to_def_id_kind(item: &ModuleNameTreeItem) -> DefIdKind {
     match item {
         ModuleNameTreeItem::Mod(module) => DefIdKind::Mod(module.mod_id),
-        ModuleNameTreeItem::Ty(ty) => {
-            if let Some(def_id) = ty_index
-                .get(&ty.def_id)
-                .and_then(|ty_def| *ty_def.alias_target.borrow())
-            {
-                DefIdKind::Ty(def_id)
-            } else {
-                DefIdKind::Ty(ty.def_id)
-            }
-        }
+        // 型の位置では alias を canonical な型に潰さない。
+        //
+        // 潰すと `type MyGame = Game[A, B]` の [A, B] が失われてしまう
+        // (ここは TyDefId しか運べないため)。
+        // alias 自身の TyDefId のまま HIR まで運び、
+        // lowering の最後で alias_expansion が右辺ごと置き換える。
+        //
+        // 一方、関連アイテムの解決 (resolve_path_in_ty) は
+        // `PairIntT::new` を `Pair::new` に解決する必要があるので
+        // 引き続き alias_target を辿る。
+        ModuleNameTreeItem::Ty(ty) => DefIdKind::Ty(ty.def_id),
         ModuleNameTreeItem::Val(val_def_id) => DefIdKind::Val(*val_def_id),
     }
 }

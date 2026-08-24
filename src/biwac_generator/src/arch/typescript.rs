@@ -16,6 +16,12 @@ use crate::arch::typescript::{
     globals::native_code_as_oxc,
 };
 
+// ランタイムとの規約: ゲームのストーリー起動時にこの名前の関数が呼ばれる。
+//
+// これは TypeScript ターゲット固有の規約なので、
+// どの scene がエントリポイントかを決める biwac_scene 側はこの名前を知らない。
+const ENTRYPOINT_NAME: &str = "__biwa_entrypoint";
+
 pub fn generate(
     hir: &Hir,
     interner: &IdentInterner,
@@ -25,6 +31,7 @@ pub fn generate(
         std::sync::Arc<biwac_dependency_metadata::DepMetadata>,
     )],
     lang_items: &biwac_lang_item::LangItemTable,
+    well_known_scenes: &biwac_scene::WellKnownScenes,
 ) -> String {
     let allocator = oxc_allocator::Allocator::default();
     let ctx = AstBuildCtx::new(hir, interner, srcs, ext_pkgs, lang_items, &allocator);
@@ -223,6 +230,17 @@ pub fn generate(
         &allocator,
     ));
 
+    // エントリポイントは通常どおりマングル名で出力したうえで、
+    // ランタイムが知っている名前へ別名 export する。
+    // こうすると biwa コード内から呼ぶ経路 (マングル名参照) がそのまま動く。
+    if let Some(def_id) = well_known_scenes.get(biwac_scene::WellKnownScene::Main) {
+        body.push(export_alias(
+            &ctx.get_value_mangled(&def_id),
+            ENTRYPOINT_NAME,
+            &allocator,
+        ));
+    }
+
     let oxc_ast = oxc_ast::ast::Program {
         span: span(),
         source_type: oxc_ast::ast::SourceType::ts(), // TypeScript
@@ -241,6 +259,46 @@ pub fn generate(
 
 fn span() -> oxc_span::Span {
     oxc_span::Span::new(0, 0)
+}
+
+/// `export { <local> as <exported> };` を作る。
+fn export_alias<'a>(
+    local: &str,
+    exported: &'a str,
+    allocator: &'a oxc_allocator::Allocator,
+) -> oxc_ast::ast::Statement<'a> {
+    let local_name = oxc_span::Ident::new_const(allocator.alloc_str(local));
+
+    oxc_ast::ast::Statement::ExportNamedDeclaration(oxc_allocator::Box::new_in(
+        oxc_ast::ast::ExportNamedDeclaration {
+            span: span(),
+            declaration: None,
+            specifiers: oxc_allocator::Vec::from_iter_in(
+                [oxc_ast::ast::ExportSpecifier {
+                    span: span(),
+                    local: oxc_ast::ast::ModuleExportName::IdentifierReference(
+                        oxc_ast::ast::IdentifierReference {
+                            span: span(),
+                            name: local_name,
+                            reference_id: Cell::new(None),
+                        },
+                    ),
+                    exported: oxc_ast::ast::ModuleExportName::IdentifierName(
+                        oxc_ast::ast::IdentifierName {
+                            span: span(),
+                            name: oxc_span::Ident::new_const(exported),
+                        },
+                    ),
+                    export_kind: oxc_ast::ast::ImportOrExportKind::Value,
+                }],
+                allocator,
+            ),
+            source: None,
+            export_kind: oxc_ast::ast::ImportOrExportKind::Value,
+            with_clause: None,
+        },
+        allocator,
+    ))
 }
 
 /// トップレベル宣言を `export` 付きにする。

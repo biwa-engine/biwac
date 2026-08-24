@@ -12,6 +12,7 @@ members = [
   "src/biwac_package_loader",
   "src/biwac_hir",
   "src/biwac_lang_item",
+  "src/biwac_scene",
   "src/biwac_dependency_metadata",
   "src/biwac_name_resolver",
   "src/biwac_type_inferrer",

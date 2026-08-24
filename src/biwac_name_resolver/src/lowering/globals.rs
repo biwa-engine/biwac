@@ -253,12 +253,17 @@ pub(super) fn lower_native_fn_def(
     )
 }
 
+/// 型定義を lower する。
+///
+/// 型 alias は `tys` ではなく `aliases` 側に入る。
+/// alias は独立した型ではなく別名にすぎず、
+/// [`crate::lowering::alias_expansion`] が使用箇所を右辺で置き換えるためである。
 pub(crate) fn lower_type_def(
     type_def: &TypeDef,
+    tys: &mut Vec<(TyDefId, DefinedTyImpl)>,
+    aliases: &mut Vec<(TyDefId, TypeAliasDef)>,
     errors: &mut Vec<ResolveError>,
-) -> Vec<(TyDefId, DefinedTyImpl)> {
-    let mut tys = Vec::new();
-
+) {
     match type_def {
         TypeDef::Struct(s) => {
             tys.push(lower_struct_def(s, errors));
@@ -266,12 +271,10 @@ pub(crate) fn lower_type_def(
         TypeDef::NativeTypeAlias(n) => {
             tys.push(lower_native_type_alias(n));
         }
-        TypeDef::TypeAlias(_) => {
-            // nothing to do
-        } // TypeDef::TypeAlias(a) => lower_type_alias(hir, a, errors),
+        TypeDef::TypeAlias(a) => {
+            aliases.push(lower_type_alias(a, errors));
+        }
     }
-
-    tys
 }
 
 fn lower_struct_def(
