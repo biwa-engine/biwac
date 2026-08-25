@@ -12,6 +12,9 @@ biwac_lang_item = { path = "../biwac_lang_item"}
 biwac_hir = { path = "../biwac_hir"}
 biwac_scene = { path = "../biwac_scene"}
 biwac_dependency_metadata = { path = "../biwac_dependency_metadata"}
+biwac_fingerprint = { path = "../biwac_fingerprint"}
+biwac_hash = { path = "../biwac_hash"}
+biwac_span = { path = "../biwac_span"}
 biwac_name_resolver = { path = "../biwac_name_resolver"}
 biwac_type_inferrer = { path = "../biwac_type_inferrer"}
 biwac_generator = { path = "../biwac_generator"}

@@ -2,21 +2,45 @@ mod dep_graph;
 
 use colored::Colorize;
 use std::{
-    collections::HashMap,
+    collections::HashSet,
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use biwac_base::{IdentInterner, PackageName, SourceHolder};
+use biwac_base::{IdentInterner, PackageId, PackageName, SourceHolder};
 use biwac_dependency_metadata::{DepMetadata, ExternalPackage};
+use biwac_fingerprint::{Fingerprint, Freshness, SourceEntry, StaleReason};
+use biwac_hash::Hash64;
 
 use dep_graph::DepGraph;
 
-pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
-    println!("{}", "Compiling...".green().bold(),);
+/// ビルドの振る舞いの指定。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildOptions {
+    /// 鮮度判定を飛ばして全パッケージを建て直す。
+    pub force_rebuild: bool,
+}
 
-    let mut interner = IdentInterner::new();
+/// このコンパイラの同一性。
+///
+/// これが前回と違えばキャッシュはすべて無効になる。
+/// `.biwameta` の形式版数を混ぜてあるので、形式を変えたときは
+/// 「古い成果物を掴んでエラー」ではなく「フィンガープリント不一致で建て直し」になる。
+fn compiler_identity() -> Hash64 {
+    biwac_fingerprint::compiler_hash(&[
+        biwac_dependency_metadata::BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION,
+    ])
+}
+
+/// 依存グラフの各パッケージの、今回のビルドで確定した SVH。
+///
+/// トポロジカル順 (葉から) に埋まっていくので、
+/// あるパッケージを判定する時点で、その依存の SVH は必ず揃っている。
+type SvhMap = std::collections::HashMap<PackageId, Hash64>;
+
+pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> {
+    println!("{}", "Compiling...".green().bold(),);
 
     let metadata = biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone())
         .map_err(|e| {
@@ -32,25 +56,6 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
         metadata.metadata.version.patch()
     );
 
-    // build directory preparation
-    let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
-    if !build_dir_path.exists() {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .create(build_dir_path.clone())
-            .unwrap();
-    } else if !build_dir_path.is_dir() {
-        panic!(
-            "Destination directory broken, conflicted file found: `{}`",
-            build_dir_path
-                .as_os_str()
-                .to_str()
-                .expect("broken build directory path")
-        );
-    }
-
-    // Dependency building via DepGraph (BFS discovery + Kahn's topological batching)
-    //
     // packages_dir: sibling directory of pkg_root_path (workspace root).
     // Each package lives at packages_dir/<name>/.
     let packages_dir = pkg_root_path
@@ -65,51 +70,61 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
         .map(|d| d.name.value().to_string())
         .collect();
 
-    let external_packages = if root_dep_names.is_empty() {
-        Vec::new()
-    } else {
-        let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
+    // Discover full transitive dependency graph.
+    // 依存が無くても空グラフとして扱い、以降の分岐を減らす。
+    let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
+    let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
+        biwac_base::print_error_finish_message(1);
+    })?;
 
-        // Discover full transitive dependency graph.
-        let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
-            biwac_base::print_error_finish_message(1);
-        })?;
+    // Build in topological order (leaves = no deps first).
+    // Items within the same batch are independent and can be parallelized (future tokio).
+    let batches = dep_graph.topo_batches().map_err(|_| {
+        biwac_base::print_error_finish_message(1);
+    })?;
 
-        // Build in topological order (leaves = no deps first).
-        // Items within the same batch are independent and can be parallelized (future tokio).
-        let batches = dep_graph.topo_batches().map_err(|_| {
-            biwac_base::print_error_finish_message(1);
-        })?;
-        if !batches.is_empty() {
-            println!("{}", "Compiling dependencies...".green().bold(),);
+    let mut svhs = SvhMap::new();
+    for batch in &batches {
+        // TODO: parallelize within batch using tokio
+
+        for dep_name in batch {
+            let dep_root = packages_dir.join(dep_name);
+            let svh = build_or_reuse_package(
+                dep_root,
+                &packages_dir,
+                &dep_graph,
+                &svhs,
+                options,
+                DisplayDepth::Dependency,
+            )?;
+            let pkg_id = dep_graph
+                .pkg_id(dep_name)
+                .expect("package must be in graph");
+            svhs.insert(pkg_id, svh);
         }
-        let mut built_deps: Vec<String> = Vec::new();
-        for batch in &batches {
-            // TODO: parallelize within batch using tokio
+    }
 
-            for dep_name in batch {
-                let dep_root = packages_dir.join(dep_name);
-                build_single_dep(dep_root, dep_name)?;
-                built_deps.push(dep_name.clone());
-            }
-        }
-        if !batches.is_empty() {
-            println!("{}", "Compiling dependencies finished!".green().bold(),);
-        }
+    // 生成物は import 文が `./<package>.ts` を指すため、
+    // 自パッケージと推移的依存の .ts が同じディレクトリに並んでいる必要がある。
+    //
+    // 再ビルドしたものだけでなく **グラフの全パッケージ** を対象にする。
+    // キャッシュが効いた依存の .ts も要るし、
+    // 依存から外れたパッケージの .ts は消さなければならない。
+    let build_dir_path = prepare_build_dir(&pkg_root_path)?;
+    collect_dep_bins(
+        &dep_graph.all_packages(),
+        metadata.metadata.name.value(),
+        &packages_dir,
+        &build_dir_path,
+    )?;
 
-        // 生成物は import 文が `./<package>.ts` を指すため、
-        // 自パッケージと推移的依存の .ts が同じディレクトリに並んでいる必要がある。
-        collect_dep_bins(&built_deps, &packages_dir, &build_dir_path)?;
-
-        load_external_packages(&dep_graph, &root_dep_names, &packages_dir, &mut interner)?
-    };
-
-    load_analyze_and_codegen_single_package(
-        external_packages,
-        &mut interner,
-        &metadata,
+    build_or_reuse_package(
         pkg_root_path,
-        build_dir_path,
+        &packages_dir,
+        &dep_graph,
+        &svhs,
+        options,
+        DisplayDepth::Root,
     )?;
 
     println!("{}", "Finished!".green().bold(),);
@@ -117,126 +132,225 @@ pub fn compile(pkg_root_path: PathBuf) -> Result<(), ()> {
     Ok(())
 }
 
-/// Builds a single dependency if its .biwameta is not already up to date.
-fn build_single_dep(dep_root: PathBuf, dep_name: &str) -> Result<(), ()> {
-    let meta_path = dep_root
-        .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
-        .join(format!("{}.biwameta", dep_name));
-    if meta_path.exists() {
-        return Ok(()); // cached
+/// 進捗表示のインデント。ルートパッケージと依存で見た目を変えるだけ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayDepth {
+    Root,
+    Dependency,
+}
+
+impl DisplayDepth {
+    fn indent(&self) -> &'static str {
+        match self {
+            Self::Root => "",
+            Self::Dependency => "  ",
+        }
     }
+}
 
-    // compiling single dependency
-
-    let mut interner = IdentInterner::new();
-
+/// パッケージ 1 つを、必要なら再ビルドする。
+///
+/// 戻り値はそのパッケージの SVH (インタフェースのハッシュ)。
+/// キャッシュを使った場合は前回の値をそのまま返す。
+/// 呼び出し側はこれを下流のパッケージの鮮度判定に渡す。
+fn build_or_reuse_package(
+    pkg_root: PathBuf,
+    packages_dir: &Path,
+    dep_graph: &DepGraph,
+    svhs: &SvhMap,
+    options: BuildOptions,
+    depth: DisplayDepth,
+) -> Result<Hash64, ()> {
     let metadata =
-        biwac_metadata_loader::try_load_package_metadata(dep_root.clone()).map_err(|e| {
+        biwac_metadata_loader::try_load_package_metadata(pkg_root.clone()).map_err(|e| {
             e.print_error_message();
             biwac_base::print_error_finish_message(1);
         })?;
+    let pkg_name = metadata.metadata.name.value().to_string();
 
-    println!(
-        "  {} {} v{}.{}.{}",
-        "Compiling...".green().bold(),
-        metadata.metadata.name.value(),
-        metadata.metadata.version.major(),
-        metadata.metadata.version.minor(),
-        metadata.metadata.version.patch()
-    );
+    let build_dir_path = prepare_build_dir(&pkg_root)?;
 
-    // build directory preparation
-    let build_dir_path = dep_root.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
-    std::fs::create_dir_all(&build_dir_path).map_err(|e| {
-        eprintln!("Error: failed to create {:?}: {}", build_dir_path, e);
+    // このパッケージのビルドが読むことになる依存の集合 = 推移閉包。
+    //
+    // ルートパッケージはグラフに含まれないので、
+    // その推移閉包はグラフ全体そのものになる。
+    let transitive_deps = match depth {
+        DisplayDepth::Root => dep_graph.all_packages(),
+        DisplayDepth::Dependency => dep_graph.transitive_deps(&pkg_name),
+    };
+    let dep_svhs: Vec<(PackageId, Hash64)> = transitive_deps
+        .iter()
+        .filter_map(|name| {
+            let pkg_id = dep_graph.pkg_id(name)?;
+            Some((pkg_id, *svhs.get(&pkg_id)?))
+        })
+        .collect();
+
+    let sources = biwac_fingerprint::collect_sources(&pkg_root).map_err(|e| {
+        eprintln!("Error: failed to read sources of `{pkg_name}`: {e}");
         biwac_base::print_error_finish_message(1);
     })?;
 
-    // Dependency building via DepGraph (BFS discovery + Kahn's topological batching)
-    //
-    // packages_dir: sibling directory of pkg_root_path (workspace root).
-    // Each package lives at packages_dir/<name>/.
-    let packages_dir = dep_root
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let freshness = check_freshness(
+        &build_dir_path,
+        &pkg_name,
+        &metadata.metadata,
+        &dep_svhs,
+        &sources,
+        options,
+    );
 
-    let root_dep_names: Vec<String> = metadata
+    if let Freshness::Fresh(svh) = freshness {
+        println!(
+            "{}{} {} v{}.{}.{}",
+            depth.indent(),
+            "Fresh".cyan().bold(),
+            pkg_name,
+            metadata.metadata.version.major(),
+            metadata.metadata.version.minor(),
+            metadata.metadata.version.patch(),
+        );
+        return Ok(svh);
+    }
+    let Freshness::Stale(reason) = freshness else {
+        unreachable!()
+    };
+
+    println!(
+        "{}{} {} v{}.{}.{} ({})",
+        depth.indent(),
+        "Compiling".green().bold(),
+        pkg_name,
+        metadata.metadata.version.major(),
+        metadata.metadata.version.minor(),
+        metadata.metadata.version.patch(),
+        reason.describe(),
+    );
+
+    let mut interner = IdentInterner::new();
+    let direct_dep_names: Vec<String> = metadata
         .metadata
         .dependencies
         .iter()
         .map(|d| d.name.value().to_string())
         .collect();
 
-    let external_packages = if root_dep_names.is_empty() {
-        Vec::new()
-    } else {
-        // このパッケージの依存はトポロジカル順で既にビルド済みなので、ロードするだけでよい。
-        // ただしグラフは自分で引き直す:
-        // 直接依存の .biwameta が、さらにその依存の型を参照している可能性があり、
-        // それを解決するには推移閉包すべての ID とメタデータが要る。
-        let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
-        let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
-            biwac_base::print_error_finish_message(1);
-        })?;
+    let external_packages = load_external_packages(
+        &transitive_deps,
+        &direct_dep_names,
+        dep_graph,
+        packages_dir,
+        &mut interner,
+    )?;
 
-        load_external_packages(&dep_graph, &root_dep_names, &packages_dir, &mut interner)?
-    };
-
-    load_analyze_and_codegen_single_package(
+    let svh = load_analyze_and_codegen_single_package(
         external_packages,
         &mut interner,
         &metadata,
-        dep_root,
-        build_dir_path,
+        &dep_svhs,
+        pkg_root,
+        build_dir_path.clone(),
     )?;
 
-    println!("    -> {}", "Finished!".green().bold(),);
+    // 次回の鮮度判定のために、今回のビルドの状態を記録する。
+    let fingerprint = Fingerprint::of_build(
+        compiler_identity(),
+        &metadata.metadata,
+        svh,
+        &dep_svhs,
+        sources,
+    );
+    let fp_path = biwac_fingerprint::fingerprint_path(&build_dir_path, &pkg_name);
+    std::fs::write(&fp_path, fingerprint.encode_file()).map_err(|e| {
+        eprintln!("Error: failed to write {:?}: {}", fp_path, e);
+        biwac_base::print_error_finish_message(1);
+    })?;
 
-    Ok(())
+    Ok(svh)
 }
 
-/// 依存グラフの推移閉包すべてに PackageId を振り、`.biwameta` をロードする。
+/// 前回のビルドから状況が変わっていないかを判定する。
+///
+/// 判定材料は [`biwac_fingerprint`] に閉じている。
+/// ここは「前回の記録を読み出す」ところだけを持つ。
+fn check_freshness(
+    build_dir_path: &Path,
+    pkg_name: &str,
+    metadata: &biwac_base::PackageMetadata,
+    dep_svhs: &[(PackageId, Hash64)],
+    sources: &[SourceEntry],
+    options: BuildOptions,
+) -> Freshness {
+    if options.force_rebuild {
+        return Freshness::Stale(StaleReason::Forced);
+    }
+
+    // シグニチャのキャッシュ本体が無ければ、記録があっても意味がない。
+    if !metadata_path(build_dir_path, pkg_name).exists() {
+        return Freshness::Stale(StaleReason::NoPreviousBuild);
+    }
+
+    let fp_path = biwac_fingerprint::fingerprint_path(build_dir_path, pkg_name);
+    let Ok(data) = std::fs::read(&fp_path) else {
+        return Freshness::Stale(StaleReason::NoPreviousBuild);
+    };
+    // 形式が変わった / 壊れている場合は、単に「前回の情報は使えない」と扱って建て直す。
+    let Ok(previous) = Fingerprint::decode_file(&data) else {
+        return Freshness::Stale(StaleReason::UnreadableFingerprint);
+    };
+
+    previous.freshness(compiler_identity(), metadata, dep_svhs, sources)
+}
+
+fn metadata_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
+    build_dir_path.join(format!("{pkg_name}.biwameta"))
+}
+
+fn prepare_build_dir(pkg_root: &Path) -> Result<PathBuf, ()> {
+    let build_dir_path = pkg_root.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
+    if build_dir_path.exists() && !build_dir_path.is_dir() {
+        panic!(
+            "Destination directory broken, conflicted file found: `{}`",
+            build_dir_path
+                .as_os_str()
+                .to_str()
+                .expect("broken build directory path")
+        );
+    }
+    std::fs::create_dir_all(&build_dir_path).map_err(|e| {
+        eprintln!("Error: failed to create {:?}: {}", build_dir_path, e);
+        biwac_base::print_error_finish_message(1);
+    })?;
+    Ok(build_dir_path)
+}
+
+/// 依存グラフの推移閉包すべての `.biwameta` をロードする。
 ///
 /// 直接依存だけでは足りない。依存の `.biwameta` に載っているシグニチャが
 /// さらにその依存の型を参照していることがあり
 /// (`greeter::theme() -> color::Rgb`)、
-/// その参照を DefId に復元するには相手の ID とメタデータが要るからである。
+/// その参照を DefId に復元するには相手のメタデータが要るからである。
 /// 名前で引ける (= import できる) のは直接依存だけなので、
 /// [`ExternalPackage::direct`] で区別する。
-///
-/// PackageId はここが単一の割り当て元である。
-/// 名前順に振るので、同じグラフからは常に同じ採番になる。
 fn load_external_packages(
+    transitive_deps: &[String],
+    direct_dep_names: &[String],
     dep_graph: &DepGraph,
-    root_dep_names: &[String],
     packages_dir: &Path,
     interner: &mut IdentInterner,
 ) -> Result<Vec<ExternalPackage>, ()> {
-    let all_names = dep_graph.all_packages();
-
-    let pkg_ids: HashMap<String, biwac_base::PackageId> = all_names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            (
-                name.clone(),
-                biwac_base::PackageId::new(
-                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
-                ),
-            )
-        })
-        .collect();
-
-    let mut packages = Vec::with_capacity(all_names.len());
-    for name in &all_names {
+    let mut packages = Vec::with_capacity(transitive_deps.len());
+    for name in transitive_deps {
+        let Some(pkg_id) = dep_graph.pkg_id(name) else {
+            continue;
+        };
         let dep_root = packages_dir.join(name);
-        let meta = load_dep_metadata(&dep_root, name, &pkg_ids)?;
+        let meta = load_dep_metadata(&dep_root, name)?;
         packages.push(ExternalPackage {
             ident: interner.get_or_insert(name),
-            pkg_id: pkg_ids[name],
+            pkg_id,
             meta: Arc::new(meta),
-            direct: root_dep_names.iter().any(|d| d == name),
+            direct: direct_dep_names.iter().any(|d| d == name),
         });
     }
 
@@ -244,48 +358,49 @@ fn load_external_packages(
 }
 
 /// Loads a .biwameta file from a built dependency's build directory.
-///
-/// `pkg_ids` はファイル内の依存パッケージ表を今回の採番へ束縛するために使う。
-fn load_dep_metadata(
-    dep_root: &Path,
-    dep_name: &str,
-    pkg_ids: &HashMap<String, biwac_base::PackageId>,
-) -> Result<DepMetadata, ()> {
+fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> Result<DepMetadata, ()> {
     let meta_path = dep_root
         .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
         .join(format!("{}.biwameta", dep_name));
     let data = std::fs::read(&meta_path).map_err(|e| {
         eprintln!("Error: failed to read {:?}: {}", meta_path, e);
     })?;
-    DepMetadata::decode_file(&data, pkg_ids).map_err(|e| {
+    DepMetadata::decode_file(&data).map_err(|e| {
         eprintln!("Error: failed to decode {:?}: {}", meta_path, e);
     })
 }
 
-// Persist self package's symbol metadata to disk for dependents.
+/// Persist self package's symbol metadata to disk for dependents.
+/// 生成した `.biwameta` の SVH を返す。
 fn persist_dep_metadata(
     hir: &biwac_hir::Hir,
     lang_items: &biwac_lang_item::LangItemTable,
     srcs: &biwac_base::SourceHolder,
     interner: &biwac_base::IdentInterner,
-    build_dir_path: PathBuf,
+    dep_svhs: &[(PackageId, Hash64)],
+    build_dir_path: &Path,
     metadata: &biwac_base::MetadataHolder,
-) -> Result<(), ()> {
-    let dep_meta = DepMetadata::new(hir, srcs, interner, lang_items);
+) -> Result<Hash64, ()> {
+    let dep_meta = DepMetadata::new(hir, srcs, interner, lang_items, dep_svhs);
+    let svh = dep_meta.svh;
     let meta_bytes = dep_meta.encode_file();
-    let meta_path = build_dir_path.join(format!("{}.biwameta", metadata.metadata.name.value()));
-    std::fs::write(&meta_path, meta_bytes).map_err(|e| {
-        eprintln!("Error: failed to write {:?}: {}", meta_path, e);
-    })
+    let meta_path = metadata_path(build_dir_path, metadata.metadata.name.value());
+    std::fs::write(&meta_path, meta_bytes)
+        .map_err(|e| {
+            eprintln!("Error: failed to write {:?}: {}", meta_path, e);
+        })
+        .map(|_| svh)
 }
 
+/// パイプライン本体。生成した `.biwameta` の SVH を返す。
 fn load_analyze_and_codegen_single_package(
     external_packages: Vec<ExternalPackage>,
     interner: &mut biwac_base::IdentInterner,
     metadata: &biwac_base::MetadataHolder,
+    dep_svhs: &[(PackageId, Hash64)],
     pkg_root_path: PathBuf,
     build_dir_path: PathBuf,
-) -> Result<(), ()> {
+) -> Result<Hash64, ()> {
     // 型推論と codegen は「名前で引けるか」を問わないので、
     // direct かどうかを落として推移閉包すべてを渡す。
     let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
@@ -326,12 +441,13 @@ fn load_analyze_and_codegen_single_package(
 
     // Persist self package's symbol metadata to disk for dependents.
     // lang item テーブルも書き出すので、依存側はこれを読んで復元する。
-    persist_dep_metadata(
+    let svh = persist_dep_metadata(
         &hir,
         &lang_items,
         &srcs,
         interner,
-        build_dir_path.clone(),
+        dep_svhs,
+        &build_dir_path,
         metadata,
     )?;
 
@@ -355,7 +471,7 @@ fn load_analyze_and_codegen_single_package(
 
     write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
 
-    Ok(())
+    Ok(svh)
 }
 
 /// パッケージ内の全モジュールに属性検証パスを走らせる。
@@ -407,8 +523,13 @@ fn print_errors<E: biwac_base::BiwacError>(
 /// 各パッケージは自分の .biwa_build/typescript/<name>.ts に出力するが、
 /// codegen が生成する import は `./<package>.ts` という相対パスなので、
 /// ルートパッケージの出力ディレクトリに推移的依存も含めて並べる必要がある。
+///
+/// 再ビルドしたものだけでなく **依存グラフの全パッケージ** が対象である。
+/// キャッシュが効いた依存の .ts も並んでいなければならないし、
+/// 依存から外れたパッケージの .ts は取り除かなければならない。
 fn collect_dep_bins(
     dep_names: &[String],
+    self_pkg_name: &str,
     packages_dir: &Path,
     build_dir_path: &Path,
 ) -> Result<(), ()> {
@@ -417,9 +538,6 @@ fn collect_dep_bins(
     }
 
     let dst_dir = build_dir_path.join("typescript");
-    if dep_names.is_empty() {
-        return Ok(());
-    }
     std::fs::create_dir_all(&dst_dir).map_err(|e| {
         eprintln!("Error: failed to create {:?}: {}", dst_dir, e);
     })?;
@@ -436,6 +554,27 @@ fn collect_dep_bins(
         std::fs::copy(&src, &dst).map_err(|e| {
             eprintln!("Error: failed to copy {:?} to {:?}: {}", src, dst, e);
         })?;
+    }
+
+    // グラフから消えたパッケージの生成物を掃除する。
+    // 残したままだと、依存を外したのに古いコードが出力に紛れ続ける。
+    let mut keep: HashSet<String> = dep_names.iter().map(|n| format!("{n}.ts")).collect();
+    keep.insert(format!("{self_pkg_name}.ts"));
+
+    let Ok(entries) = std::fs::read_dir(&dst_dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("ts") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !keep.contains(name) {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 
     Ok(())

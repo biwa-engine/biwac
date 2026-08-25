@@ -74,7 +74,7 @@ fn lower_module_types(
             globals::lower_type_def(type_def, tys, aliases, errors);
         }
     }
-    for child in module.children.values() {
+    for (_, child) in module.children_ordered() {
         lower_module_types(child, tys, aliases, errors);
     }
 }
@@ -90,7 +90,7 @@ fn lower_impl_blocks(
             globals::lower_impl_block(tys, impl_block, impl_collector, errors);
         }
     }
-    for child in module.children.values() {
+    for (_, child) in module.children_ordered() {
         lower_impl_blocks(tys, child, impl_collector, errors);
     }
 }
@@ -119,7 +119,7 @@ fn lower_module_vals(
             | biwac_ast::Globals::NativeCode(_) => {}
         }
     }
-    for child in module.children.values() {
+    for (_, child) in module.children_ordered() {
         vals.extend(lower_module_vals(child, errors));
     }
 
@@ -134,7 +134,7 @@ fn lower_native_codes(module: &LoadedModule) -> Vec<biwac_hir::NativeCode> {
             codes.push(globals::lower_native_code(native));
         }
     }
-    for child in module.children.values() {
+    for (_, child) in module.children_ordered() {
         codes.extend(lower_native_codes(child));
     }
 

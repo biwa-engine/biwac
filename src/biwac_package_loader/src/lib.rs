@@ -30,9 +30,21 @@ impl LoadedModule {
     /// 自身と全子孫モジュールを深さ優先で走査する。
     pub fn walk(&self, f: &mut impl FnMut(&LoadedModule)) {
         f(self);
-        for child in self.children.values() {
+        for (_, child) in self.children_ordered() {
             child.walk(f);
         }
+    }
+
+    /// 子モジュールを決定論的な順序 ([`ModId`] 昇順 = ファイル名順) で返す。
+    ///
+    /// `children` は名前引きのために HashMap なので、走査順は実行ごとに変わる。
+    /// DefId の採番や、順序が成果物に残る処理はこちらを使う。
+    /// 採番がぶれると .biwameta がバイト単位で変わり、
+    /// SVH による鮮度判定が毎回「変更あり」になってしまう。
+    pub fn children_ordered(&self) -> Vec<(&InternedIdent, &LoadedModule)> {
+        let mut children: Vec<(&InternedIdent, &LoadedModule)> = self.children.iter().collect();
+        children.sort_by_key(|(_, m)| m.mod_id);
+        children
     }
 }
 
@@ -161,7 +173,7 @@ impl Pkg {
 
 fn read_module_files(srcs: &mut SourceHolder, module_tree: &ModuleTree) {
     // read children module files
-    for module_tree in module_tree.children.values() {
+    for (_, module_tree) in &module_tree.children {
         read_module_files(srcs, module_tree);
     }
 
@@ -240,7 +252,13 @@ struct ModuleTree {
     mod_id: ModId,
     mod_path: ModPath,
     path: Box<PathBuf>,
-    children: HashMap<InternedIdent, ModuleTree>,
+    /// 子モジュール。ファイル名順に並べる。
+    ///
+    /// HashMap ではなく Vec なのは、この順序が
+    /// ModId の採番順・識別子の intern 順・ひいては DefId の採番順を決めるからである。
+    /// 採番がビルドごとに変わると .biwameta がバイト単位で変わり、
+    /// 差分ビルドの鮮度判定 (SVH) が毎回「変更あり」になってしまう。
+    children: Vec<(InternedIdent, ModuleTree)>,
 }
 
 struct ModuleTreeCtx {
@@ -266,7 +284,7 @@ fn map_module_tree_children_from_dir<'a>(
     dir: &Path,
     modpath: ModPath,
     interner: &mut IdentInterner,
-) -> Result<HashMap<InternedIdent, ModuleTree>, PkgLoadError<'a>> {
+) -> Result<Vec<(InternedIdent, ModuleTree)>, PkgLoadError<'a>> {
     let mut work_dir_files: HashMap<String, (ModPath, Box<PathBuf>)> = HashMap::new();
     let mut work_dir_sub_dirs: HashMap<String, Box<PathBuf>> = HashMap::new();
 
@@ -308,7 +326,15 @@ fn map_module_tree_children_from_dir<'a>(
 
     // モジュールと同名のディレクトリがあればサブモジュールとして再帰的にロードする
     // 各種OSのファイルシステムがファイルパスの重複を許さないことを保証する限り、
-    // ここで、modulesの重複を考える必要はなく、HashMap::insert()やextend()を使って良い
+    // ここで、modulesの重複を考える必要はない
+    //
+    // ファイル名でソートしてから処理する。
+    // read_dir の順序も HashMap の走査順も実行ごとに変わるので、
+    // そのままだと ModId・intern id・DefId の採番が毎回変わってしまう。
+    let mut work_dir_files: Vec<(String, (ModPath, Box<PathBuf>))> =
+        work_dir_files.into_iter().collect();
+    work_dir_files.sort_by(|a, b| a.0.cmp(&b.0));
+
     work_dir_files
         .into_iter()
         .map(|(file_name, (mod_path, path))| {
@@ -322,7 +348,7 @@ fn map_module_tree_children_from_dir<'a>(
                     interner,
                 )?
             } else {
-                HashMap::new()
+                Vec::new()
             };
 
             Ok((

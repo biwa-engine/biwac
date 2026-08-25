@@ -11,11 +11,11 @@ use std::sync::OnceLock;
 use crate::error::DepMetadataError;
 use body::SymbolBody;
 use codec::{DiskDecode, DiskEncode};
+pub use format::BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION;
 use format::{
-    BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION, BIWAC_DEPENDENCY_METADATA_MAGIC, DiskBodyOffset,
-    DiskExternalSymbol, DiskFileIndex, DiskPackageDep, DiskPackageIndex, DiskSourceInfo, DiskSpan,
-    DiskSymbolHeader, DiskSymbolIndex, DiskSymbolKind, DiskTy, DiskTyHeader, DiskTyKind,
-    DiskVisibility,
+    BIWAC_DEPENDENCY_METADATA_MAGIC, DiskBodyOffset, DiskDepSvh, DiskExternalSymbol, DiskFileIndex,
+    DiskSourceInfo, DiskSpan, DiskSymbolHeader, DiskSymbolIndex, DiskSymbolKind, DiskTy,
+    DiskTyHeader, DiskTyKind, DiskVisibility,
 };
 use lang_item::DiskLangItem;
 use table::{LazyDiskVec, SourceFileTable, StringTable};
@@ -34,26 +34,32 @@ pub struct DepMetadata {
     /// このパッケージが定義した lang item。
     /// 依存側はこれを使って lang item テーブルを復元する。
     pub lang_items: Vec<DiskLangItem>,
-    /// このファイルが外部シンボルを参照している依存パッケージの一覧。
-    /// 索引がファイルローカルな「パッケージ id」 ([`DiskPackageIndex`]) になる。
-    pub dep_packages: Vec<DiskPackageDep>,
+    /// このパッケージのインタフェースのハッシュ (Strict Version Hash)。
+    ///
+    /// 差分ビルドの中核。これが前回と一致していれば、
+    /// このパッケージに依存しているパッケージは再ビルドしなくてよい。
+    /// span やコメントは含まないので、実装だけの変更は伝播しない。
+    /// 詳細は [`DepMetadata::compute_svh`]。
+    pub svh: biwac_hash::Hash64,
+    /// ビルド時の依存グラフ (推移閉包) の各パッケージの SVH。
+    /// 鮮度判定と整合性検査に使う。
+    pub dep_svhs: Vec<DiskDepSvh>,
     /// 依存パッケージのシンボルへの参照の一覧。
     /// [`DiskTyKind::ExternalDefined`] の sym_id がここを指す。
     pub ext_syms: Vec<DiskExternalSymbol>,
-    /// `dep_packages` の索引 → 今回のビルドで割り当てられた [`biwac_base::PackageId`]。
-    ///
-    /// ファイルには名前しか書かれていないので、ロード時にここへ束縛する
-    /// ([`DepMetadata::decode_file`] を参照)。
-    /// これがあることで、外部シンボルへの参照を `DefId` に復元できる。
-    resolved_pkg_ids: Vec<biwac_base::PackageId>,
 }
 
 impl DepMetadata {
+    /// HIR から `.biwameta` を組み立てる。
+    ///
+    /// `dep_svhs` はビルド時の依存グラフ (推移閉包) の各パッケージの SVH。
+    /// 差分ビルドの鮮度判定に使うため、そのままファイルに記録する。
     pub fn new(
         hir: &biwac_hir::Hir,
         source_holder: &biwac_base::SourceHolder,
         interner: &biwac_base::IdentInterner,
         lang_item_table: &biwac_lang_item::LangItemTable,
+        dep_svhs: &[(biwac_base::PackageId, biwac_hash::Hash64)],
     ) -> Self {
         use biwac_base::ModPath;
         use biwac_hir::{AssocValDefKind, TyDefKind, ValDefKind};
@@ -318,18 +324,7 @@ impl DepMetadata {
 
         // シグニチャやメンバ型に依存パッケージの型が現れたら、
         // ここに登録して ExternalDefined として書き出す。
-        // 名前は hir.packages から引く (依存グラフの推移閉包が入っている)。
-        let mut ext_syms = ExtSymBuilder::new(
-            hir.packages
-                .iter()
-                .map(|(pkg_id, ident)| {
-                    (
-                        *pkg_id,
-                        interner.get_str(ident).unwrap_or_default().to_string(),
-                    )
-                })
-                .collect(),
-        );
+        let mut ext_syms = ExtSymBuilder::new();
 
         let mut body_builder = BodyBuilder::new();
         let mut sym_hdrs: Vec<DiskSymbolHeader> = Vec::with_capacity(total_syms);
@@ -392,13 +387,25 @@ impl DepMetadata {
                     .collect(),
             );
 
-            // members (HashMap なのでソートして順序を安定させる)
-            let mut members_vec: Vec<DiskStructMember> = item
+            // members
+            //
+            // HIR 側は HashMap なので、**名前でソートしてから** 変換する。
+            // 文字列テーブルへの push もこの順に起きるため、
+            // .biwameta がビルドごとにバイト一致するようになる。
+            // (以前は変換してから DiskStringOffset でソートしていたが、
+            //  そのオフセット自体が HashMap の走査順で決まるので効いていなかった。
+            //  差分ビルドはメタデータのハッシュを土台にするので、ここは崩せない)
+            let mut members_sorted: Vec<(&str, &biwac_hir::Ty)> = item
                 .def
                 .members
                 .iter()
-                .map(|(ident, ty)| {
-                    let mem_name = interner.get_str(ident).unwrap_or("");
+                .map(|(ident, ty)| (interner.get_str(ident).unwrap_or(""), ty))
+                .collect();
+            members_sorted.sort_by_key(|(name, _)| *name);
+
+            let members_vec: Vec<DiskStructMember> = members_sorted
+                .into_iter()
+                .map(|(mem_name, ty)| {
                     let mem_name_off = strings.push(mem_name);
                     // メンバ名 span は HIR に存在しないので型の span で代替
                     let mem_name_span = impl_to_disk_span(&ty.span, &mod_to_file_idx);
@@ -417,7 +424,6 @@ impl DepMetadata {
                     }
                 })
                 .collect();
-            members_vec.sort_by_key(|m| m.name.0);
 
             // assoc symbols
             let assoc_syms: Vec<DiskSymbolIndex> = assoc_fn_items
@@ -594,38 +600,41 @@ impl DepMetadata {
         // 決定論的な順序にする
         lang_items.sort_by_key(|li| li.lang_item);
 
-        // 外部シンボル表を確定させる。
-        // 依存パッケージ名を文字列テーブルに載せるので、strings の最後の変更になる。
-        let (dep_packages, ext_sym_entries, resolved_pkg_ids) = ext_syms.finish(&mut strings);
+        // 依存の SVH は id 順に並べる (集合として比較するので順序を正準化しておく)。
+        let mut dep_svh_entries: Vec<DiskDepSvh> = dep_svhs
+            .iter()
+            .map(|(pkg_id, svh)| DiskDepSvh {
+                pkg: pkg_id.value(),
+                svh: svh.as_u64(),
+            })
+            .collect();
+        dep_svh_entries.sort_by_key(|d| d.pkg);
 
-        Self {
+        let mut me = Self {
             sym_hdrs,
             sym_bodies,
             source_files,
             strings,
             root_sym_idx,
             lang_items,
-            dep_packages,
-            ext_syms: ext_sym_entries,
-            resolved_pkg_ids,
-        }
+            svh: biwac_hash::Hash64::ZERO,
+            dep_svhs: dep_svh_entries,
+            ext_syms: ext_syms.finish(),
+        };
+        // SVH は組み上がったシンボル表から計算する。
+        // デコード側でも同じ関数で再計算できるので、必要なら検証もできる。
+        me.svh = me.compute_svh();
+        me
     }
 
     // --- Decode ---
 
     /// `.biwameta` を読む。
     ///
-    /// `pkg_ids` は今回のビルドで採番した「パッケージ名 → [`biwac_base::PackageId`]」表。
-    /// ファイル内の依存パッケージ表は名前しか持たないので、
-    /// ここで今回の採番へ束縛する。
-    /// これがないと外部シンボルへの参照を `DefId` に復元できない。
-    ///
-    /// driver は依存グラフの推移閉包すべてに id を振ってから呼ぶ必要がある。
-    /// 表に無い名前が現れたら [`DepMetadataError::UnknownDependencyPackage`]。
-    pub fn decode_file(
-        data: &[u8],
-        pkg_ids: &HashMap<String, biwac_base::PackageId>,
-    ) -> Result<Self, DepMetadataError> {
+    /// 外部シンボル参照は `PackageId` の生値を持っており、
+    /// その id は (name, version) から導出される安定ハッシュなので、
+    /// ロード時に何かへ束縛し直す必要はない。
+    pub fn decode_file(data: &[u8]) -> Result<Self, DepMetadataError> {
         let mut pos = 0;
 
         // ヘッダ (magic + version)
@@ -706,14 +715,18 @@ impl DepMetadata {
             lang_items.push(li);
         }
 
-        // dep_pkg_table: [count: u32][DiskPackageDep; count]
-        let (dep_pkg_count, n) = u32::decode(&data[pos..])?;
+        // svh
+        let (svh, n) = u64::decode(&data[pos..])?;
         pos += n;
-        let mut dep_packages = Vec::with_capacity(dep_pkg_count as usize);
-        for _ in 0..dep_pkg_count {
-            let (dep, n) = DiskPackageDep::decode(&data[pos..])?;
+
+        // dep_svh_table: [count: u32][DiskDepSvh; count]
+        let (dep_svh_count, n) = u32::decode(&data[pos..])?;
+        pos += n;
+        let mut dep_svhs = Vec::with_capacity(dep_svh_count as usize);
+        for _ in 0..dep_svh_count {
+            let (dep, n) = DiskDepSvh::decode(&data[pos..])?;
             pos += n;
-            dep_packages.push(dep);
+            dep_svhs.push(dep);
         }
 
         // ext_sym_table: [count: u32][DiskExternalSymbol; count]
@@ -726,17 +739,6 @@ impl DepMetadata {
             ext_syms.push(e);
         }
 
-        // ファイルローカルなパッケージ索引を今回の採番へ束縛する。
-        let mut resolved_pkg_ids = Vec::with_capacity(dep_packages.len());
-        for dep in &dep_packages {
-            let name = strings.get(dep.name)?;
-            let pkg_id = pkg_ids
-                .get(name)
-                .copied()
-                .ok_or_else(|| DepMetadataError::UnknownDependencyPackage(name.to_string()))?;
-            resolved_pkg_ids.push(pkg_id);
-        }
-
         Ok(Self {
             sym_hdrs,
             sym_bodies,
@@ -744,9 +746,9 @@ impl DepMetadata {
             strings,
             root_sym_idx,
             lang_items,
-            dep_packages,
+            svh: biwac_hash::Hash64::from_u64(svh),
+            dep_svhs,
             ext_syms,
-            resolved_pkg_ids,
         })
     }
 
@@ -796,9 +798,12 @@ impl DepMetadata {
             li.encode(&mut buf);
         }
 
-        // dep_pkg_table
-        (self.dep_packages.len() as u32).encode(&mut buf);
-        for dep in &self.dep_packages {
+        // svh
+        self.svh.as_u64().encode(&mut buf);
+
+        // dep_svh_table
+        (self.dep_svhs.len() as u32).encode(&mut buf);
+        for dep in &self.dep_svhs {
             dep.encode(&mut buf);
         }
 
@@ -812,12 +817,194 @@ impl DepMetadata {
     }
 
     /// 外部シンボル表のエントリ 1 件を `(PackageId, シンボルインデックス)` に解決する。
-    ///
-    /// 依存パッケージ表の束縛は decode 時に済んでいるので、ここでは索引を引くだけ。
     fn resolve_ext_sym(&self, ext_sym_idx: u32) -> Option<(biwac_base::PackageId, u32)> {
         let entry = self.ext_syms.get(ext_sym_idx as usize)?;
-        let pkg_id = self.resolved_pkg_ids.get(entry.pkg.0 as usize)?;
-        Some((*pkg_id, entry.sym.0))
+        Some((biwac_base::PackageId::new(entry.pkg), entry.sym.0))
+    }
+
+    /// ビルド時に見た依存パッケージの `(PackageId, Svh)` を列挙する。
+    pub fn dep_svhs(
+        &self,
+    ) -> impl Iterator<Item = (biwac_base::PackageId, biwac_hash::Hash64)> + '_ {
+        self.dep_svhs.iter().map(|d| {
+            (
+                biwac_base::PackageId::new(d.pkg),
+                biwac_hash::Hash64::from_u64(d.svh),
+            )
+        })
+    }
+
+    // ============================================================
+    // SVH (Strict Version Hash)
+    // ============================================================
+
+    /// このパッケージの **インタフェース** のハッシュを計算する。
+    ///
+    /// 差分ビルドの中核。あるパッケージの SVH が前回と一致していれば、
+    /// そのパッケージに依存しているパッケージを再ビルドする必要はない。
+    /// rustc の `Svh` (`rustc_data_structures/src/svh.rs`) に相当する。
+    ///
+    /// **含めるもの**: シンボルの並びと種別・名前・所属モジュール・シグニチャ・
+    /// メンバ・native 本体・lang item、そして **シンボルインデックス**。
+    ///
+    /// インデックスを含めるのが要点である。
+    /// 外部パッケージからの参照は `(PackageId, シンボルインデックス)` の形で行われるので、
+    /// 採番がずれたら参照側は作り直さなければならない。
+    /// 逆に、採番も名前もシグニチャも同一なら、参照側は一切影響を受けない。
+    ///
+    /// **含めないもの**:
+    /// - span のバイトオフセットと `def_raw_code`
+    ///   (コメントや空行を足しただけで依存先に再ビルドが波及しないように)
+    /// - 文字列テーブルのオフセット (文字列そのものを混ぜる)
+    /// - 依存の SVH 表
+    ///   (含めると伝播が打ち切れなくなる。std を再ビルドしても、
+    ///    このパッケージが参照している std のシンボルが動いていなければ
+    ///    ここは不変であってほしい)
+    ///
+    /// 所属モジュールのファイル名は含める。マングル名の一部になるからである
+    /// ([`Self::symbol_mangling_info`] を参照)。
+    pub fn compute_svh(&self) -> biwac_hash::Hash64 {
+        use biwac_hash::StableHasher64;
+
+        let mut h = StableHasher64::new();
+        h.write_str("biwameta-svh");
+        h.write_u32(BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION);
+        h.write_u32(self.root_sym_idx);
+
+        h.write_usize(self.sym_hdrs.len());
+        for sym_idx in 0..self.sym_hdrs.len() {
+            h.write_usize(sym_idx);
+
+            let Ok(body) = self.get_symbol_body(sym_idx) else {
+                // ヘッダはあるのにボディが壊れている。
+                // 「読めなかった」という事実自体を混ぜて、正常なものと区別する。
+                h.write_str("<undecodable>");
+                continue;
+            };
+
+            match body {
+                SymbolBody::Mod(d) => {
+                    h.write_str("mod");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    h.write_usize(d.children.0.len());
+                    for c in &d.children.0 {
+                        h.write_u32(c.0);
+                    }
+                }
+                SymbolBody::Struct(d) => {
+                    h.write_str("struct");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    self.svh_genargs(&mut h, &d.genargs.0);
+
+                    // メンバは名前順に正準化する。
+                    // .biwameta 側も名前順に書いているので実際には既に整列しているが、
+                    // SVH は表現ではなく意味のハッシュなので、ここでも保証しておく。
+                    let mut members: Vec<(&str, &DiskTy)> = d
+                        .members
+                        .0
+                        .iter()
+                        .map(|m| (self.get_str(m.name).unwrap_or(""), &m.ty))
+                        .collect();
+                    members.sort_by_key(|(name, _)| *name);
+                    h.write_usize(members.len());
+                    for (name, ty) in members {
+                        h.write_str(name);
+                        self.svh_ty(&mut h, ty);
+                    }
+
+                    h.write_usize(d.assoc_symbols.0.len());
+                    for a in &d.assoc_symbols.0 {
+                        h.write_u32(a.0);
+                    }
+                }
+                SymbolBody::NativeTypeAlias(d) => {
+                    h.write_str("native-type-alias");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    // native 本体はターゲット言語にそのまま出るのでインタフェースである。
+                    h.write_str(self.get_str(d.native).unwrap_or(""));
+                    self.svh_genargs(&mut h, &d.genargs.0);
+                    h.write_usize(d.assoc_symbols.0.len());
+                    for a in &d.assoc_symbols.0 {
+                        h.write_u32(a.0);
+                    }
+                }
+                SymbolBody::Fn(d) => {
+                    h.write_str("fn");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    self.svh_genargs(&mut h, &d.genargs.0);
+                    h.write_usize(d.args.0.len());
+                    for a in &d.args.0 {
+                        h.write_str(self.get_str(a.name).unwrap_or(""));
+                        self.svh_ty(&mut h, &a.ty);
+                    }
+                    self.svh_ty(&mut h, &d.rty);
+                    h.write_usize(d.impl_self_ty.0.len());
+                    for t in &d.impl_self_ty.0 {
+                        self.svh_ty(&mut h, t);
+                    }
+                }
+            }
+        }
+
+        // lang item は依存側のコンパイラが直接引くのでインタフェースである。
+        // DepMetadata::new が discriminant 順にソート済み。
+        h.write_str("lang-items");
+        h.write_usize(self.lang_items.len());
+        for li in &self.lang_items {
+            h.write_u32(li.lang_item);
+            h.write_u32(li.sym_idx.0);
+        }
+
+        h.finish()
+    }
+
+    /// シンボル名と、それが属するモジュールのファイル名を混ぜる。
+    ///
+    /// span のバイトオフセットは混ぜない。
+    /// モジュールのファイル名だけはマングル名に出るので必要になる。
+    fn svh_name(
+        &self,
+        h: &mut biwac_hash::StableHasher64,
+        name: format::DiskStringOffset,
+        span: &DiskSpan,
+    ) {
+        h.write_str(self.get_str(name).unwrap_or(""));
+        let modu = self
+            .source_files
+            .get(span.file.0)
+            .ok()
+            .and_then(|f| self.get_str(f.file_path).ok())
+            .unwrap_or("");
+        h.write_str(modu);
+    }
+
+    fn svh_genargs(&self, h: &mut biwac_hash::StableHasher64, genargs: &[format::DiskGenArg]) {
+        h.write_usize(genargs.len());
+        for g in genargs {
+            h.write_str(self.get_str(g.name).unwrap_or(""));
+        }
+    }
+
+    fn svh_ty(&self, h: &mut biwac_hash::StableHasher64, ty: &DiskTy) {
+        h.write_u32(ty.hdr.kind);
+        match DiskTyKind::try_from(ty.hdr.kind) {
+            // ExternalDefined の sym_id は ext_sym_table の索引なので、
+            // 表の詰め順に左右されないよう解決してから混ぜる。
+            Ok(DiskTyKind::ExternalDefined) => match self.resolve_ext_sym(ty.hdr.sym_id.0) {
+                Some((pkg_id, sym_idx)) => {
+                    h.write_u32(pkg_id.value());
+                    h.write_u32(sym_idx);
+                }
+                None => h.write_str("<unresolved-external>"),
+            },
+            // Defined は自ファイルの索引、Gen/LocGen は序数、Fn は引数の数。
+            // どれもそのまま混ぜてよい。
+            _ => h.write_u32(ty.hdr.sym_id.0),
+        }
+        h.write_usize(ty.genargs.len());
+        for g in &ty.genargs {
+            self.svh_ty(h, g);
+        }
     }
 
     pub fn get_symbol_body(&self, sym_idx: usize) -> Result<&SymbolBody, DepMetadataError> {
@@ -1331,32 +1518,23 @@ fn ext_loc_gen_id(fn_sym_idx: u32, ordinal: u32) -> u32 {
     (fn_sym_idx << 10) | ordinal
 }
 
-/// 外部シンボル表 (dep_pkg_table + ext_sym_table) の組み立て。
+/// 外部シンボル表 (ext_sym_table) の組み立て。
 ///
 /// エンコード中に依存パッケージのシンボルが現れるたびに [`Self::intern`] を呼び、
 /// 返ってきた索引を `DiskTyKind::ExternalDefined` の sym_id に入れる。
+/// 同じシンボルへの複数の参照は 1 エントリを共有する。
 ///
-/// パッケージも個々のシンボル参照も登場順に採番し、重複は共有する。
-/// 呼び出し側 (`DepMetadata::new`) が決定論的な順序で走査しているので、
-/// 同じ入力からは同じ表ができる。
+/// `PackageId` は (name, version) から導出される安定 id なので、
+/// ファイルローカルな番号に置き換えて名前で解決し直す必要がない。
 struct ExtSymBuilder {
-    /// PackageId → パッケージ名。`hir.packages` から作る。
-    names: HashMap<biwac_base::PackageId, String>,
-    /// PackageId → dep_pkg_table 索引
-    pkg_index: HashMap<biwac_base::PackageId, u32>,
-    /// dep_pkg_table 索引順のパッケージ (名前, PackageId)
-    deps: Vec<(String, biwac_base::PackageId)>,
-    /// (dep 索引, 相手のシンボルインデックス) → ext_sym_table 索引
+    /// (PackageId の生値, 相手のシンボルインデックス) → ext_sym_table 索引
     entry_index: HashMap<(u32, u32), u32>,
     entries: Vec<DiskExternalSymbol>,
 }
 
 impl ExtSymBuilder {
-    fn new(names: HashMap<biwac_base::PackageId, String>) -> Self {
+    fn new() -> Self {
         Self {
-            names,
-            pkg_index: HashMap::new(),
-            deps: Vec::new(),
             entry_index: HashMap::new(),
             entries: Vec::new(),
         }
@@ -1364,61 +1542,21 @@ impl ExtSymBuilder {
 
     /// 外部シンボルを登録し、ext_sym_table のインデックスを返す。
     fn intern(&mut self, pkg_id: biwac_base::PackageId, sym_idx: u32) -> u32 {
-        let dep_idx = match self.pkg_index.get(&pkg_id) {
-            Some(i) => *i,
-            None => {
-                // 名前が引けないのはコンパイラバグ
-                // (hir.packages は依存グラフ全体を持っているはず)。
-                // 黙って別のパッケージを指すよりは、
-                // 読み込み側で UnknownDependencyPackage として落ちるほうがよい。
-                debug_assert!(
-                    self.names.contains_key(&pkg_id),
-                    "compiler bug: package id {} has no name in hir.packages",
-                    pkg_id.value()
-                );
-                let name = self
-                    .names
-                    .get(&pkg_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("<unknown package {}>", pkg_id.value()));
-                let i = self.deps.len() as u32;
-                self.deps.push((name, pkg_id));
-                self.pkg_index.insert(pkg_id, i);
-                i
-            }
-        };
-
-        let key = (dep_idx, sym_idx);
+        let key = (pkg_id.value(), sym_idx);
         if let Some(i) = self.entry_index.get(&key) {
             return *i;
         }
         let i = self.entries.len() as u32;
         self.entries.push(DiskExternalSymbol {
-            pkg: DiskPackageIndex(dep_idx),
+            pkg: pkg_id.value(),
             sym: DiskSymbolIndex(sym_idx),
         });
         self.entry_index.insert(key, i);
         i
     }
 
-    /// 依存パッケージ名を文字列テーブルに載せ、2 つの表と束縛済み PackageId を返す。
-    fn finish(
-        self,
-        strings: &mut StringTable,
-    ) -> (
-        Vec<DiskPackageDep>,
-        Vec<DiskExternalSymbol>,
-        Vec<biwac_base::PackageId>,
-    ) {
-        let mut dep_packages = Vec::with_capacity(self.deps.len());
-        let mut resolved = Vec::with_capacity(self.deps.len());
-        for (name, pkg_id) in &self.deps {
-            dep_packages.push(DiskPackageDep {
-                name: strings.push(name),
-            });
-            resolved.push(*pkg_id);
-        }
-        (dep_packages, self.entries, resolved)
+    fn finish(self) -> Vec<DiskExternalSymbol> {
+        self.entries
     }
 }
 

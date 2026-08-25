@@ -14,6 +14,7 @@ members = [
   "src/biwac_lang_item",
   "src/biwac_scene",
   "src/biwac_dependency_metadata",
+  "src/biwac_fingerprint",
   "src/biwac_name_resolver",
   "src/biwac_type_inferrer",
   "src/biwac_generator",

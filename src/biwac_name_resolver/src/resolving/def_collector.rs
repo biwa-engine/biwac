@@ -189,7 +189,9 @@ impl DefCollector {
             }
         }
 
-        for (interned_mod_name, module) in &module.children {
+        // 子モジュールも決定論的な順序で処理する。
+        // ここで DefId を採番するので、順序がぶれると .biwameta がビルドごとに変わる。
+        for (interned_mod_name, module) in module.children_ordered() {
             match children.entry(*interned_mod_name) {
                 Entry::Vacant(e) => match self.collect_in_module(module) {
                     Ok(module_tree) => {
@@ -358,7 +360,7 @@ impl DefCollector {
             }
         }
 
-        for (child_name, child_module) in &module.children {
+        for (child_name, child_module) in module.children_ordered() {
             let child_tree = match module_tree.children.get(child_name) {
                 Some(ModuleNameTreeItem::Mod(m)) => m,
                 _ => continue,
@@ -602,7 +604,7 @@ impl DefCollector {
             }
         }
 
-        for (child_name, child_module) in &module.children {
+        for (child_name, child_module) in module.children_ordered() {
             let child_tree = match module_tree.children.get(child_name) {
                 Some(ModuleNameTreeItem::Mod(m)) => m,
                 _ => continue,

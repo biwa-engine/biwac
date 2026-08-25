@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -10,16 +9,12 @@ use biwac_dependency_metadata::ExternalPackage;
 use crate::NameResolver;
 
 /// Loads a .biwameta file from a built dependency's build directory.
-fn load_dep_metadata(
-    dep_root: &Path,
-    dep_name: &str,
-    pkg_ids: &HashMap<String, biwac_base::PackageId>,
-) -> biwac_dependency_metadata::DepMetadata {
+fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> biwac_dependency_metadata::DepMetadata {
     let meta_path = dep_root
         .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
         .join(format!("{}.biwameta", dep_name));
     let data = std::fs::read(&meta_path).unwrap();
-    biwac_dependency_metadata::DepMetadata::decode_file(&data, pkg_ids).unwrap()
+    biwac_dependency_metadata::DepMetadata::decode_file(&data).unwrap()
 }
 
 #[test]
@@ -55,27 +50,21 @@ fn test1() {
 
     // std は依存を持たないので、ここは常に空になる。
     // driver と違って推移閉包は辿らず、直接依存だけを見る簡易版である。
-    let pkg_ids: HashMap<String, biwac_base::PackageId> = root_dep_names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            (
-                name.clone(),
-                biwac_base::PackageId::new(
-                    i as u32 + biwac_base::PackageId::UNRESERVED_PACKAGE_MIN,
-                ),
-            )
-        })
-        .collect();
-
     let external_packages: Vec<ExternalPackage> = root_dep_names
         .iter()
         .map(|dep_name| {
             let dep_root = packages_dir.join(dep_name);
-            let dep_meta = load_dep_metadata(&dep_root, dep_name, &pkg_ids);
+            let dep_metadata =
+                biwac_metadata_loader::try_load_package_metadata(dep_root.clone()).unwrap();
+            let dep_meta = load_dep_metadata(&dep_root, dep_name);
             ExternalPackage {
                 ident: interner.get_or_insert(dep_name),
-                pkg_id: pkg_ids[dep_name],
+                // PackageId は (name, version) から導出される。driver と同じ規則。
+                pkg_id: biwac_span::PackageHashId::new(
+                    &dep_metadata.metadata.name,
+                    &dep_metadata.metadata.version,
+                )
+                .as_package_id(),
                 meta: Arc::new(dep_meta),
                 direct: true,
             }

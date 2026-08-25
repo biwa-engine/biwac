@@ -33,6 +33,26 @@ impl DiskEncode for u32 {
     }
 }
 
+// --- u64 (little endian) ---
+
+impl DiskDecode for u64 {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        if bytes.len() < 8 {
+            return Err(DepMetadataError::UnexpectedEnd {
+                needed: 8,
+                available: bytes.len(),
+            });
+        }
+        Ok((u64::from_le_bytes(bytes[..8].try_into().unwrap()), 8))
+    }
+}
+
+impl DiskEncode for u64 {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_le_bytes());
+    }
+}
+
 // --- DiskVec<T>: [len: u32][T; len] ---
 //
 // 固定長・可変長どちらの T にも使える。

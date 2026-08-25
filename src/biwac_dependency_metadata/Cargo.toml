@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 biwac_base = { path = "../biwac_base"}
+biwac_hash = { path = "../biwac_hash"}
 biwac_hir = { path = "../biwac_hir"}
 biwac_lang_item = { path = "../biwac_lang_item"}
 biwac_span = { path = "../biwac_span"}

@@ -10,13 +10,14 @@
 ///   [string_table_total_bytes: u32][string_data: string_table_total_bytes B]
 ///     └─ 各文字列: null 終端 UTF-8
 ///   [lang_item_count: u32][DiskLangItem; lang_item_count]
-///   [dep_pkg_count: u32][DiskPackageDep; dep_pkg_count]
+///   [svh: u64]
+///   [dep_svh_count: u32][DiskDepSvh; dep_svh_count]
 ///   [ext_sym_count: u32][DiskExternalSymbol; ext_sym_count]
 use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 4;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 5;
 
 // --- インデックス / オフセット型 ---
 
@@ -36,20 +37,10 @@ pub struct DiskFileIndex(pub u32);
 #[derive(Debug, Clone, Copy)]
 pub struct DiskSymbolIndex(pub u32);
 
-/// dep_pkg_table 内のインデックス。
-///
-/// ファイルローカルな「パッケージ id」である。
-/// セッションをまたいで安定な id ではないので、
-/// 実体の [`biwac_base::PackageId`] への束縛はロード時に名前で行う
-/// (`DepMetadata::decode_file` を参照)。
-#[derive(Debug, Clone, Copy)]
-pub struct DiskPackageIndex(pub u32);
-
 impl_u32_newtype_codec!(DiskBodyOffset);
 impl_u32_newtype_codec!(DiskStringOffset);
 impl_u32_newtype_codec!(DiskFileIndex);
 impl_u32_newtype_codec!(DiskSymbolIndex);
-impl_u32_newtype_codec!(DiskPackageIndex);
 
 // --- DiskSymbolKind ---
 
@@ -206,7 +197,7 @@ pub enum DiskTyKind {
     ///
     /// `Defined` の `sym_id` が「このファイル内の」シンボルインデックスなのに対し、
     /// こちらの `sym_id` は **ext_sym_table のインデックス** である。
-    /// そこから `(DiskPackageIndex, DiskSymbolIndex)` を引く。
+    /// そこから `(PackageId, DiskSymbolIndex)` を引く。
     ///
     /// `DiskTyHeader` は `sym_id` を u32 1 個しか持てず、
     /// `(パッケージ, シンボル)` の組を直接埋め込むと固定長 20B が崩れるため、
@@ -659,36 +650,51 @@ impl DiskEncode for DiskModData {
     }
 }
 
-// --- DiskPackageDep (固定長 4B): 依存パッケージ表のエントリ ---
+// --- DiskDepSvh (固定長 12B): 依存パッケージの SVH ---
 //
-// このファイルが外部シンボルを参照している依存パッケージ 1 件。
-// 索引 (DiskPackageIndex) がファイルローカルな「パッケージ id」になる。
+// このパッケージをビルドしたとき、依存グラフの推移閉包に居た各パッケージの
+// `(PackageId, Svh)` を記録する。
 //
-// ここに `PackageId` の生値を焼かないのは、
-// PackageId がビルドごとの連番であり、
-// .biwameta はビルド間でキャッシュされ、
-// 別のルートパッケージからも読まれるためである。
-// 名前で持っておき、ロード時に今回の採番へ束縛する。
+// 名前ではなく id で持てるのは、PackageId が (name, version) から導出される
+// 安定ハッシュだからである (biwac_span::PackageHashId を参照)。
+// 誰がいつビルドしても同じ id になるので、
+// 「このファイルの中でだけ通じるパッケージ番号」を名前で解決し直す必要がない。
+//
+// 用途は 2 つ:
+//   - ロード時の整合性検査 (rustc の CrateDep::hash に相当)
+//   - 差分ビルドの鮮度判定。前回ビルド時の依存の SVH と今回のそれを突き合わせる
+//
+// 推移閉包すべてを載せるのは、パッケージのビルドが直接依存だけでなく
+// 推移閉包すべてのメタデータを読むからである
+// (推移的な依存が定義した lang item も取り込む)。
 
-#[derive(Debug, Clone, Copy)]
-pub struct DiskPackageDep {
-    pub name: DiskStringOffset,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskDepSvh {
+    /// 依存パッケージの [`biwac_base::PackageId`] の生値
+    pub pkg: u32,
+    /// そのパッケージのインタフェースのハッシュ
+    pub svh: u64,
 }
 
-impl DiskPackageDep {
-    pub const BYTE_SIZE: usize = 4;
+impl DiskDepSvh {
+    pub const BYTE_SIZE: usize = 12;
 }
 
-impl DiskDecode for DiskPackageDep {
+impl DiskDecode for DiskDepSvh {
     fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
-        let (name, n) = DiskStringOffset::decode(bytes)?;
-        Ok((Self { name }, n))
+        let mut pos = 0;
+        let (pkg, n) = u32::decode(&bytes[pos..])?;
+        pos += n;
+        let (svh, n) = u64::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((Self { pkg, svh }, pos))
     }
 }
 
-impl DiskEncode for DiskPackageDep {
+impl DiskEncode for DiskDepSvh {
     fn encode(&self, buf: &mut Vec<u8>) {
-        self.name.encode(buf);
+        self.pkg.encode(buf);
+        self.svh.encode(buf);
     }
 }
 
@@ -697,16 +703,15 @@ impl DiskEncode for DiskPackageDep {
 // 依存パッケージのシンボル 1 件への参照。
 // `DiskTyKind::ExternalDefined` の sym_id がこの表を指す。
 //
+// `pkg` は [`biwac_base::PackageId`] の生値そのもの。
 // `sym` は **相手の .biwameta 内での** シンボルインデックスである。
-// したがって依存が再ビルドされて採番が変わると、
-// このファイルの外部参照は無効になる。
-// 「更新されたパッケージに依存するパッケージ群を再ビルドする」規則は
-// 最適化ではなく正しさの要件である。
-// (再ビルド判定自体はインクリメンタルビルドの作業で、まだ実装されていない)
+// したがって依存が再ビルドされて採番が変われば、このファイルの外部参照は無効になる。
+// それを検出するのが上の dep_svh_table で、
+// SVH にはシンボルインデックスが含まれる (DepMetadata::compute_svh を参照)。
 
 #[derive(Debug, Clone, Copy)]
 pub struct DiskExternalSymbol {
-    pub pkg: DiskPackageIndex,
+    pub pkg: u32,
     pub sym: DiskSymbolIndex,
 }
 
@@ -717,7 +722,7 @@ impl DiskExternalSymbol {
 impl DiskDecode for DiskExternalSymbol {
     fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
         let mut pos = 0;
-        let (pkg, n) = DiskPackageIndex::decode(&bytes[pos..])?;
+        let (pkg, n) = u32::decode(&bytes[pos..])?;
         pos += n;
         let (sym, n) = DiskSymbolIndex::decode(&bytes[pos..])?;
         pos += n;

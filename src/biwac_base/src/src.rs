@@ -16,7 +16,7 @@ pub struct SourceHolder {
 ///
 /// Self-package IDs are assigned sequentially from 0 and fit in the low 32 bits.
 /// External packages always have `pkg_id >= 1`, so there is no collision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModId(u64);
 
 #[derive(Debug)]

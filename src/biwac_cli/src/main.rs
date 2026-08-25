@@ -8,6 +8,13 @@ struct Args {
     /// package path (optional)
     #[arg(short, long)]
     package_path: Option<String>,
+
+    /// Rebuild every package, ignoring cached build results.
+    ///
+    /// 差分ビルドは前回のフィンガープリントとの突き合わせで判定するので、
+    /// キャッシュを疑ったときの逃げ道として用意しておく。
+    #[arg(short, long)]
+    rebuild: bool,
 }
 
 fn main() {
@@ -25,7 +32,12 @@ fn main() {
         );
     }
 
-    let res = biwac_driver::compile(pkg_root_path.to_path_buf());
+    let res = biwac_driver::compile(
+        pkg_root_path.to_path_buf(),
+        biwac_driver::BuildOptions {
+            force_rebuild: args.rebuild,
+        },
+    );
 
     match res {
         Ok(_) => exit(0),

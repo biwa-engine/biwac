@@ -110,7 +110,7 @@ fn resolve_in_module(
         }
     }
 
-    for (module_name, module) in &module.children {
+    for (module_name, module) in module.children_ordered() {
         match module_tree.children.get(module_name).unwrap() {
             crate::ModuleNameTreeItem::Mod(module_tree) => {
                 resolve_in_module(
