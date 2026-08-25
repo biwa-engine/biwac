@@ -2,10 +2,13 @@ mod end_scene;
 mod if_stmt;
 mod vardecl;
 
-use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelMessage, NovelStmt};
+use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelMessage, NovelStmt, NovelWait};
 use biwac_span::Span;
 
 use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKind};
+
+/// ノベルテキスト中の待ちコマンド。
+const WAIT_COMMAND: &str = ">>";
 
 impl<'src> NovelSourceStream<'src> {
     pub(crate) fn consume_statements(&mut self) -> Result<Vec<NovelStmt>, NovelParseError> {
@@ -15,14 +18,37 @@ impl<'src> NovelSourceStream<'src> {
                     NovelLineKind::RawNovel => {
                         // TODO:
                         // - 埋め込み式 $(expr) をパース
-                        // - wait コマンド >> をパース
 
                         let line = &self.src[self.line_begin_idx..self.next_line_begin_idx];
+                        let span = self.current_span(line.len()); // FIXME
 
-                        Ok(vec![NovelStmt::NovelWrite(NovelMessage {
-                            msg: line.to_string(),
-                            span: self.current_span(line.len()), // FIXME
-                        })])
+                        // wait コマンド `>>`。
+                        //
+                        // 行がこれだけなら待つだけ、
+                        // 本文の後ろに付いていればその行を書いてから待つ。
+                        match line.trim_end().strip_suffix(WAIT_COMMAND) {
+                            Some(before) if before.trim().is_empty() => {
+                                Ok(vec![NovelStmt::NovelWait(NovelWait { span })])
+                            }
+                            Some(_) => {
+                                // `>>` だけを取り除く。字下げと行末の改行は本文の一部として残す。
+                                let cut = line.rfind(WAIT_COMMAND).expect("suffix was found");
+                                let msg =
+                                    format!("{}{}", &line[..cut], &line[cut + WAIT_COMMAND.len()..]);
+
+                                Ok(vec![
+                                    NovelStmt::NovelWrite(NovelMessage {
+                                        msg,
+                                        span: span.clone(),
+                                    }),
+                                    NovelStmt::NovelWait(NovelWait { span }),
+                                ])
+                            }
+                            None => Ok(vec![NovelStmt::NovelWrite(NovelMessage {
+                                msg: line.to_string(),
+                                span,
+                            })]),
+                        }
                     }
                     NovelLineKind::GeneralCommand => match self.peek_token()? {
                         Some(t) => match t.kind {
