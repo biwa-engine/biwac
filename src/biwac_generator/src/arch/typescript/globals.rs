@@ -6,7 +6,7 @@ use biwac_span::VarId;
 use oxc_allocator::CloneIn;
 
 use crate::arch::typescript::{
-    AsOxc, AsOxcGlobal, AsOxcLocal, AstBuildCtx, FnAstBuildCtx, Mangled, span,
+    AsOxc, AsOxcGlobal, AsOxcLocal, AstBuildCtx, FnAstBuildCtx, Mangled, generator_ty, span,
 };
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
@@ -552,7 +552,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
                     name: oxc_span::Ident::new_const(ctx.allocator.alloc_str(&id)),
                     symbol_id: Cell::new(None),
                 }),
-                generator: false,
+                generator: true,
                 r#type: oxc_ast::ast::FunctionType::FunctionDeclaration,
                 r#async: false,
                 pure: false,
@@ -615,7 +615,10 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
                 return_type: Some(oxc_allocator::Box::new_in(
                     oxc_ast::ast::TSTypeAnnotation {
                         span: span(),
-                        type_annotation: self.signature.rty.kind.as_oxc(ctx),
+                        type_annotation: generator_ty(
+                            self.signature.rty.kind.as_oxc(ctx),
+                            ctx.allocator,
+                        ),
                     },
                     ctx.allocator,
                 )),

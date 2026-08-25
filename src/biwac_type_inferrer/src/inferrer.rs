@@ -1087,10 +1087,14 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             .get_value_ty(&def_id)
             .ok_or(TyError::MissingLangItem { item })?;
 
+        // 戻り値は syscall の記述子である。
+        // scene はこれを yield してエンジンに制御を渡す。
+        let syscall = self.tctx.lang_item_ty(LangItem::Syscall, span.clone())?;
+
         let expected = Ty::new(
             TyKind::Fn(FnTy {
                 args: args.to_vec(),
-                rty: Box::new(Ty::new(TyKind::Void, span.clone())),
+                rty: Box::new(syscall),
                 genargs: Vec::new(),
             }),
             span.clone(),

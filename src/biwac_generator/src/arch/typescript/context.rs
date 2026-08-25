@@ -42,6 +42,21 @@ impl<'a> AstBuildCtx<'a> {
         }
     }
 
+    /// この値が scene か。
+    ///
+    /// scene は generator function として出力されるので、
+    /// 呼び出し側は `yield*` で委譲しなければならない
+    /// (そのまま呼ぶと本体が走らず generator オブジェクトが返るだけになる)。
+    ///
+    /// 判定できるのは自パッケージの scene だけである。
+    /// 外部パッケージのシンボルは HIR に無く、`.biwameta` も
+    /// 関数と scene を区別して持っていない。
+    /// パッケージを跨いだ scene 呼び出しを解禁するときは、
+    /// メタデータに種別を載せる必要がある。
+    pub(super) fn is_scene(&self, def_id: &ValDefId) -> bool {
+        matches!(self.hir.vals.get(def_id), Some(ValDefKind::NovelScene(_)))
+    }
+
     /// lang item の関数のマングル済み名を返す。
     ///
     /// 型検査を通っていれば必ず解決できる

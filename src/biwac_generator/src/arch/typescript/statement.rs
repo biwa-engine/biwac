@@ -4,7 +4,7 @@ use biwac_hir::{Primary, Stmt};
 use biwac_lang_item::LangItem;
 use oxc_allocator::FromIn;
 
-use crate::arch::typescript::{AsOxc, AsOxcLocal, Mangled, span};
+use crate::arch::typescript::{AsOxc, AsOxcLocal, Mangled, span, yield_expr};
 
 impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
     fn as_oxc_local(
@@ -172,7 +172,13 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
     }
 }
 
-/// novel statement を lang item の関数呼び出し文に展開する。
+/// novel statement を syscall の発行に展開する。
+///
+/// lang item の関数 (std) が syscall の記述子を組み立て、
+/// それを `yield` することでエンジン (kernel) に制御が渡る。
+/// レジスタに引数を積むのが std、syscall 命令が `yield` にあたる。
+/// 中断できるのは generator である scene の中だけなので、
+/// この展開が現れるのも scene の中だけである。
 fn novel_call<'a, const N: usize>(
     ctx: &'a super::AstBuildCtx<'a>,
     item: LangItem,
@@ -181,26 +187,30 @@ fn novel_call<'a, const N: usize>(
     oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
         oxc_ast::ast::ExpressionStatement {
             span: span(),
-            expression: oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
-                oxc_ast::ast::CallExpression {
-                    span: span(),
-                    callee: oxc_ast::ast::Expression::Identifier(oxc_allocator::Box::new_in(
-                        oxc_ast::ast::IdentifierReference {
-                            span: span(),
-                            name: oxc_span::Ident::new_const(
-                                ctx.allocator.alloc_str(&ctx.lang_item_fn_mangled(item)),
-                            ),
-                            reference_id: Cell::new(None),
-                        },
-                        ctx.allocator,
-                    )),
-                    type_arguments: None,
-                    arguments: oxc_allocator::Vec::from_iter_in(args, ctx.allocator),
-                    optional: false,
-                    pure: false,
-                },
+            expression: yield_expr(
+                oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::CallExpression {
+                        span: span(),
+                        callee: oxc_ast::ast::Expression::Identifier(oxc_allocator::Box::new_in(
+                            oxc_ast::ast::IdentifierReference {
+                                span: span(),
+                                name: oxc_span::Ident::new_const(
+                                    ctx.allocator.alloc_str(&ctx.lang_item_fn_mangled(item)),
+                                ),
+                                reference_id: Cell::new(None),
+                            },
+                            ctx.allocator,
+                        )),
+                        type_arguments: None,
+                        arguments: oxc_allocator::Vec::from_iter_in(args, ctx.allocator),
+                        optional: false,
+                        pure: false,
+                    },
+                    ctx.allocator,
+                )),
+                false,
                 ctx.allocator,
-            )),
+            ),
         },
         ctx.allocator,
     ))

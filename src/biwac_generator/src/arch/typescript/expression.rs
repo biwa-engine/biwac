@@ -5,7 +5,7 @@ use biwac_hir::{BlockExpr, Callee, Expr, ExprVal, Literal, Primary, VarIdKind};
 use biwac_span::VarId;
 use oxc_allocator::FromIn;
 
-use crate::arch::typescript::{AsOxcLocal, Mangled, span};
+use crate::arch::typescript::{AsOxcLocal, Mangled, span, yield_expr};
 
 impl Mangled for VarIdKind {
     fn mangled(&self, ctx: &super::AstBuildCtx) -> String {
@@ -188,7 +188,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                     ))
                 }
                 Primary::FnCall(c) => {
-                    oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
+                    let call = oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
                         oxc_ast::ast::CallExpression {
                             span: span(),
                             callee: oxc_ast::ast::Expression::Identifier(
@@ -215,7 +215,16 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                             pure: false,
                         },
                         ctx.allocator,
-                    ))
+                    ));
+
+                    // scene は generator なので、呼ぶ側が委譲しなければならない。
+                    // 呼び出し先が出した syscall はそのまま外側の kernel まで抜ける。
+                    match &c.callee {
+                        Callee::Fn(def_id) if ctx.is_scene(def_id) => {
+                            yield_expr(call, true, ctx.allocator)
+                        }
+                        _ => call,
+                    }
                 }
                 Primary::IfExpr(if_expr) => {
                     if if_expr.then.stmts.is_empty() && if_expr.els.stmts.is_empty() {

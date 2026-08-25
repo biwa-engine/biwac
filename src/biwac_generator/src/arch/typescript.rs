@@ -261,6 +261,75 @@ fn span() -> oxc_span::Span {
     oxc_span::Span::new(0, 0)
 }
 
+/// `yield <expr>` / `yield* <expr>` を作る。
+///
+/// ランタイムとの規約: scene は generator function として出力され、
+/// エンジン側 (kernel) が `next()` で駆動する。
+/// `yield` は syscall 命令にあたり、積まれた値がエンジンに渡り、
+/// エンジンが書き戻した結果が `yield` 式の値になる。
+///
+/// `delegate` (= `yield*`) は別の scene に制御を渡すときに使う。
+/// 呼び出し先の syscall がそのまま外側まで抜けていく。
+fn yield_expr<'a>(
+    argument: oxc_ast::ast::Expression<'a>,
+    delegate: bool,
+    allocator: &'a oxc_allocator::Allocator,
+) -> oxc_ast::ast::Expression<'a> {
+    oxc_ast::ast::Expression::YieldExpression(oxc_allocator::Box::new_in(
+        oxc_ast::ast::YieldExpression {
+            span: span(),
+            delegate,
+            argument: Some(argument),
+        },
+        allocator,
+    ))
+}
+
+/// scene の戻り値型 `Generator<unknown, <rty>, any>` を作る。
+///
+/// generator function の戻り値型は `Generator` でなければ TypeScript が受け付けない。
+/// yield する値 (syscall) の型はエンジン側が知っていればよいので `unknown`、
+/// 書き戻される値は syscall ごとに違うので `any` とする。
+fn generator_ty<'a>(
+    rty: oxc_ast::ast::TSType<'a>,
+    allocator: &'a oxc_allocator::Allocator,
+) -> oxc_ast::ast::TSType<'a> {
+    oxc_ast::ast::TSType::TSTypeReference(oxc_allocator::Box::new_in(
+        oxc_ast::ast::TSTypeReference {
+            span: span(),
+            type_name: oxc_ast::ast::TSTypeName::IdentifierReference(oxc_allocator::Box::new_in(
+                oxc_ast::ast::IdentifierReference {
+                    span: span(),
+                    name: oxc_span::Ident::new_const("Generator"),
+                    reference_id: Cell::new(None),
+                },
+                allocator,
+            )),
+            type_arguments: Some(oxc_allocator::Box::new_in(
+                oxc_ast::ast::TSTypeParameterInstantiation {
+                    span: span(),
+                    params: oxc_allocator::Vec::from_iter_in(
+                        [
+                            oxc_ast::ast::TSType::TSUnknownKeyword(oxc_allocator::Box::new_in(
+                                oxc_ast::ast::TSUnknownKeyword { span: span() },
+                                allocator,
+                            )),
+                            rty,
+                            oxc_ast::ast::TSType::TSAnyKeyword(oxc_allocator::Box::new_in(
+                                oxc_ast::ast::TSAnyKeyword { span: span() },
+                                allocator,
+                            )),
+                        ],
+                        allocator,
+                    ),
+                },
+                allocator,
+            )),
+        },
+        allocator,
+    ))
+}
+
 /// `export { <local> as <exported> };` を作る。
 fn export_alias<'a>(
     local: &str,

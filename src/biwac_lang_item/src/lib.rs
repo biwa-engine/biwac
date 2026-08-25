@@ -304,6 +304,11 @@ lang_item_table!(
     // コンパイラは "..." を書かれた位置でこの型を割り当てる。
     String,    "string",    LangItemKind::Ty, LangItemGenericRequirement::Exact(0);
 
+    // エンジンへのシステムコールの記述子。
+    // novel statement の展開先はこの型を返し、scene がそれを yield して
+    // エンジン (kernel) に制御を渡す。中身はエンジンとの規約で、コンパイラは見ない。
+    Syscall,   "syscall",   LangItemKind::Ty, LangItemGenericRequirement::Exact(0);
+
     // scene 内の novel statement が展開される先。
     // エンドユーザやサードパーティに直接呼ばれることを想定しておらず、
     // コンパイラのみが知っている API である。
