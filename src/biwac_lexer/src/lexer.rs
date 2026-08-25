@@ -25,6 +25,8 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
     let mut inner_line_comment = false;
 
     let mut region_begin_idx = 0;
+    // 開いている DSL の `{{` の位置。閉じが見つからなかったときの指し先に使う。
+    let mut dsl_open_idx = 0;
 
     // UTF-8 バイトインデックス
     let mut char_indices_iter = src.char_indices();
@@ -50,8 +52,14 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                             span: Span::new(mod_id, region_begin_idx, i + trimmed_len),
                         });
 
-                        // トリム分と}}分イテレータを進める
-                        char_indices_iter.nth(trimmed_len + 2);
+                        // トリム分と }} 分イテレータを進める。
+                        //
+                        // 直前に取り出したのが i の `\n` なので、
+                        // 次に出てくるのは i+1 である。
+                        // 進めたいのは i+1 から `}}` の 2 文字目 (i+trimmed_len+1) までの
+                        // trimmed_len+1 文字で、`nth(n)` は n+1 文字を消費する。
+                        // (間は空白文字なのでバイト数と文字数は一致する)
+                        char_indices_iter.nth(trimmed_len);
                         region_begin_idx = i + trimmed_len + 2;
                         inner_dsl = false;
                     }
@@ -102,11 +110,32 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                         && src[i + 1..].starts_with("{")
                     {
                         // start of DSL such as novel mode, or inline native code.
+
+                        // `{{` の後ろに同じ行で何か書かれていたら、その場で弾く。
+                        //
+                        // DSL の中身は Biwa の文法ではないので、閉じの判定に中身は使えない
+                        // (native code に `}}` が現れても不思議ではない)。
+                        // そのため閉じは `}}` で始まる行だけと決めてあり、
+                        // 1 行で書かれた `{{ ... }}` は閉じたことにならない。
+                        // 放っておくと後続の定義まで DSL に飲み込まれ、
+                        // 「定義が無い」という遠い場所のエラーになる。
+                        let body_begin_idx = i + 2;
+                        let rest_of_line = src[body_begin_idx..]
+                            .split('\n')
+                            .next()
+                            .unwrap_or_default();
+                        if !rest_of_line.trim().is_empty() {
+                            return Err(TokenizeError::DslOpenNotAtLineEnd {
+                                span: Span::new(mod_id, i, body_begin_idx),
+                            });
+                        }
+
                         regions.push(SrcRegion {
                             kind: RegionKind::Raw,
                             span: Span::new(mod_id, region_begin_idx, i),
                         });
-                        region_begin_idx = i + 2;
+                        dsl_open_idx = i;
+                        region_begin_idx = body_begin_idx;
                         inner_dsl = true;
                         char_indices_iter.next(); // 2個目の `{` を飛ばす
                     }
@@ -118,6 +147,11 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
     if inner_quoted {
         Err(TokenizeError::DoubleQuoteCloseNotFound {
             span: Span::new(mod_id, src_len, src_len + 1),
+        })
+    } else if inner_dsl {
+        // `}}` の行が来ないままファイルが終わった。
+        Err(TokenizeError::DslCloseNotFound {
+            span: Span::new(mod_id, dsl_open_idx, dsl_open_idx + 2),
         })
     } else {
         regions.push(SrcRegion {

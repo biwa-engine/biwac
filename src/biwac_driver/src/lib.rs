@@ -300,6 +300,13 @@ fn check_freshness(
         return Freshness::Stale(StaleReason::NoPreviousBuild);
     }
 
+    // 生成物が消えていれば、記録がどうであれ建て直す。
+    // 出力ディレクトリだけ消したときに「Fresh」と言い張って、
+    // 生成物が無いまま成功してしまうのを防ぐ。
+    if !bin_path(build_dir_path, pkg_name).exists() {
+        return Freshness::Stale(StaleReason::MissingOutput);
+    }
+
     let fp_path = biwac_fingerprint::fingerprint_path(build_dir_path, pkg_name);
     let Ok(data) = std::fs::read(&fp_path) else {
         return Freshness::Stale(StaleReason::NoPreviousBuild);
@@ -314,6 +321,15 @@ fn check_freshness(
 
 fn metadata_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
     build_dir_path.join(format!("{pkg_name}.biwameta"))
+}
+
+/// codegen の出力先。
+fn bin_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
+    if cfg!(feature = "typescript") {
+        build_dir_path.join("typescript").join(format!("{pkg_name}.ts"))
+    } else {
+        todo!()
+    }
 }
 
 fn prepare_build_dir(pkg_root: &Path) -> Result<PathBuf, ()> {

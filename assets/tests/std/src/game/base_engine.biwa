@@ -1,11 +1,33 @@
+// エンジン (基盤ランタイム) との境界。
+//
+// エンジンの API はシステムコールにあたる。呼ぶとエンジン側 (kernel land) に入る。
+//
+// - 中断する syscall (クリック待ちなど) は、scene から `yield` で発行される。
+//   ここにある関数は「レジスタに積む」役だけを持ち、syscall の記述子を組み立てて返す。
+//   実際に制御を渡す `yield` 命令はコンパイラが scene の中に置く。
+//   中断できるのは generator である scene だけなので、この形になる。
+// - 中断しない syscall (画像を出す、名前を変える) は普通の関数呼び出しでよい。
+//   エンジンの API をそのまま呼び、積んで即座に返る。
+//
+// `@biwa/engine/*` は生成物の配置場所に依存しないための論理パスで、
+// Biwa CLI が用意する Vite の alias / tsconfig の paths によって
+// 実際のエンジン実装 (`.biwa_runtime/src/engine/...`) へ解決される。
 [[native(arch="typescript")]]
 {{
-  import { createImage } from "../engine/api/image.ts";
-  import { showMessage, waitForClick } from "../engine/api/message.ts";
+  import { createImage } from "@biwa/engine/api/image";
+  import { Sys, type BiwaSyscall } from "@biwa/engine/vm/syscall";
 }}
 
 import package::types::string::String;
 
+// syscall の記述子。中身はエンジンとの規約であり、Biwa 側からは不透明。
+[[lang="syscall"]]
+[[native(arch="typescript")]]
+type Syscall = {{
+  BiwaSyscall
+}};
+
+// 中断しない syscall。積んで即座に返る。
 [[native(arch="typescript")]]
 fn create_image(path: String, x: Int, y: Int) {{
   createImage(path, x, y, {
@@ -19,14 +41,15 @@ fn create_image(path: String, x: Int, y: Int) {{
 // ゲーム開発者やサードパーティが直接呼ぶことは想定していない。
 [[lang="write"]]
 [[native(arch="typescript")]]
-fn write(msg: String) {{
-  showMessage(msg);
+fn write(msg: String) -> Syscall {{
+  return { sys: Sys.Write, args: [msg] };
 }}
 
-// novel statement の待機 (クリック待ち) の展開先。
+// novel statement の待ち (クリック待ち) の展開先。
 // write と同じくコンパイラのみが呼び出す。
+// エンジンはクリックが来るまで scene を再開しない。
 [[lang="wait"]]
 [[native(arch="typescript")]]
-fn wait() {{
-  waitForClick();
+fn wait() -> Syscall {{
+  return { sys: Sys.Wait, args: [] };
 }}

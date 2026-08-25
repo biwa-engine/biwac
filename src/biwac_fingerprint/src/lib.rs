@@ -102,6 +102,8 @@ pub enum Freshness {
 pub enum StaleReason {
     /// 前回の成果物が無い (初回ビルド、あるいは掃除された)
     NoPreviousBuild,
+    /// 記録は残っているが、生成物が消えている
+    MissingOutput,
     /// フィンガープリントファイルが読めない (形式変更・破損)
     UnreadableFingerprint,
     /// コンパイラが変わった
@@ -122,6 +124,7 @@ impl StaleReason {
     pub fn describe(&self) -> String {
         match self {
             Self::NoPreviousBuild => "no previous build".to_string(),
+            Self::MissingOutput => "the output is missing".to_string(),
             Self::UnreadableFingerprint => "fingerprint is unreadable".to_string(),
             Self::CompilerChanged => "the compiler changed".to_string(),
             Self::ManifestChanged => "biwa-package.json changed".to_string(),

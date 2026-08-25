@@ -226,20 +226,31 @@ fn load_module<'a>(
         }
     };
 
-    let ast = biwac_parser::Parser::new(
+    let ast = match biwac_parser::Parser::new(
         module_tree.mod_id,
         module_tree.mod_path.clone(),
         tokens,
         interner,
     )
     .try_parse()
-    .map_err(|e| {
-        errs.push(PkgLoadError::ParseError {
-            modpath: module_tree.mod_path.clone(),
-            err: Box::new(e),
-        });
-        errs
-    })?;
+    {
+        Ok(ast) => ast,
+        Err(e) => {
+            errs.push(PkgLoadError::ParseError {
+                modpath: module_tree.mod_path.clone(),
+                err: Box::new(e),
+            });
+            return Err(errs);
+        }
+    };
+
+    // 自分は読めても、子モジュールが失敗していれば失敗である。
+    //
+    // ここで捨ててしまうと、その子モジュールが存在しなかったことになり、
+    // 「定義したはずのシンボルが無い」という遠い場所のエラーだけが残る。
+    if !errs.is_empty() {
+        return Err(errs);
+    }
 
     Ok(LoadedModule {
         mod_id: module_tree.mod_id,
