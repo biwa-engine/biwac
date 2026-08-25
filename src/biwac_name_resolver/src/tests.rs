@@ -32,14 +32,9 @@ fn test1() {
 
     let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
 
-    // Dependency building via DepGraph (BFS discovery + Kahn's topological batching)
-    //
-    // packages_dir: sibling directory of pkg_root_path (workspace root).
-    // Each package lives at packages_dir/<name>/.
-    let packages_dir = build_dir_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    // 依存パッケージは <root>/.biwa_build/deps/<name>/ に取得済みである前提。
+    // std は依存を持たないので、実際にはここは使われない。
+    let packages_dir = biwac_base::dependencies_dir(pkg_root_path);
 
     let root_dep_names: Vec<String> = metadata
         .metadata

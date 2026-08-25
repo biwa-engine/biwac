@@ -56,12 +56,12 @@ pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> 
         metadata.metadata.version.patch()
     );
 
-    // packages_dir: sibling directory of pkg_root_path (workspace root).
-    // Each package lives at packages_dir/<name>/.
-    let packages_dir = pkg_root_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    // 依存パッケージは <root>/.biwa_build/deps/<name>/ に取得済みである前提。
+    //
+    // 推移的依存も含めてここに平らに並ぶので、ビルド全体で参照する依存ディレクトリは
+    // このひとつだけになる。依存パッケージ自身の deps/ は見ない。
+    // (deps/greeter を建てるときも、その依存 std / color はここから引く)
+    let packages_dir = biwac_base::dependencies_dir(&pkg_root_path);
 
     let root_dep_names: Vec<String> = metadata
         .metadata
@@ -69,6 +69,16 @@ pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> 
         .iter()
         .map(|d| d.name.value().to_string())
         .collect();
+
+    // 取得は未実装なので、無ければその旨を伝えて止まる。
+    if !root_dep_names.is_empty() && !packages_dir.is_dir() {
+        eprintln!(
+            "Error: dependencies are not fetched: `{}` does not exist",
+            packages_dir.display()
+        );
+        biwac_base::print_error_finish_message(1);
+        return Err(());
+    }
 
     // Discover full transitive dependency graph.
     // 依存が無くても空グラフとして扱い、以降の分岐を減らす。

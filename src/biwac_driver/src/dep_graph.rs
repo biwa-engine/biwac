@@ -22,6 +22,9 @@ impl DepGraph {
     /// 依存グラフを構築する。
     ///
     /// 各パッケージのマニフェストは packages_dir/<name>/biwa-package.json から読み込む。
+    /// `packages_dir` はルートパッケージの `.biwa_build/deps/` であり、
+    /// **推移的依存も含めてすべてここに平らに並んでいる**前提である
+    /// (依存パッケージ自身の deps/ は辿らない)。
     /// deps が空の場合は空グラフを返す。
     pub fn discover(root_deps: &[&str], packages_dir: &Path) -> Result<Self, ()> {
         let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
@@ -40,6 +43,17 @@ impl DepGraph {
             visited.insert(dep_name.clone());
 
             let dep_root = packages_dir.join(&dep_name);
+            // 依存の取得はまだコンパイラの仕事になっていないので、
+            // 「無い」ことは形式エラーではなく「まだ持ってきていない」ことを意味する。
+            // そう分かるメッセージにする。
+            if !dep_root.is_dir() {
+                eprintln!(
+                    "Error: dependency `{}` is not fetched: `{}` does not exist",
+                    dep_name,
+                    dep_root.display()
+                );
+                return Err(());
+            }
             let sub_meta =
                 biwac_metadata_loader::try_load_package_metadata(dep_root).map_err(|e| {
                     e.print_error_message();
