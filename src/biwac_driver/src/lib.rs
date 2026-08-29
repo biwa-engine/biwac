@@ -281,23 +281,32 @@ fn build_or_reuse_package(
         &mut interner,
     )?;
 
-    // 依存の `.biwamir` を実際に読んでみる。
+    // 依存の `.biwamir` を読む。
     //
-    // 消費するのは単相化パス (次回) だが、書き出しだけ入れて読み込みを放置すると
-    // 壊れていても気づけないので、`--emit mir` のときに全依存を通しておく。
-    if options.emit_mir {
-        let deps: Vec<(String, Hash64)> = external_packages
+    // 単相化の入力であり、同時に「書き出した MIR が読み戻せるか」の検査でもある。
+    // 既定のビルド (TypeScript) は単相化を通らないので読まない。
+    let dep_mirs = if options.emit_mir {
+        let deps: Vec<(PackageId, String, Hash64)> = external_packages
             .iter()
-            .filter_map(|p| Some((interner.get_str(&p.ident)?.to_string(), p.meta.svh)))
+            .filter_map(|p| {
+                Some((
+                    p.pkg_id,
+                    interner.get_str(&p.ident)?.to_string(),
+                    p.meta.svh,
+                ))
+            })
             .collect();
-        verify_dep_mir(&deps, packages_dir, &mut interner, depth)?;
-    }
+        load_dep_mirs(&deps, packages_dir, &mut interner, depth)?
+    } else {
+        Vec::new()
+    };
 
     let hashes = load_analyze_and_codegen_single_package(
         external_packages,
         &mut interner,
         &metadata,
         &dep_hashes,
+        dep_mirs,
         pkg_root,
         build_dir_path.clone(),
         options,
@@ -493,6 +502,7 @@ fn load_analyze_and_codegen_single_package(
     interner: &mut biwac_base::IdentInterner,
     metadata: &biwac_base::MetadataHolder,
     dep_hashes: &[(PackageId, PackageHashes)],
+    dep_mirs: Vec<(PackageId, biwac_mir::Mir)>,
     pkg_root_path: PathBuf,
     build_dir_path: PathBuf,
     options: BuildOptions,
@@ -556,7 +566,7 @@ fn load_analyze_and_codegen_single_package(
     // 単相化するターゲットは依存パッケージの本体を必要とするので、
     // 「そのターゲットのときだけ書く」形にはできない
     // (ある日 wasm を建てようとしたら依存の MIR が無い、ということになる)。
-    let mir_hash = persist_mir(
+    let (mir_hash, mir) = persist_mir(
         &hir,
         &lang_items,
         interner,
@@ -571,6 +581,26 @@ fn load_analyze_and_codegen_single_package(
     // 中間表現だけを見たいときに codegen まで走らせる理由が無いのと、
     // 中間表現の検証をターゲットの実装状況に縛られずに行えるようにするため。
     if options.emit_mir {
+        // 単相化できるのは根を持つパッケージ、つまり playable なものだけである。
+        // ライブラリはどの型で実体化されるかを知らないので、
+        // ジェネリックなままの `.biwamir` を出して終わる。
+        if pkg_kind.is_playable() {
+            let mono = monomorphize_program(
+                &hir,
+                &mir,
+                &ext_pkgs_for_ty,
+                &dep_mirs,
+                &well_known_scenes,
+                interner,
+            )?;
+            println!(
+                "{} {} instance(s), {} type(s)",
+                "Monomorphized".cyan().bold(),
+                mono.instances.len(),
+                mono.types.len(),
+            );
+            last_monomorphized(mono);
+        }
         return Ok(hashes);
     }
 
@@ -608,11 +638,11 @@ fn persist_mir(
     meta_svh: Hash64,
     build_dir_path: &Path,
     metadata: &biwac_base::MetadataHolder,
-) -> Result<Hash64, ()> {
+) -> Result<(Hash64, biwac_mir::Mir), ()> {
     let pkg_id = self_package_id(&metadata.metadata);
-    let mir = biwac_mir_build::build(hir, lang_items, pkg_id);
+    let mut mir = biwac_mir_build::build(hir, lang_items, pkg_id);
 
-    let errors = biwac_mir_build::validate(&mir);
+    let errors = biwac_mir::validate(&mir);
     if !errors.is_empty() {
         eprintln!("Error: built MIR is broken (this is a compiler bug):");
         for e in &errors {
@@ -621,6 +651,15 @@ fn persist_mir(
         biwac_base::print_error_finish_message(errors.len());
         return Err(());
     }
+
+    // 書き出す前に畳む。`.biwamir` に載る形も、下流が単相化に使う形も
+    // これを通したあとのものになる。
+    biwac_mir_transform::run_passes(&mut mir, biwac_mir_transform::default_passes()).map_err(
+        |e| {
+            eprintln!("Error: {e}");
+            biwac_base::print_error_finish_message(1);
+        },
+    )?;
 
     let text = biwac_mir::encode(
         &mir,
@@ -638,7 +677,63 @@ fn persist_mir(
         biwac_base::print_error_finish_message(1);
     })?;
 
-    Ok(mir_hash(&text))
+    Ok((mir_hash(&text), mir))
+}
+
+/// 直近の単相化の結果を、テストから覗けるようにしておく。
+///
+/// 結果はファイルにしないので、テストは in-process でこれを見る。
+/// 本番の経路では書くだけで、誰も読まない。
+#[cfg(test)]
+fn last_monomorphized(mono: biwac_mir::MonoMir) {
+    tests::LAST_MONO.with(|slot| *slot.borrow_mut() = Some(mono));
+}
+
+#[cfg(not(test))]
+fn last_monomorphized(_mono: biwac_mir::MonoMir) {}
+
+/// プログラム全体を単相化する。
+///
+/// 単相化の結果はファイルにしない。消費者は次に入るバックエンドで、
+/// それはメモリ上で受け取れば足りるためである。
+/// ここでは「通ること」と規模だけを確かめる。
+fn monomorphize_program(
+    hir: &biwac_hir::Hir,
+    own: &biwac_mir::Mir,
+    ext_pkgs: &[(PackageId, Arc<DepMetadata>)],
+    dep_mirs: &[(PackageId, biwac_mir::Mir)],
+    well_known_scenes: &biwac_scene::WellKnownScenes,
+    interner: &mut IdentInterner,
+) -> Result<biwac_mir::MonoMir, ()> {
+    // 根はランタイムが名前で呼ぶ scene だけである。
+    // そこから辿れない関数は成果物に入らない (到達性による除去がここで効く)。
+    let roots: Vec<biwac_span::ValDefId> = biwac_scene::WellKnownScene::ALL
+        .iter()
+        .filter_map(|s| well_known_scenes.get(*s))
+        .collect();
+
+    let deps: Vec<(PackageId, &DepMetadata, &biwac_mir::Mir)> = dep_mirs
+        .iter()
+        .filter_map(|(pkg_id, mir)| {
+            let meta = ext_pkgs.iter().find(|(id, _)| id == pkg_id)?;
+            Some((*pkg_id, meta.1.as_ref(), mir))
+        })
+        .collect();
+
+    biwac_mir_transform::monomorphize(biwac_mir_transform::MonoInput {
+        hir,
+        own,
+        deps: &deps,
+        roots: &roots,
+        interner,
+    })
+    .map_err(|errors| {
+        eprintln!("Error: monomorphization failed:");
+        for e in &errors {
+            eprintln!("  {e}");
+        }
+        biwac_base::print_error_finish_message(errors.len());
+    })
 }
 
 /// `.biwamir` の内容のハッシュ。
@@ -661,23 +756,25 @@ fn self_package_id(metadata: &biwac_base::PackageMetadata) -> PackageId {
     biwac_span::PackageHashId::new(&metadata.name, &metadata.version).as_package_id()
 }
 
-/// 依存の `.biwamir` がすべて読めることを確かめる。
-fn verify_dep_mir(
-    deps: &[(String, Hash64)],
+/// 依存の `.biwamir` をすべて読む。
+fn load_dep_mirs(
+    deps: &[(PackageId, String, Hash64)],
     packages_dir: &Path,
     interner: &mut IdentInterner,
     depth: DisplayDepth,
-) -> Result<(), ()> {
+) -> Result<Vec<(PackageId, biwac_mir::Mir)>, ()> {
     if deps.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    let mut out = Vec::with_capacity(deps.len());
     let mut items = 0;
-    for (name, svh) in deps {
+    for (pkg_id, name, svh) in deps {
         let root = packages_dir.join(name);
         let mir = load_dep_mir(&root, name, *svh, interner).map_err(|_| {
             biwac_base::print_error_finish_message(1);
         })?;
         items += mir.items.len();
+        out.push((*pkg_id, mir));
     }
     println!(
         "{}{} {} dependency MIR file(s), {} item(s)",
@@ -686,7 +783,7 @@ fn verify_dep_mir(
         deps.len(),
         items,
     );
-    Ok(())
+    Ok(out)
 }
 
 /// 依存パッケージの `.biwamir` を読む。
@@ -865,24 +962,51 @@ fn write_bin(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
 
     use biwac_base::IdentInterner;
+    use biwac_hir::TyKind;
+    use biwac_mir::{MirItem, MonoMir, MonoTyDefKind};
 
     use crate::{BuildOptions, compile};
 
-    /// 同じパッケージを 2 つのテストが同時にビルドすると
-    /// 出力ファイルの書き込みがぶつかるので、1 回だけ建てて共有する。
-    fn build_once(pkg: &str) {
+    thread_local! {
+        /// 直近の単相化の結果。
+        ///
+        /// 単相化の結果はファイルにしないので、テストはここから受け取る。
+        pub(super) static LAST_MONO: RefCell<Option<MonoMir>> = const { RefCell::new(None) };
+    }
+
+    /// `--emit mir` でビルドし、単相化の結果を返す。
+    ///
+    /// 単相化は playable パッケージでしか走らないので、
+    /// ライブラリに対して呼ぶと `None` になる。
+    fn monomorphize(pkg: &str) -> Option<MonoMir> {
+        with_build_lock(|built| {
+            // 結果はスレッドローカルに置かれるので、同じスレッドで建てて取り出す。
+            LAST_MONO.with(|slot| *slot.borrow_mut() = None);
+            emit_mir_build(pkg);
+            built.insert(pkg.to_string());
+            LAST_MONO.with(|slot| slot.borrow_mut().take())
+        })
+    }
+
+    /// ビルドは常にこの中で行う。
+    ///
+    /// 同じパッケージを 2 つのテストが同時に建てると
+    /// 出力ファイルの書き込みがぶつかるので、直列化する。
+    /// `built` には一度建てたパッケージが入り、無駄な建て直しを省く。
+    fn with_build_lock<T>(f: impl FnOnce(&mut HashSet<String>) -> T) -> T {
         static BUILT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
         let built = BUILT.get_or_init(|| Mutex::new(HashSet::new()));
         let mut built = built.lock().unwrap_or_else(|e| e.into_inner());
-        if !built.insert(pkg.to_string()) {
-            return;
-        }
+        f(&mut built)
+    }
 
+    fn emit_mir_build(pkg: &str) {
         compile(
             Path::new("../../assets/tests").join(pkg),
             BuildOptions {
@@ -891,6 +1015,15 @@ mod tests {
             },
         )
         .expect("MIR emission failed");
+    }
+
+    /// まだ建てていなければ建てる。
+    fn build_once(pkg: &str) {
+        with_build_lock(|built| {
+            if built.insert(pkg.to_string()) {
+                emit_mir_build(pkg);
+            }
+        });
     }
 
     fn build_dir(pkg: &str) -> PathBuf {
@@ -922,7 +1055,21 @@ mod tests {
         // validator が簡約可能性まで見ているので、
         // ここを通っている時点で後方辺の行き先はループ頭である。
         assert!(mir.contains("switch "), "{mir}");
-        assert!(mir.contains("goto 1"), "{mir}");
+        assert!(mir.contains("goto "), "{mir}");
+
+        // simplify_cfg が掛かっていること。
+        // 文の無い `goto` だけのブロックは畳まれて残らない。
+        let empty_goto_blocks = mir
+            .lines()
+            .zip(mir.lines().skip(1))
+            .filter(|(a, b)| {
+                a.trim_start().starts_with("bb ") && b.trim_start().starts_with("goto ")
+            })
+            .count();
+        assert_eq!(
+            empty_goto_blocks, 0,
+            "simplify_cfg should leave no empty goto block:\n{mir}"
+        );
 
         // メンバへの代入は Place の射影になる。
         assert!(mir.contains("_1.count@"), "{mir}");
@@ -1056,6 +1203,150 @@ mod tests {
                 .any(|v| (*v >> 32) as u32 == color_pkg.value()),
             "greeter's MIR should mention a type owned by color"
         );
+    }
+
+    /// 単相化がジェネリクスを消し、到達可能なものだけを残すこと。
+    ///
+    /// 結果はファイルにしないので、構造をそのまま見る。
+    #[test]
+    fn monomorphization() {
+        let mono = monomorphize("test1").expect("test1 is playable");
+
+        // 同じ関数が複数の実体を持つこと。
+        //
+        // `scene main` -> `foo()` は `Pair::new(l, z)` と `Pair::new(x, ...)` を呼び、
+        // 前者は [Line, Int]、後者は [Int, Int] になる。
+        // 名前を引く経路をテストに持ち込みたくないので、
+        // 「2 つ以上の実体を持つ def_id」として見る。
+        let mut by_def: std::collections::HashMap<biwac_span::ValDefId, Vec<&biwac_mir::GenArgs>> =
+            std::collections::HashMap::new();
+        for inst in &mono.instances {
+            by_def
+                .entry(inst.key.def_id)
+                .or_default()
+                .push(&inst.key.args);
+        }
+        let multi: Vec<_> = by_def.iter().filter(|(_, v)| v.len() > 1).collect();
+        assert_eq!(
+            multi.len(),
+            1,
+            "exactly one function (Pair::new) should have several instances, got {:?}",
+            multi
+                .iter()
+                .map(|(k, v)| (k.value(), v.len()))
+                .collect::<Vec<_>>()
+        );
+        let (_, args) = multi[0];
+        assert_eq!(args.len(), 2, "Pair::new should have two instances");
+        assert_ne!(args[0], args[1], "the two instances must differ");
+
+        // どの実体にもジェネリック型が残っていないこと。
+        for inst in &mono.instances {
+            assert!(
+                inst.key.args.iter().all(|(_, ty)| is_concrete(ty)),
+                "instance val#{} still has a generic argument",
+                inst.key.def_id.value()
+            );
+            let MirItem::Body(body) = &inst.item else {
+                continue;
+            };
+            assert!(
+                body.genargs.is_empty(),
+                "a monomorphized body must not declare generic arguments"
+            );
+            for (i, local) in body.locals.iter().enumerate() {
+                assert!(
+                    is_concrete(&local.ty),
+                    "local _{i} of val#{} is not concrete: {:?}",
+                    inst.key.def_id.value(),
+                    local.ty.kind
+                );
+            }
+        }
+
+        // 推移的依存 (color) の型が、メンバ付きで並んでいること。
+        // test1 は color に依存していないので、
+        // 推移閉包の `.biwamir` / `.biwameta` を辿れていないと出てこない。
+        //
+        // color には struct が Rgb しか無く、メンバは r / g / b の 3 つである。
+        let color_pkg = package_id_of("color");
+        let rgb = mono.types.iter().find(|t| t.key.def_id.pkg() == color_pkg);
+        assert!(
+            rgb.is_some(),
+            "a type owned by color should be among the monomorphized types"
+        );
+        let MonoTyDefKind::Struct { members } = &rgb.unwrap().kind else {
+            panic!("color::Rgb should be a struct");
+        };
+        assert_eq!(members.len(), 3, "color::Rgb has r / g / b");
+
+        // 到達しない関数は入らない。
+        // test1 自身の `.biwamir` に載っている item のほうが多いはずである
+        // (`Line::len` や `Pair::y_int` などは誰からも呼ばれていない)。
+        let own_instances = mono
+            .instances
+            .iter()
+            .filter(|i| i.key.def_id.pkg().is_self())
+            .count();
+        let own_items = read_mir("test1")
+            .lines()
+            .filter(|l| l.starts_with("fn ") || l.starts_with("native "))
+            .count();
+        assert!(
+            own_instances < own_items,
+            "unreachable functions must be dropped ({own_instances} instances vs {own_items} items)"
+        );
+
+        // エントリポイントが自パッケージの scene であること。
+        let entry = mono.entry_instance().expect("entry point");
+        assert!(entry.key.def_id.pkg().is_self());
+        assert!(
+            entry.key.args.is_empty(),
+            "a scene takes no generic argument"
+        );
+
+        // 2 回走らせて同じ並びになること。
+        // 実体の索引がそのまま番号になるので、順序が揺れると成果物も揺れる。
+        let again = monomorphize("test1").expect("test1 is playable");
+        let keys = |m: &MonoMir| {
+            format!(
+                "{:?}",
+                m.instances.iter().map(|i| &i.key).collect::<Vec<_>>()
+            )
+        };
+        assert_eq!(keys(&mono), keys(&again), "instance order must be stable");
+        let ty_keys =
+            |m: &MonoMir| format!("{:?}", m.types.iter().map(|t| &t.key).collect::<Vec<_>>());
+        assert_eq!(ty_keys(&mono), ty_keys(&again), "type order must be stable");
+    }
+
+    /// ライブラリでは単相化が走らないこと (根が無い)。
+    #[test]
+    fn library_is_not_monomorphized() {
+        assert!(
+            monomorphize("mir_fixture").is_none(),
+            "a library package has no entry point, so nothing is monomorphized"
+        );
+        // `.biwamir` は今までどおり書かれる。
+        assert!(!read_mir("mir_fixture").is_empty());
+    }
+
+    fn package_id_of(pkg: &str) -> biwac_base::PackageId {
+        let metadata = biwac_metadata_loader::try_load_package_metadata(
+            Path::new("../../assets/tests").join(pkg),
+        )
+        .unwrap();
+        biwac_span::PackageHashId::new(&metadata.metadata.name, &metadata.metadata.version)
+            .as_package_id()
+    }
+
+    fn is_concrete(ty: &biwac_hir::Ty) -> bool {
+        match &ty.kind {
+            TyKind::Int | TyKind::Float | TyKind::Bool | TyKind::Void => true,
+            TyKind::Gen(_) | TyKind::LocGen(_) | TyKind::Infer(_) => false,
+            TyKind::Defined(dt) => dt.genargs.iter().all(is_concrete),
+            TyKind::Fn(f) => f.args.iter().all(is_concrete) && is_concrete(&f.rty),
+        }
     }
 
     /// `.biwamir` と `.biwameta` の対応が崩れていたら読み込みで止まること。

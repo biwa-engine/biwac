@@ -19,6 +19,7 @@ biwac_name_resolver = { path = "../biwac_name_resolver"}
 biwac_type_inferrer = { path = "../biwac_type_inferrer"}
 biwac_mir = { path = "../biwac_mir"}
 biwac_mir_build = { path = "../biwac_mir_build"}
+biwac_mir_transform = { path = "../biwac_mir_transform"}
 biwac_generator = { path = "../biwac_generator"}
 colored.workspace = true
 

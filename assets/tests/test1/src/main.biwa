@@ -47,6 +47,14 @@ fn greeting_demo() {
   let red = c.r;
 }
 
+// 単相化の根はランタイムが呼ぶ scene (main) だけなので、
+// そこから辿れない関数は成果物に入らない。
+// scene main が foo() と greeting_demo() を呼んでいるのは、
+// ジェネリクスの実体化と、パッケージをまたぐ実体化を通すためである。
+//
+//  - foo()            -> Pair::new が [Int, Int] と [Line, Int] の 2 通りに実体化される
+//  - greeting_demo()  -> greeter (直接依存) と color / std (推移的依存) を引き込む
+
 struct MyGameState {}
 
 struct MyGameCharacters {}
@@ -61,6 +69,9 @@ scene main(g: MyGame) -> MyGame {{
   }
 
   hogehoge~~~
-  
+
+  #foo()
+  #greeting_demo()
+
   #endscene g
 }}

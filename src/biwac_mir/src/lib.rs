@@ -32,8 +32,10 @@
 
 mod body;
 mod codec;
+mod mono;
 mod place;
 mod rvalue;
+mod validate;
 
 use std::collections::BTreeMap;
 
@@ -49,8 +51,10 @@ pub use codec::{
     BIWAC_MIR_FORMAT_VERSION, DecodedMir, EncodeCtx, MIR_FILE_EXTENSION, MirDecodeError, decode,
     encode,
 };
+pub use mono::{InstanceKey, MonoInstance, MonoMir, MonoTyDef, MonoTyDefKind, TyInstanceKey};
 pub use place::{Place, PlaceElem};
 pub use rvalue::{BinOp, Const, Operand, Rvalue, StrId, StringPool, UnOp};
+pub use validate::{ValidationError, ValidationErrorKind, validate, validate_body};
 
 /// 1 パッケージ分の MIR。
 #[derive(Debug, Clone)]

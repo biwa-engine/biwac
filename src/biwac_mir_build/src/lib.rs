@@ -8,15 +8,12 @@
 //! 依存パッケージのシンボルはシグニチャしか手元に無く、本体が無い。
 
 mod builder;
-mod validate;
 
 use biwac_base::PackageId;
 use biwac_hir::{AssocValDefKind, Hir, ValDefKind};
 use biwac_lang_item::LangItemTable;
 use biwac_mir::Mir;
 use biwac_span::ValDefId;
-
-pub use validate::{ValidationError, validate};
 
 /// 自パッケージの全シンボルを MIR に落とす。
 ///

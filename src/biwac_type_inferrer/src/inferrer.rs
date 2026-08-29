@@ -202,20 +202,26 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     /// 単相化するターゲットが必要とする情報で、
     /// 単一化が終わると [`CallCtx`] ごと捨てられてしまうのでここで拾っておく。
     ///
-    /// LIMITATION: ここに載るのは、引数と戻り値の単一化で確定したものだけである。
-    /// メソッド呼び出しのレシーバは単一化に掛かっていないので
-    /// (`impl[T] Option[T]` の `T` のような) impl block 側のジェネリック型は載らない。
-    /// 単相化パスを入れるときに、レシーバからの割り当ての計算が別途必要になる。
-    fn record_call_genargs(&mut self, expr_id: Option<ExprId>, ctx: CallCtx) {
+    /// 載るのは
+    ///
+    ///  - 引数とレシーバの単一化で確定したもの
+    ///  - 戻り値にしか現れず、この時点では型変数のままのもの
+    ///    (推論の最後に `resolve_ty` が解く)
+    ///
+    /// の両方である。
+    fn record_call_genargs(
+        &mut self,
+        expr_id: Option<ExprId>,
+        assigns: HashMap<LocalGenDefId, Ty>,
+    ) {
         let Some(expr_id) = expr_id else {
             return;
         };
-        if ctx.gen_assigns.is_empty() {
+        if assigns.is_empty() {
             return;
         }
 
-        let mut assigns: Vec<(LocalGenDefId, Ty)> = ctx
-            .gen_assigns
+        let mut assigns: Vec<(LocalGenDefId, Ty)> = assigns
             .into_iter()
             .map(|(lgid, ty)| (lgid, self.apply_ty(ty)))
             .collect();
@@ -793,9 +799,14 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                     };
 
-                    self.record_call_genargs(expr_id, cctx);
+                    // 戻り値にしか現れないジェネリック型は、この時点ではまだ決まっていない。
+                    // 型変数を割り当てておき、外側の文脈で解かれた結果を
+                    // 推論の最後 (`resolve_ty`) に拾う。
+                    let mut subst = cctx.gen_assigns.clone();
+                    let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &mut subst);
+                    self.record_call_genargs(expr_id, subst);
 
-                    Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
+                    Ok(rty)
                 }
                 Callee::Var(v) => {
                     // 変数は名前解決済みであるため、先に型推論されているはず
@@ -910,9 +921,12 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                 };
 
-                self.record_call_genargs(expr_id, cctx);
+                // 同上。
+                let mut subst = cctx.gen_assigns.clone();
+                let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &mut subst);
+                self.record_call_genargs(expr_id, subst);
 
-                Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
+                Ok(rty)
             }
         }
     }
@@ -921,7 +935,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     // 呼び出して使用する際に未確定の場合、
     // 推論が必要なものとして型変数を割り当てる
     #[allow(dead_code)]
-    fn fresh_gen_ty(&mut self, ty: Ty) -> Ty {
+    fn fresh_gen_ty(&mut self, ty: Ty, subst: &mut HashMap<LocalGenDefId, Ty>) -> Ty {
         match ty.kind {
             TyKind::Int
             | TyKind::Float
@@ -934,9 +948,9 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     args: fty
                         .args
                         .into_iter()
-                        .map(|a| self.fresh_loc_gen_ty(a))
+                        .map(|a| self.fresh_loc_gen_ty(a, subst))
                         .collect(),
-                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty)),
+                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty, subst)),
                     genargs: fty.genargs,
                 }),
                 ty.span,
@@ -947,7 +961,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     genargs: defined_ty
                         .genargs
                         .into_iter()
-                        .map(|g| self.fresh_loc_gen_ty(g))
+                        .map(|g| self.fresh_loc_gen_ty(g, subst))
                         .collect(),
                 }),
                 ty.span,
@@ -959,7 +973,14 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     // 関数や型などの定義に存在するジェネリック型について、
     // 呼び出して使用する際に未確定の場合、
     // 推論が必要なものとして型変数を割り当てる
-    fn fresh_loc_gen_ty(&mut self, ty: Ty) -> Ty {
+    //
+    // `subst` は「このジェネリック型にこの型変数を割り当てた」という記録である。
+    // 同じ LocalGenDefId には必ず同じ型変数を割り当てなければならない。
+    // 出現ごとに別の変数を作ると
+    //  - 引数と戻り値の両方に `T` が出る関数で両者が繋がらない
+    //  - 呼び出し位置でどの `T` がどう決まったのかを後から辿れない
+    // ことになり、単相化が必要とする割り当てを記録できない。
+    fn fresh_loc_gen_ty(&mut self, ty: Ty, subst: &mut HashMap<LocalGenDefId, Ty>) -> Ty {
         match ty.kind {
             TyKind::Int
             | TyKind::Float
@@ -972,9 +993,9 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     args: fty
                         .args
                         .into_iter()
-                        .map(|a| self.fresh_loc_gen_ty(a))
+                        .map(|a| self.fresh_loc_gen_ty(a, subst))
                         .collect(),
-                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty)),
+                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty, subst)),
                     genargs: fty.genargs,
                 }),
                 ty.span,
@@ -985,12 +1006,19 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     genargs: defined_ty
                         .genargs
                         .into_iter()
-                        .map(|g| self.fresh_loc_gen_ty(g))
+                        .map(|g| self.fresh_loc_gen_ty(g, subst))
                         .collect(),
                 }),
                 ty.span,
             ),
-            TyKind::LocGen(_) => Ty::new(self.fresh(), ty.span),
+            TyKind::LocGen(lgid) => {
+                if let Some(assigned) = subst.get(&lgid) {
+                    return Ty::new(assigned.kind.clone(), ty.span);
+                }
+                let assigned = Ty::new(self.fresh(), ty.span.clone());
+                subst.insert(lgid, assigned.clone());
+                assigned
+            }
         }
     }
 

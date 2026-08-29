@@ -1,0 +1,11 @@
+[package]
+name = "biwac_mir_transform"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_span = { path = "../biwac_span"}
+biwac_hir = { path = "../biwac_hir"}
+biwac_dependency_metadata = { path = "../biwac_dependency_metadata"}
+biwac_mir = { path = "../biwac_mir"}

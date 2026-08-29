@@ -3,14 +3,17 @@
 //! ここで検出されるのはすべてコンパイラのバグであり、ユーザのコードの誤りではない。
 //! それでも黙って壊れた MIR を後段に渡すよりは、
 //! 作った直後に落ちたほうが原因を追いやすい。
+//!
+//! 構築の直後だけでなく、MIR→MIR のパスを掛けたあとにも走らせる。
+//! 「表現が満たすべき条件」なのでここ (表現の crate) に置いてある。
 
 use std::fmt;
 
-use biwac_hir::TyKind;
-use biwac_mir::{
+use crate::{
     BasicBlock, Body, Callee, Local, Mir, MirItem, Operand, Place, Rvalue, StatementKind,
     TerminatorKind,
 };
+use biwac_hir::TyKind;
 use biwac_span::ValDefId;
 
 #[derive(Debug, Clone)]
@@ -72,6 +75,7 @@ impl fmt::Display for ValidationError {
     }
 }
 
+/// パッケージ 1 つ分の MIR を検査する。
 pub fn validate(mir: &Mir) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     for item in mir.items.values() {
@@ -82,7 +86,8 @@ pub fn validate(mir: &Mir) -> Vec<ValidationError> {
     errors
 }
 
-fn validate_body(body: &Body, errors: &mut Vec<ValidationError>) {
+/// 関数 1 つ分を検査する。パスの後始末の確認に使う。
+pub fn validate_body(body: &Body, errors: &mut Vec<ValidationError>) {
     let mut push = |kind| {
         errors.push(ValidationError {
             def_id: body.def_id,
