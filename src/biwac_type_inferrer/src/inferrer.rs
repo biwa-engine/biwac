@@ -5,9 +5,9 @@ pub(crate) mod context;
 use biwac_ast::{BinOperator, UnOperator};
 use biwac_base::InternedIdent;
 use biwac_hir::{
-    AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnBody, FnSignature,
-    FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Primary, Stmt, StructLiteral, Ty, TyDefKind,
-    TyKind, TyVar, ValDefKind, VarIdKind,
+    AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprId, ExprVal, FnBody,
+    FnSignature, FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Primary, Stmt, StructLiteral,
+    Ty, TyDefKind, TyKind, TyVar, ValDefKind, VarIdKind,
 };
 use biwac_lang_item::LangItem;
 use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, VarId};
@@ -55,6 +55,38 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
     fn apply_ty(&mut self, t: Ty) -> Ty {
         Ty::new(self.apply(t.kind), t.span)
+    }
+
+    /// 推論が終わった後に、記録した型から型変数を取り除く。
+    ///
+    /// 推論の途中で使う [`Self::apply`] と違い、
+    /// 定義型のジェネリック引数の中まで潜る。
+    /// また、記録を書き換えるだけなので型変数を新しく作らない。
+    ///
+    /// 型は式を推論した時点で記録されるが、その時点ではまだ確定していないことがある。
+    ///
+    /// ```biwa
+    /// let aa = Pair::new(x, pair.y()).add();
+    ///                       ^^^^^^^^ ここの型が決まるのは Pair::new の単一化の後
+    /// ```
+    fn resolve_ty(&self, t: &Ty) -> Ty {
+        let kind = match &t.kind {
+            TyKind::Infer(InferTy::Var(v)) => match self.substitutions.get(v) {
+                Some(t2) => return Ty::new(self.resolve_ty(t2).kind, t.span.clone()),
+                None => t.kind.clone(),
+            },
+            TyKind::Defined(dt) => TyKind::Defined(DefinedTy {
+                def_id: dt.def_id,
+                genargs: dt.genargs.iter().map(|g| self.resolve_ty(g)).collect(),
+            }),
+            TyKind::Fn(fty) => TyKind::Fn(FnTy {
+                args: fty.args.iter().map(|a| self.resolve_ty(a)).collect(),
+                rty: Box::new(self.resolve_ty(&fty.rty)),
+                genargs: fty.genargs.clone(),
+            }),
+            _ => t.kind.clone(),
+        };
+        Ty::new(kind, t.span.clone())
     }
 
     // TODO:
@@ -163,6 +195,34 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 }
             }
         }
+    }
+
+    /// 呼び出し位置で確定したジェネリック型への割り当てを記録する。
+    ///
+    /// 単相化するターゲットが必要とする情報で、
+    /// 単一化が終わると [`CallCtx`] ごと捨てられてしまうのでここで拾っておく。
+    ///
+    /// LIMITATION: ここに載るのは、引数と戻り値の単一化で確定したものだけである。
+    /// メソッド呼び出しのレシーバは単一化に掛かっていないので
+    /// (`impl[T] Option[T]` の `T` のような) impl block 側のジェネリック型は載らない。
+    /// 単相化パスを入れるときに、レシーバからの割り当ての計算が別途必要になる。
+    fn record_call_genargs(&mut self, expr_id: Option<ExprId>, ctx: CallCtx) {
+        let Some(expr_id) = expr_id else {
+            return;
+        };
+        if ctx.gen_assigns.is_empty() {
+            return;
+        }
+
+        let mut assigns: Vec<(LocalGenDefId, Ty)> = ctx
+            .gen_assigns
+            .into_iter()
+            .map(|(lgid, ty)| (lgid, self.apply_ty(ty)))
+            .collect();
+        // 走査順を固定する。ビルドの決定論のため。
+        assigns.sort_by_key(|(lgid, _)| lgid.value());
+
+        self.call_genargs.insert(expr_id, assigns);
     }
 
     // callee の型を具体化する
@@ -470,7 +530,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
     fn infer_expr(&mut self, expr: &Expr) -> TyResult<Ty> {
         let res = match &expr.expr {
-            ExprVal::Primary(primary) => self.infer_primary_expr(primary),
+            ExprVal::Primary(primary) => self.infer_primary_expr(Some(expr.id), primary),
             ExprVal::Unary(u) => {
                 match &u.op {
                     // T: Int, Uint, Float のいずれかに対して適用可能で
@@ -665,7 +725,11 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
         }
     }
 
-    fn infer_primary_expr(&mut self, primary: &Primary) -> TyResult<Ty> {
+    /// `expr_id` はこの primary を包む [`Expr`] の id。
+    /// 呼び出し位置のジェネリック引数を記録するのに使う。
+    /// 代入文の左辺のように [`Expr`] に包まれていない primary では `None` になる
+    /// (左辺に呼び出しは現れないので記録するものが無い)。
+    fn infer_primary_expr(&mut self, expr_id: Option<ExprId>, primary: &Primary) -> TyResult<Ty> {
         match primary {
             Primary::Literal(l) => match l {
                 Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span())),
@@ -728,6 +792,8 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     } else {
                         panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                     };
+
+                    self.record_call_genargs(expr_id, cctx);
 
                     Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
                 }
@@ -793,13 +859,35 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     .borrow_mut()
                     .depends_on_val(&def_id);
 
-                let callee_ty = self.tctx.get_value_ty(&def_id).unwrap();
+                let callee_sign = self.tctx.get_value_signature(&def_id).unwrap();
 
-                let args = m
+                let mut args = m
                     .args
                     .iter()
                     .map(|a| self.infer_expr(a))
-                    .collect::<TyResult<_>>()?;
+                    .collect::<TyResult<Vec<_>>>()?;
+
+                // レシーバを第 1 引数として単一化に含める。
+                //
+                // `FnSignature::as_ty` は self を落とすので、
+                // それだけで単一化するとレシーバから決まるジェネリック型
+                // (`impl[T] Pair[T, U]` の `T`, `U` など) が確定しないまま残り、
+                // 呼び出し側の式に呼び先のジェネリック型が漏れてしまう。
+                let mut callee_args: Vec<Ty> =
+                    callee_sign.args.iter().map(|a| a.ty.clone()).collect();
+                if let Some(self_ty) = &callee_sign.self_ty {
+                    callee_args.insert(0, self_ty.clone());
+                    args.insert(0, left.clone());
+                }
+
+                let callee_ty = Ty::new(
+                    TyKind::Fn(FnTy {
+                        args: callee_args,
+                        rty: Box::new(callee_sign.rty.clone()),
+                        genargs: callee_sign.genargs.iter().map(|(_, g)| *g).collect(),
+                    }),
+                    callee_sign.span.clone(),
+                );
 
                 let rty = Ty::new(self.fresh(), primary.span());
 
@@ -821,6 +909,8 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 } else {
                     panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
                 };
+
+                self.record_call_genargs(expr_id, cctx);
 
                 Ok(self.fresh_loc_gen_ty(*unified_fty.rty))
             }
@@ -1023,7 +1113,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             Stmt::Assign(ass) => {
                 match &ass.dst {
                     Primary::Variable(_) | Primary::MemberAccess(_) => {
-                        let dst = self.infer_primary_expr(&ass.dst)?;
+                        let dst = self.infer_primary_expr(None, &ass.dst)?;
                         let src = self.infer_expr(&ass.src)?;
 
                         self.unify(dst, src)?;
@@ -1201,9 +1291,35 @@ impl<'a> TyCtx<'a> {
             });
         };
 
+        // 記録した型に残っている型変数を、最後にまとめて解く。
+        let expr_tys = fctx
+            .exprs
+            .iter()
+            .map(|(id, ty)| (*id, fctx.resolve_ty(ty)))
+            .collect();
+        let var_tys = fctx
+            .vars
+            .iter()
+            .map(|(id, ty)| (*id, fctx.resolve_ty(ty)))
+            .collect();
+        let call_genargs = fctx
+            .call_genargs
+            .iter()
+            .map(|(id, assigns)| {
+                (
+                    *id,
+                    assigns
+                        .iter()
+                        .map(|(lgid, ty)| (*lgid, fctx.resolve_ty(ty)))
+                        .collect(),
+                )
+            })
+            .collect();
+
         Ok(TyInfo {
-            expr_tys: fctx.exprs,
-            var_tys: fctx.vars,
+            expr_tys,
+            var_tys,
+            call_genargs,
         })
     }
 
@@ -1238,10 +1354,12 @@ impl<'a> TyCtx<'a> {
                 ValDefKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
                     f.var_tys = ty_info.var_tys;
+                    f.call_genargs = ty_info.call_genargs;
                 }
                 ValDefKind::NovelScene(n) => {
                     n.expr_tys = ty_info.expr_tys;
                     n.var_tys = ty_info.var_tys;
+                    n.call_genargs = ty_info.call_genargs;
                 }
                 ValDefKind::Native(_) => {
                     // nothing to do
@@ -1292,6 +1410,7 @@ impl<'a> TyCtx<'a> {
                 AssocValDefKind::Fn(f) => {
                     f.expr_tys = ty_info.expr_tys;
                     f.var_tys = ty_info.var_tys;
+                    f.call_genargs = ty_info.call_genargs;
                 }
                 AssocValDefKind::NativeFn(_) => {
                     // nothing to do

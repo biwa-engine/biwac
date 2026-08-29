@@ -38,6 +38,17 @@ pub struct FnDef {
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<VarId, Ty>,
 
+    // 呼び出し式ごとの、呼び先のジェネリック型への割り当て。
+    //
+    // 単相化 (monomorphization) を行うターゲットでは、
+    // 呼び出し位置でどの型が代入されたのかを知る必要がある。
+    // 推論の途中でしか計算されない情報なので、ここに残しておく。
+    //
+    // 位置ではなく LocalGenDefId との組で持つのは、
+    // 具体化が Ty::embody_by_loc_gen_ty_id で行われるためである。
+    // LocalGenDefId 順に並ぶ。
+    pub call_genargs: HashMap<ExprId, Vec<(LocalGenDefId, Ty)>>,
+
     pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
@@ -166,6 +177,9 @@ pub struct NovelSceneDef {
     // 型推論された結果の式に対する型が記録される
     pub expr_tys: HashMap<ExprId, Ty>,
     pub var_tys: HashMap<VarId, Ty>,
+
+    // FnDef と同じ。
+    pub call_genargs: HashMap<ExprId, Vec<(LocalGenDefId, Ty)>>,
 }
 
 impl FnDef {
@@ -181,6 +195,7 @@ impl FnDef {
             body,
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
+            call_genargs: HashMap::new(),
             impl_genargs,
         }
     }
@@ -223,6 +238,7 @@ impl NovelSceneDef {
             body,
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
+            call_genargs: HashMap::new(),
         }
     }
 }

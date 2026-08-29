@@ -1,0 +1,129 @@
+// MIR の lowering を確かめるための小さなライブラリ。
+//
+// 意図: TypeScript の codegen が todo!() のまま扱えていない構文
+// (while 文、ブロック文) を含む。したがって既定のビルド経路には乗せず、
+// `biwac --emit mir` で MIR の構築だけを確かめるのに使う。
+//
+// 依存を持たないので lang item も文字列リテラルも使えない。
+// 制御フローと構造体だけで書く。
+//
+// NOTE: 条件式の末尾に識別子を置くと (`while i < n {` や `if a > b {`) パースできない。
+// `n {` が構造体リテラルの開始に見えるためで、MIR とは無関係な既知の制限である。
+// このファイルではその形を避けている。
+
+// while 文。
+//
+// 意図: MIR で唯一 CFG に循環を作る構文。
+// ループ頭のブロックと、そこへ戻る後方辺ができることを確かめる。
+// 後方辺の行き先がループ頭であること (= CFG が簡約可能であること) は
+// validator が検査する。
+fn sum_to_ten() -> Int {
+  let total = 0;
+  let i = 0;
+  while i < 10 {
+    total = total + i;
+    i = i + 1;
+  }
+  return total;
+}
+
+// 条件が呼び出しを含む while。
+//
+// 意図: 条件式の評価そのものが複数のブロックに分かれる。
+// ループ頭は「条件の評価を始めるブロック」であって
+// 「分岐するブロック」ではない、ということの確認。
+fn count_down(n: Int) -> Int {
+  let steps = 0;
+  let x = n;
+  while positive(x) {
+    x = x - 1;
+    steps = steps + 1;
+  }
+  return steps;
+}
+
+fn positive(x: Int) -> Bool {
+  return x > 0;
+}
+
+// ブロック文。
+//
+// 意図: 名前解決の時点で用途を終えているので、
+// MIR では中身が外側にそのまま並ぶだけになり、ブロックの境目が消える。
+fn nested_block(x: Int) -> Int {
+  let y = 0;
+  {
+    y = x + 1;
+    {
+      y = y * 2;
+    }
+  }
+  return y;
+}
+
+// 入れ子の if 文と、else の無い if。
+//
+// 意図: 分岐がすべて合流ブロックに集まること。
+// else が無い側にも合流への辺が要る。
+fn classify(x: Int) -> Int {
+  let r = 0;
+  if x > 0 {
+    if x > 10 {
+      r = 2;
+    } else {
+      r = 1;
+    }
+  } else {
+    r = 0;
+  }
+  if r == 2 {
+    r = r + 100;
+  }
+  return r;
+}
+
+// if 式。
+//
+// 意図: 文ではなく式なので、両方の枝が同じ場所 (戻り値スロット `_0`) に書く。
+// destination-passing がそのまま効くところ。
+fn abs_or_zero(a: Int) -> Int {
+  if a > 0 { a } else { 0 }
+}
+
+struct Counter {
+  count: Int,
+  step: Int,
+}
+
+impl Counter {
+  fn new(step: Int) -> Self {
+    Self {
+      count = 0,
+      step = step,
+    }
+  }
+
+  // メンバへの代入。
+  //
+  // 意図: 代入の左辺が local ではなく「local + フィールド射影」になる。
+  // Place に射影が要る理由がここにある。
+  fn advance(self) -> Self {
+    self.count = self.count + self.step;
+    return self;
+  }
+
+  fn get(self) -> Int {
+    return self.count;
+  }
+}
+
+// 早期 return。
+//
+// 意図: return の後ろに文が続く。行き先の無いブロックができるが、
+// 到達しないので構築の最後に落とされる。
+fn first_positive(a: Int, b: Int) -> Int {
+  if a > 0 {
+    return a;
+  }
+  return b;
+}

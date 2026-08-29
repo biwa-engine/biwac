@@ -159,6 +159,21 @@ macro_rules! impl_typed_def_id {
                 self.0.local.0
             }
         }
+
+        // 走査順を固定したい箇所 (MIR のシンボル表など) で
+        // BTreeMap のキーにできるようにする。
+        // 順序そのものに意味は無く、ビルドの決定論のためにある。
+        impl Ord for $typed_def_id {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.as_u64().cmp(&other.0.as_u64())
+            }
+        }
+
+        impl PartialOrd for $typed_def_id {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
     };
 }
 

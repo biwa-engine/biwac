@@ -1,0 +1,6 @@
+{
+  "name": "mir_fixture",
+  "version": "0.1.0",
+  "description": "test fixture: constructs that only the MIR path handles",
+  "dependencies": []
+}

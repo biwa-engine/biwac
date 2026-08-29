@@ -17,6 +17,8 @@ members = [
   "src/biwac_fingerprint",
   "src/biwac_name_resolver",
   "src/biwac_type_inferrer",
+  "src/biwac_mir",
+  "src/biwac_mir_build",
   "src/biwac_generator",
   "src/biwac_driver",
   "src/biwac_cli"

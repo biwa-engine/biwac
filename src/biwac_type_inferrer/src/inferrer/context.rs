@@ -5,11 +5,11 @@ use std::sync::Arc;
 use biwac_base::{IdentInterner, InternedIdent, PackageId};
 use biwac_dependency_metadata::DepMetadata;
 use biwac_hir::{
-    AssocValDefKind, DefinedTyImpl, ExprId, Hir, Ident, InferTy, Ty, TyDefKind, TyKind, TyVar,
-    ValDefKind,
+    AssocValDefKind, DefinedTyImpl, ExprId, FnSignature, Hir, Ident, InferTy, Ty, TyDefKind,
+    TyKind, TyVar, ValDefKind,
 };
 use biwac_lang_item::{LangItem, LangItemKind, LangItemTable};
-use biwac_span::{TyDefId, ValDefId, VarId};
+use biwac_span::{LocalGenDefId, TyDefId, ValDefId, VarId};
 
 use crate::{TyError, TyResult};
 
@@ -145,15 +145,23 @@ impl<'a> TyCtx<'a> {
     }
 
     pub(super) fn get_value_ty(&self, def_id: &ValDefId) -> Option<Ty> {
+        self.get_value_signature(def_id).map(|s| s.as_ty())
+    }
+
+    /// シンボルのシグニチャ。
+    ///
+    /// [`Self::get_value_ty`] が返す [`biwac_hir::FnTy`] は `self` を落としてしまうので、
+    /// レシーバまで含めて見たい場合はこちらを使う。
+    pub(super) fn get_value_signature(&self, def_id: &ValDefId) -> Option<FnSignature> {
         if def_id.pkg().is_self() {
             // self package の top-level fn は hir.vals から直接返す。
             if let Some(v) = self.hir.vals.get(def_id) {
-                let fty = match v {
-                    ValDefKind::Fn(fn_def) => fn_def.signature.as_ty(),
-                    ValDefKind::Native(fn_def) => fn_def.signature.as_ty(),
-                    ValDefKind::NovelScene(scene_def) => scene_def.signature.as_ty(),
+                let sign = match v {
+                    ValDefKind::Fn(fn_def) => fn_def.signature.clone(),
+                    ValDefKind::Native(fn_def) => fn_def.signature.clone(),
+                    ValDefKind::NovelScene(scene_def) => scene_def.signature.clone(),
                 };
-                Some(fty)
+                Some(sign)
             } else {
                 let (ty_def_id, assoc_name) = self.hir.assoc_val_map.get(def_id)?;
 
@@ -169,8 +177,8 @@ impl<'a> TyCtx<'a> {
                     .unwrap()
                     .val_content
                 {
-                    AssocValDefKind::Fn(fn_def) => Some(fn_def.signature.as_ty()),
-                    AssocValDefKind::NativeFn(fn_def) => Some(fn_def.signature.as_ty()),
+                    AssocValDefKind::Fn(fn_def) => Some(fn_def.signature.clone()),
+                    AssocValDefKind::NativeFn(fn_def) => Some(fn_def.signature.clone()),
                 }
             }
         } else {
@@ -181,7 +189,7 @@ impl<'a> TyCtx<'a> {
                 let mut ig = self.interner.borrow_mut();
                 dep.get_ext_val_kind(def_id.local_idx(), pkg_id, &mut ig)
             } {
-                Some(sign.as_ty())
+                Some(sign)
             } else {
                 // 外部パッケージ assoc fn マップ確認
                 // val_content から FnSignature を取り出して ValDefKind::ExternalFn に変換してキャッシュする。
@@ -191,16 +199,12 @@ impl<'a> TyCtx<'a> {
                 drop(assoc_map); // get_ty_impl が ext_ty_cache を borrow するため先に解放
 
                 let ty_impl = self.get_ty_impl(&ty_def_id)?;
-                ty_impl
-                    .vals
-                    .get(&method_id)?
-                    .vals
-                    .get(def_id)
-                    .map(|pair| match &pair.val_content {
+                ty_impl.vals.get(&method_id)?.vals.get(def_id).map(|pair| {
+                    match &pair.val_content {
                         AssocValDefKind::NativeFn(f) => Some(f.signature.clone()),
                         AssocValDefKind::Fn(f) => Some(f.signature.clone()),
-                    })?
-                    .map(|sign| sign.as_ty())
+                    }
+                })?
             }
         }
     }
@@ -250,6 +254,10 @@ pub struct FnTyCtx<'tctx, 'a> {
     pub(super) substitutions: HashMap<TyVar, Ty>,
     pub(super) vars: HashMap<VarId, Ty>,
     pub(super) exprs: HashMap<ExprId, Ty>,
+
+    /// 呼び出し式ごとの、呼び先のジェネリック型への割り当て。
+    /// [`biwac_hir::FnDef::call_genargs`] にそのまま渡る。
+    pub(super) call_genargs: HashMap<ExprId, Vec<(LocalGenDefId, Ty)>>,
     pub(super) rty: Ty,
 }
 
@@ -257,6 +265,7 @@ pub struct FnTyCtx<'tctx, 'a> {
 pub(super) struct TyInfo {
     pub(super) expr_tys: HashMap<ExprId, Ty>,
     pub(super) var_tys: HashMap<VarId, Ty>,
+    pub(super) call_genargs: HashMap<ExprId, Vec<(LocalGenDefId, Ty)>>,
 }
 
 impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
@@ -267,6 +276,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             substitutions: HashMap::new(),
             vars: HashMap::new(),
             exprs: HashMap::new(),
+            call_genargs: HashMap::new(),
             rty,
         }
     }

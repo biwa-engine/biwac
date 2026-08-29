@@ -1,0 +1,12 @@
+[package]
+name = "biwac_mir_build"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base"}
+biwac_span = { path = "../biwac_span"}
+biwac_ast = { path = "../biwac_ast"}
+biwac_hir = { path = "../biwac_hir"}
+biwac_lang_item = { path = "../biwac_lang_item"}
+biwac_mir = { path = "../biwac_mir"}

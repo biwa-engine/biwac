@@ -15,6 +15,20 @@ struct Args {
     /// キャッシュを疑ったときの逃げ道として用意しておく。
     #[arg(short, long)]
     rebuild: bool,
+
+    /// Emit the given intermediate representation instead of the default output.
+    ///
+    /// rustc と同じく、既定の出力を置き換える。
+    /// 中間表現は成果物ではなくキャッシュもされないので、
+    /// 指定すると鮮度に関わらず建て直しになる。
+    #[arg(long, value_enum)]
+    emit: Option<EmitKind>,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum EmitKind {
+    /// MIR のテキスト表現を `<build dir>/<package>.mir` に書き出す。
+    Mir,
 }
 
 fn main() {
@@ -36,6 +50,7 @@ fn main() {
         pkg_root_path.to_path_buf(),
         biwac_driver::BuildOptions {
             force_rebuild: args.rebuild,
+            emit_mir: args.emit == Some(EmitKind::Mir),
         },
     );
 

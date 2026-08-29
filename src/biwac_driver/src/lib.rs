@@ -20,6 +20,13 @@ use dep_graph::DepGraph;
 pub struct BuildOptions {
     /// 鮮度判定を飛ばして全パッケージを建て直す。
     pub force_rebuild: bool,
+
+    /// MIR を構築して、そのテキスト表現を `<build dir>/<package>.mir` に書き出す。
+    ///
+    /// 既定のビルドでは MIR を作らない。
+    /// TypeScript は HIR から直接生成しており MIR を通らないので、
+    /// 作っても捨てるだけになるためである。
+    pub emit_mir: bool,
 }
 
 /// このコンパイラの同一性。
@@ -41,6 +48,14 @@ type SvhMap = std::collections::HashMap<PackageId, Hash64>;
 
 pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> {
     println!("{}", "Compiling...".green().bold(),);
+
+    // MIR は成果物ではなくキャッシュもされないので、
+    // 鮮度判定で飛ばされると何も出力されずに終わってしまう。
+    // 求められたら建て直す。
+    let options = BuildOptions {
+        force_rebuild: options.force_rebuild || options.emit_mir,
+        ..options
+    };
 
     let metadata = biwac_metadata_loader::try_load_package_metadata(pkg_root_path.clone())
         .map_err(|e| {
@@ -121,12 +136,14 @@ pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> 
     // キャッシュが効いた依存の .ts も要るし、
     // 依存から外れたパッケージの .ts は消さなければならない。
     let build_dir_path = prepare_build_dir(&pkg_root_path)?;
-    collect_dep_bins(
-        &dep_graph.all_packages(),
-        metadata.metadata.name.value(),
-        &packages_dir,
-        &build_dir_path,
-    )?;
+    if !options.emit_mir {
+        collect_dep_bins(
+            &dep_graph.all_packages(),
+            metadata.metadata.name.value(),
+            &packages_dir,
+            &build_dir_path,
+        )?;
+    }
 
     build_or_reuse_package(
         pkg_root_path,
@@ -260,7 +277,15 @@ fn build_or_reuse_package(
         &dep_svhs,
         pkg_root,
         build_dir_path.clone(),
+        options,
     )?;
+
+    // `--emit` を付けたビルドは既定の生成物を作っていないので、
+    // 鮮度を記録してはいけない。記録すると次回「Fresh」と言い張って
+    // 生成物が無いまま成功してしまう。
+    if options.emit_mir {
+        return Ok(svh);
+    }
 
     // 次回の鮮度判定のために、今回のビルドの状態を記録する。
     let fingerprint = Fingerprint::of_build(
@@ -326,7 +351,9 @@ fn metadata_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
 /// codegen の出力先。
 fn bin_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
     if cfg!(feature = "typescript") {
-        build_dir_path.join("typescript").join(format!("{pkg_name}.ts"))
+        build_dir_path
+            .join("typescript")
+            .join(format!("{pkg_name}.ts"))
     } else {
         todo!()
     }
@@ -426,6 +453,7 @@ fn load_analyze_and_codegen_single_package(
     dep_svhs: &[(PackageId, Hash64)],
     pkg_root_path: PathBuf,
     build_dir_path: PathBuf,
+    options: BuildOptions,
 ) -> Result<Hash64, ()> {
     // 型推論と codegen は「名前で引けるか」を問わないので、
     // direct かどうかを落として推移閉包すべてを渡す。
@@ -482,6 +510,21 @@ fn load_analyze_and_codegen_single_package(
             .infer()
             .unwrap();
 
+    // `--emit` は既定の出力を置き換える (rustc と同じ流儀)。
+    // 中間表現だけを見たいときに codegen まで走らせる理由が無いのと、
+    // 中間表現の検証をターゲットの実装状況に縛られずに行えるようにするため。
+    if options.emit_mir {
+        return emit_mir(
+            &hir,
+            &lang_items,
+            interner,
+            &ext_pkgs_for_ty,
+            &build_dir_path,
+            metadata,
+        )
+        .map(|_| svh);
+    }
+
     // codegen も lang item を使う。
     // novel statement を std の関数呼び出しに展開するため。
     // 外部パッケージのメタデータはシンボル名のマングリングに使う
@@ -498,6 +541,99 @@ fn load_analyze_and_codegen_single_package(
     write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
 
     Ok(svh)
+}
+
+/// MIR を構築して、テキスト表現を書き出す。
+///
+/// 不変条件の検査もここで走らせる。
+/// 検査に落ちるのはコンパイラのバグなので、黙って出力せずエラーにする。
+fn emit_mir(
+    hir: &biwac_hir::Hir,
+    lang_items: &biwac_lang_item::LangItemTable,
+    interner: &biwac_base::IdentInterner,
+    ext_pkgs: &[(PackageId, Arc<DepMetadata>)],
+    build_dir_path: &Path,
+    metadata: &biwac_base::MetadataHolder,
+) -> Result<(), ()> {
+    let mir = biwac_mir_build::build(hir, lang_items);
+
+    let errors = biwac_mir_build::validate(&mir);
+    if !errors.is_empty() {
+        eprintln!("Error: built MIR is broken (this is a compiler bug):");
+        for e in &errors {
+            eprintln!("  {e}");
+        }
+        biwac_base::print_error_finish_message(errors.len());
+        return Err(());
+    }
+
+    let externals = ExternalSymbolNames {
+        ext_pkgs,
+        packages: &hir.packages,
+        interner,
+    };
+    let text = biwac_mir::dump(
+        &mir,
+        &biwac_mir::DumpCtx {
+            hir,
+            interner,
+            externals: Some(&externals),
+        },
+    );
+
+    let path = build_dir_path.join(format!("{}.mir", metadata.metadata.name.value()));
+    std::fs::write(&path, text).map_err(|e| {
+        eprintln!("Error: failed to write {:?}: {}", path, e);
+        biwac_base::print_error_finish_message(1);
+    })?;
+
+    Ok(())
+}
+
+/// 依存パッケージのシンボル名を `.biwameta` から引く。
+///
+/// HIR には依存パッケージのシンボルが載っていないので、
+/// MIR のダンプでそのまま出すと id しか見えない。
+/// 読みやすさのためだけの仕組みで、引けなければ id で表示される。
+struct ExternalSymbolNames<'a> {
+    ext_pkgs: &'a [(PackageId, Arc<DepMetadata>)],
+    packages: &'a std::collections::HashMap<PackageId, biwac_base::InternedIdent>,
+    interner: &'a IdentInterner,
+}
+
+impl ExternalSymbolNames<'_> {
+    fn qualified(&self, pkg_id: PackageId, local_idx: u32) -> Option<String> {
+        let (_, meta) = self.ext_pkgs.iter().find(|(id, _)| *id == pkg_id)?;
+        let (name, modu) = meta.symbol_mangling_info(local_idx)?;
+
+        let pkg_name = self
+            .packages
+            .get(&pkg_id)
+            .and_then(|i| self.interner.get_str(i))
+            .unwrap_or("?");
+
+        // `std::types::string::String` の形にする。
+        // ルートモジュール (main / lib) は空の経路になる。
+        let segments: Vec<String> = modu.into();
+        let mut path = String::from(pkg_name);
+        for seg in segments {
+            path.push_str("::");
+            path.push_str(&seg);
+        }
+        path.push_str("::");
+        path.push_str(name);
+        Some(path)
+    }
+}
+
+impl biwac_mir::ExternalNames for ExternalSymbolNames<'_> {
+    fn ty_name(&self, def_id: biwac_span::TyDefId) -> Option<String> {
+        self.qualified(def_id.pkg(), def_id.local_idx())
+    }
+
+    fn val_name(&self, def_id: biwac_span::ValDefId) -> Option<String> {
+        self.qualified(def_id.pkg(), def_id.local_idx())
+    }
 }
 
 /// パッケージ内の全モジュールに属性検証パスを走らせる。
@@ -635,5 +771,123 @@ fn write_bin(
         f.write_all(bin.as_bytes())
     } else {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::{BuildOptions, compile};
+
+    fn emit_mir_of(pkg: &str) -> String {
+        let root = Path::new("../../assets/tests").join(pkg);
+
+        compile(
+            root.clone(),
+            BuildOptions {
+                force_rebuild: true,
+                emit_mir: true,
+            },
+        )
+        .expect("MIR emission failed");
+
+        std::fs::read_to_string(
+            root.join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+                .join(format!("{pkg}.mir")),
+        )
+        .expect("MIR dump was not written")
+    }
+
+    /// 抜き出したい関数の本体だけを取り出す。
+    fn body_of<'a>(mir: &'a str, header: &str) -> &'a str {
+        let start = mir
+            .find(header)
+            .unwrap_or_else(|| panic!("`{header}` is not in the dump:\n{mir}"));
+        let rest = &mir[start..];
+        let end = rest.find("\n}\n").expect("unterminated body");
+        &rest[..end]
+    }
+
+    // MIR でしか扱えない構文を含むフィクスチャ。
+    //
+    // TypeScript の codegen は while 文とブロック文が todo!() のままなので、
+    // このパッケージは `--emit mir` でしかビルドできない。
+    #[test]
+    fn mir_fixture() {
+        let mir = emit_mir_of("mir_fixture");
+
+        // while: ループ頭へ戻る後方辺ができる。
+        // validator が簡約可能性まで見ているので、
+        // ここを通っている時点で後方辺の行き先はループ頭である。
+        let sum = body_of(&mir, "fn sum_to_ten()");
+        assert!(sum.contains("switchInt"), "{sum}");
+        assert_eq!(
+            sum.matches("goto -> bb1").count(),
+            2,
+            "loop entry and back edge are both expected:\n{sum}"
+        );
+
+        // 条件が呼び出しを含む while は、条件の評価だけで 2 ブロックに分かれる。
+        let count_down = body_of(&mir, "fn count_down(");
+        assert!(count_down.contains("call positive"), "{count_down}");
+
+        // ブロック文は境目が消えて、外側にそのまま並ぶ。
+        let nested = body_of(&mir, "fn nested_block(");
+        assert_eq!(
+            nested.matches("bb").count(),
+            1,
+            "a block statement must not create a new basic block:\n{nested}"
+        );
+
+        // if 式は両方の枝が同じ場所 (戻り値スロット) に書く。
+        let abs = body_of(&mir, "fn abs_or_zero(");
+        assert_eq!(abs.matches("_0 =").count(), 2, "{abs}");
+
+        // メンバへの代入は Place の射影になる。
+        let advance = body_of(&mir, "fn Counter::advance(");
+        assert!(
+            advance.contains("_1.count = Add(_1.count, _1.step)"),
+            "{advance}"
+        );
+
+        // struct literal は集約になる。
+        let new = body_of(&mir, "fn Counter::new(");
+        assert!(
+            new.contains("Counter { count: const 0, step: _1 }"),
+            "{new}"
+        );
+    }
+
+    // 依存パッケージと scene を含むパッケージ。
+    #[test]
+    fn test1() {
+        let mir = emit_mir_of("test1");
+
+        // 再帰と、値を返す if 式。
+        let fact = body_of(&mir, "fn fact(");
+        assert!(fact.contains("call fact("), "{fact}");
+
+        // 依存パッケージのシンボルの呼び出しと、
+        // 推移的依存 (color) の型が local の型に現れること。
+        // test1 は color に依存していないので、
+        // 推移閉包のメタデータがロードされていないとここは解決できない。
+        let demo = body_of(&mir, "fn greeting_demo()");
+        assert!(demo.contains("call greeter::greet("), "{demo}");
+        assert!(demo.contains("color::Rgb"), "{demo}");
+
+        // scene は普通の関数として落ちる。
+        // novel 文は lang item への通常の呼び出しになり、中断は現れない。
+        let scene = body_of(&mir, "fn main(");
+        assert!(
+            scene.contains("call std::game::base_engine::write("),
+            "{scene}"
+        );
+        assert!(!scene.contains("yield"), "{scene}");
+
+        // 呼び出し位置のジェネリック引数が記録されていること。
+        // レシーバから決まる分も含む (Pair::y の T18/T19 は self からしか決まらない)。
+        let foo = body_of(&mir, "fn foo()");
+        assert!(foo.contains("Pair::y[T18 = Line, T19 = Int]"), "{foo}");
     }
 }

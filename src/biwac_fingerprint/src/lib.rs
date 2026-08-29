@@ -50,7 +50,7 @@ pub const BIWAC_FINGERPRINT_FORMAT_VERSION: u32 = 1;
 ///
 /// `.biwameta` の形式版数のように、別の場所で管理されている版数は
 /// [`compiler_hash`] の引数として混ぜる。
-pub const BIWAC_FINGERPRINT_COMPILER_EPOCH: u32 = 1;
+pub const BIWAC_FINGERPRINT_COMPILER_EPOCH: u32 = 2;
 
 pub const FINGERPRINT_FILE_EXTENSION: &str = "biwafp";
 
