@@ -31,13 +31,13 @@
 //! 将来のデバッグ情報のために必要で、かつ後から復元できない唯一の情報だからである。
 
 mod body;
+mod codec;
 mod place;
-mod pretty;
 mod rvalue;
 
 use std::collections::BTreeMap;
 
-use biwac_base::PackageName;
+use biwac_base::{PackageId, PackageName};
 use biwac_hir::Ty;
 use biwac_span::{LocalGenDefId, Span, ValDefId};
 
@@ -45,14 +45,27 @@ pub use body::{
     BasicBlock, BasicBlockData, Body, Callee, GenArgs, Local, LocalDecl, Statement, StatementKind,
     SwitchTargets, Terminator, TerminatorKind,
 };
+pub use codec::{
+    BIWAC_MIR_FORMAT_VERSION, DecodedMir, EncodeCtx, MIR_FILE_EXTENSION, MirDecodeError, decode,
+    encode,
+};
 pub use place::{Place, PlaceElem};
-pub use pretty::{DumpCtx, ExternalNames, dump};
 pub use rvalue::{BinOp, Const, Operand, Rvalue, StrId, StringPool, UnOp};
 
 /// 1 パッケージ分の MIR。
 #[derive(Debug, Clone)]
 pub struct Mir {
     pub pkg_name: PackageName,
+
+    /// このパッケージの [`PackageId`]。`(name, version)` のハッシュ由来の一意な id。
+    ///
+    /// メモリ上では自パッケージのシンボルの `def_id.pkg()` は
+    /// [`PackageId::SELF_PACKAGE`] のままだが (HIR と同じ流儀)、
+    /// この `Mir` がどのパッケージのものかはここで分かる。
+    ///
+    /// [`Const::Str`] が指す文字列プールはパッケージ相対なので、
+    /// 依存の MIR を読み込んだ後は `(pkg_id, StrId)` で初めて一意になる。
+    pub pkg_id: PackageId,
 
     /// 値名前空間のシンボルごとの本体。
     ///
@@ -69,9 +82,10 @@ pub struct Mir {
 }
 
 impl Mir {
-    pub fn new(pkg_name: PackageName) -> Self {
+    pub fn new(pkg_name: PackageName, pkg_id: PackageId) -> Self {
         Self {
             pkg_name,
+            pkg_id,
             items: BTreeMap::new(),
             strings: StringPool::default(),
         }

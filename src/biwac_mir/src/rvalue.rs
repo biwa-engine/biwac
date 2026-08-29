@@ -108,6 +108,11 @@ impl StringPool {
         StrId(idx)
     }
 
+    /// 索引から [`StrId`] を引く。ディスク形式から読み戻すのに使う。
+    pub fn id(&self, idx: u32) -> Option<StrId> {
+        ((idx as usize) < self.strings.len()).then_some(StrId(idx))
+    }
+
     pub fn get(&self, id: StrId) -> Option<&str> {
         self.strings.get(id.index()).map(|s| s.as_str())
     }

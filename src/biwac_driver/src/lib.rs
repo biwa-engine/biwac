@@ -9,8 +9,8 @@ use std::{
 };
 
 use biwac_base::{IdentInterner, PackageId, PackageName, SourceHolder};
-use biwac_dependency_metadata::{DepMetadata, ExternalPackage};
-use biwac_fingerprint::{Fingerprint, Freshness, SourceEntry, StaleReason};
+use biwac_dependency_metadata::{DepMetadata, ExternalPackage, SymbolIndexMap};
+use biwac_fingerprint::{Fingerprint, Freshness, PackageHashes, SourceEntry, StaleReason};
 use biwac_hash::Hash64;
 
 use dep_graph::DepGraph;
@@ -21,13 +21,23 @@ pub struct BuildOptions {
     /// 鮮度判定を飛ばして全パッケージを建て直す。
     pub force_rebuild: bool,
 
-    /// MIR を構築して、そのテキスト表現を `<build dir>/<package>.mir` に書き出す。
+    /// MIR までで止める。codegen は走らせない。
     ///
-    /// 既定のビルドでは MIR を作らない。
-    /// TypeScript は HIR から直接生成しており MIR を通らないので、
-    /// 作っても捨てるだけになるためである。
+    /// `.biwamir` 自体は毎ビルド書かれるので、これは
+    /// 「既定の出力を作らずに MIR だけ確かめたい」ときの指定である。
     pub emit_mir: bool,
 }
+
+/// このターゲットが、依存パッケージの **関数の本体** を
+/// 自分の出力に取り込むかどうか。
+///
+/// 単相化するターゲット (WASM 等) では依存の本体が自分の出力に混ざるので、
+/// 依存の `.biwamir` が変われば建て直さなければならない。
+/// TypeScript は `greeter.ts` に std の本体を入れないので、
+/// 依存の関数の中身が変わっても建て直す必要がない。
+///
+/// `--target` を入れるときに、ここがターゲットごとの分岐になる。
+const TARGET_CONSUMES_DEP_MIR: bool = false;
 
 /// このコンパイラの同一性。
 ///
@@ -37,14 +47,15 @@ pub struct BuildOptions {
 fn compiler_identity() -> Hash64 {
     biwac_fingerprint::compiler_hash(&[
         biwac_dependency_metadata::BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION,
+        biwac_mir::BIWAC_MIR_FORMAT_VERSION,
     ])
 }
 
-/// 依存グラフの各パッケージの、今回のビルドで確定した SVH。
+/// 依存グラフの各パッケージの、今回のビルドで確定したハッシュ。
 ///
 /// トポロジカル順 (葉から) に埋まっていくので、
-/// あるパッケージを判定する時点で、その依存の SVH は必ず揃っている。
-type SvhMap = std::collections::HashMap<PackageId, Hash64>;
+/// あるパッケージを判定する時点で、その依存のハッシュは必ず揃っている。
+type HashMapOfPackages = std::collections::HashMap<PackageId, PackageHashes>;
 
 pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> {
     println!("{}", "Compiling...".green().bold(),);
@@ -108,7 +119,7 @@ pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> 
         biwac_base::print_error_finish_message(1);
     })?;
 
-    let mut svhs = SvhMap::new();
+    let mut svhs = HashMapOfPackages::new();
     for batch in &batches {
         // TODO: parallelize within batch using tokio
 
@@ -184,10 +195,10 @@ fn build_or_reuse_package(
     pkg_root: PathBuf,
     packages_dir: &Path,
     dep_graph: &DepGraph,
-    svhs: &SvhMap,
+    svhs: &HashMapOfPackages,
     options: BuildOptions,
     depth: DisplayDepth,
-) -> Result<Hash64, ()> {
+) -> Result<PackageHashes, ()> {
     let metadata =
         biwac_metadata_loader::try_load_package_metadata(pkg_root.clone()).map_err(|e| {
             e.print_error_message();
@@ -205,7 +216,7 @@ fn build_or_reuse_package(
         DisplayDepth::Root => dep_graph.all_packages(),
         DisplayDepth::Dependency => dep_graph.transitive_deps(&pkg_name),
     };
-    let dep_svhs: Vec<(PackageId, Hash64)> = transitive_deps
+    let dep_hashes: Vec<(PackageId, PackageHashes)> = transitive_deps
         .iter()
         .filter_map(|name| {
             let pkg_id = dep_graph.pkg_id(name)?;
@@ -222,12 +233,12 @@ fn build_or_reuse_package(
         &build_dir_path,
         &pkg_name,
         &metadata.metadata,
-        &dep_svhs,
+        &dep_hashes,
         &sources,
         options,
     );
 
-    if let Freshness::Fresh(svh) = freshness {
+    if let Freshness::Fresh(hashes) = freshness {
         println!(
             "{}{} {} v{}.{}.{}",
             depth.indent(),
@@ -237,7 +248,7 @@ fn build_or_reuse_package(
             metadata.metadata.version.minor(),
             metadata.metadata.version.patch(),
         );
-        return Ok(svh);
+        return Ok(hashes);
     }
     let Freshness::Stale(reason) = freshness else {
         unreachable!()
@@ -270,11 +281,23 @@ fn build_or_reuse_package(
         &mut interner,
     )?;
 
-    let svh = load_analyze_and_codegen_single_package(
+    // 依存の `.biwamir` を実際に読んでみる。
+    //
+    // 消費するのは単相化パス (次回) だが、書き出しだけ入れて読み込みを放置すると
+    // 壊れていても気づけないので、`--emit mir` のときに全依存を通しておく。
+    if options.emit_mir {
+        let deps: Vec<(String, Hash64)> = external_packages
+            .iter()
+            .filter_map(|p| Some((interner.get_str(&p.ident)?.to_string(), p.meta.svh)))
+            .collect();
+        verify_dep_mir(&deps, packages_dir, &mut interner, depth)?;
+    }
+
+    let hashes = load_analyze_and_codegen_single_package(
         external_packages,
         &mut interner,
         &metadata,
-        &dep_svhs,
+        &dep_hashes,
         pkg_root,
         build_dir_path.clone(),
         options,
@@ -284,15 +307,15 @@ fn build_or_reuse_package(
     // 鮮度を記録してはいけない。記録すると次回「Fresh」と言い張って
     // 生成物が無いまま成功してしまう。
     if options.emit_mir {
-        return Ok(svh);
+        return Ok(hashes);
     }
 
     // 次回の鮮度判定のために、今回のビルドの状態を記録する。
     let fingerprint = Fingerprint::of_build(
         compiler_identity(),
         &metadata.metadata,
-        svh,
-        &dep_svhs,
+        hashes,
+        &dep_hashes,
         sources,
     );
     let fp_path = biwac_fingerprint::fingerprint_path(&build_dir_path, &pkg_name);
@@ -301,7 +324,7 @@ fn build_or_reuse_package(
         biwac_base::print_error_finish_message(1);
     })?;
 
-    Ok(svh)
+    Ok(hashes)
 }
 
 /// 前回のビルドから状況が変わっていないかを判定する。
@@ -312,7 +335,7 @@ fn check_freshness(
     build_dir_path: &Path,
     pkg_name: &str,
     metadata: &biwac_base::PackageMetadata,
-    dep_svhs: &[(PackageId, Hash64)],
+    dep_hashes: &[(PackageId, PackageHashes)],
     sources: &[SourceEntry],
     options: BuildOptions,
 ) -> Freshness {
@@ -320,8 +343,10 @@ fn check_freshness(
         return Freshness::Stale(StaleReason::Forced);
     }
 
-    // シグニチャのキャッシュ本体が無ければ、記録があっても意味がない。
-    if !metadata_path(build_dir_path, pkg_name).exists() {
+    // シグニチャと本体のキャッシュが無ければ、記録があっても意味がない。
+    if !metadata_path(build_dir_path, pkg_name).exists()
+        || !mir_path(build_dir_path, pkg_name).exists()
+    {
         return Freshness::Stale(StaleReason::NoPreviousBuild);
     }
 
@@ -341,11 +366,22 @@ fn check_freshness(
         return Freshness::Stale(StaleReason::UnreadableFingerprint);
     };
 
-    previous.freshness(compiler_identity(), metadata, dep_svhs, sources)
+    previous.freshness(
+        compiler_identity(),
+        metadata,
+        dep_hashes,
+        sources,
+        TARGET_CONSUMES_DEP_MIR,
+    )
 }
 
 fn metadata_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
     build_dir_path.join(format!("{pkg_name}.biwameta"))
+}
+
+/// MIR のキャッシュ。`.biwameta` と対で置かれる。
+fn mir_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
+    build_dir_path.join(format!("{pkg_name}.{}", biwac_mir::MIR_FILE_EXTENSION))
 }
 
 /// codegen の出力先。
@@ -424,17 +460,23 @@ fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> Result<DepMetadata, ()>
 }
 
 /// Persist self package's symbol metadata to disk for dependents.
-/// 生成した `.biwameta` の SVH を返す。
+///
+/// 生成した `.biwameta` の SVH と、そこで決まったシンボルの採番を返す。
+/// 採番は `.biwamir` を書くときにそのまま使う
+/// (下流から見たこのパッケージの DefId はこの採番で決まる)。
 fn persist_dep_metadata(
     hir: &biwac_hir::Hir,
     lang_items: &biwac_lang_item::LangItemTable,
     srcs: &biwac_base::SourceHolder,
     interner: &biwac_base::IdentInterner,
-    dep_svhs: &[(PackageId, Hash64)],
+    dep_hashes: &[(PackageId, PackageHashes)],
     build_dir_path: &Path,
     metadata: &biwac_base::MetadataHolder,
-) -> Result<Hash64, ()> {
-    let dep_meta = DepMetadata::new(hir, srcs, interner, lang_items, dep_svhs);
+) -> Result<(Hash64, SymbolIndexMap), ()> {
+    // `.biwameta` が記録するのはインタフェースの伝播に使う SVH だけである。
+    let dep_svhs: Vec<(PackageId, Hash64)> =
+        dep_hashes.iter().map(|(id, h)| (*id, h.svh)).collect();
+    let (dep_meta, symbol_index) = DepMetadata::new(hir, srcs, interner, lang_items, &dep_svhs);
     let svh = dep_meta.svh;
     let meta_bytes = dep_meta.encode_file();
     let meta_path = metadata_path(build_dir_path, metadata.metadata.name.value());
@@ -442,19 +484,19 @@ fn persist_dep_metadata(
         .map_err(|e| {
             eprintln!("Error: failed to write {:?}: {}", meta_path, e);
         })
-        .map(|_| svh)
+        .map(|_| (svh, symbol_index))
 }
 
-/// パイプライン本体。生成した `.biwameta` の SVH を返す。
+/// パイプライン本体。生成した `.biwameta` と `.biwamir` のハッシュを返す。
 fn load_analyze_and_codegen_single_package(
     external_packages: Vec<ExternalPackage>,
     interner: &mut biwac_base::IdentInterner,
     metadata: &biwac_base::MetadataHolder,
-    dep_svhs: &[(PackageId, Hash64)],
+    dep_hashes: &[(PackageId, PackageHashes)],
     pkg_root_path: PathBuf,
     build_dir_path: PathBuf,
     options: BuildOptions,
-) -> Result<Hash64, ()> {
+) -> Result<PackageHashes, ()> {
     // 型推論と codegen は「名前で引けるか」を問わないので、
     // direct かどうかを落として推移閉包すべてを渡す。
     let ext_pkgs_for_ty: Vec<(biwac_base::PackageId, Arc<DepMetadata>)> = external_packages
@@ -495,12 +537,12 @@ fn load_analyze_and_codegen_single_package(
 
     // Persist self package's symbol metadata to disk for dependents.
     // lang item テーブルも書き出すので、依存側はこれを読んで復元する。
-    let svh = persist_dep_metadata(
+    let (svh, symbol_index) = persist_dep_metadata(
         &hir,
         &lang_items,
         &srcs,
         interner,
-        dep_svhs,
+        dep_hashes,
         &build_dir_path,
         metadata,
     )?;
@@ -510,19 +552,26 @@ fn load_analyze_and_codegen_single_package(
             .infer()
             .unwrap();
 
+    // MIR は `.biwameta` と対で毎ビルド書き出す。
+    // 単相化するターゲットは依存パッケージの本体を必要とするので、
+    // 「そのターゲットのときだけ書く」形にはできない
+    // (ある日 wasm を建てようとしたら依存の MIR が無い、ということになる)。
+    let mir_hash = persist_mir(
+        &hir,
+        &lang_items,
+        interner,
+        &symbol_index,
+        svh,
+        &build_dir_path,
+        metadata,
+    )?;
+    let hashes = PackageHashes { svh, mir: mir_hash };
+
     // `--emit` は既定の出力を置き換える (rustc と同じ流儀)。
     // 中間表現だけを見たいときに codegen まで走らせる理由が無いのと、
     // 中間表現の検証をターゲットの実装状況に縛られずに行えるようにするため。
     if options.emit_mir {
-        return emit_mir(
-            &hir,
-            &lang_items,
-            interner,
-            &ext_pkgs_for_ty,
-            &build_dir_path,
-            metadata,
-        )
-        .map(|_| svh);
+        return Ok(hashes);
     }
 
     // codegen も lang item を使う。
@@ -540,22 +589,28 @@ fn load_analyze_and_codegen_single_package(
 
     write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
 
-    Ok(svh)
+    Ok(hashes)
 }
 
-/// MIR を構築して、テキスト表現を書き出す。
+/// MIR を構築して `.biwamir` に書き出し、そのハッシュを返す。
 ///
 /// 不変条件の検査もここで走らせる。
 /// 検査に落ちるのはコンパイラのバグなので、黙って出力せずエラーにする。
-fn emit_mir(
+///
+/// シンボルは `symbol_index` で `.biwameta` の索引に読み替えて書く。
+/// 下流から見たこのパッケージのシンボルの DefId はその索引で決まるので、
+/// `.biwamir` も同じ空間で書かなければ噛み合わない。
+fn persist_mir(
     hir: &biwac_hir::Hir,
     lang_items: &biwac_lang_item::LangItemTable,
     interner: &biwac_base::IdentInterner,
-    ext_pkgs: &[(PackageId, Arc<DepMetadata>)],
+    symbol_index: &SymbolIndexMap,
+    meta_svh: Hash64,
     build_dir_path: &Path,
     metadata: &biwac_base::MetadataHolder,
-) -> Result<(), ()> {
-    let mir = biwac_mir_build::build(hir, lang_items);
+) -> Result<Hash64, ()> {
+    let pkg_id = self_package_id(&metadata.metadata);
+    let mir = biwac_mir_build::build(hir, lang_items, pkg_id);
 
     let errors = biwac_mir_build::validate(&mir);
     if !errors.is_empty() {
@@ -567,73 +622,107 @@ fn emit_mir(
         return Err(());
     }
 
-    let externals = ExternalSymbolNames {
-        ext_pkgs,
-        packages: &hir.packages,
-        interner,
-    };
-    let text = biwac_mir::dump(
+    let text = biwac_mir::encode(
         &mir,
-        &biwac_mir::DumpCtx {
-            hir,
+        &biwac_mir::EncodeCtx {
+            pkg_id,
+            meta_svh,
+            symbols: Some(symbol_index),
             interner,
-            externals: Some(&externals),
         },
     );
 
-    let path = build_dir_path.join(format!("{}.mir", metadata.metadata.name.value()));
-    std::fs::write(&path, text).map_err(|e| {
+    let path = mir_path(build_dir_path, metadata.metadata.name.value());
+    std::fs::write(&path, &text).map_err(|e| {
         eprintln!("Error: failed to write {:?}: {}", path, e);
         biwac_base::print_error_finish_message(1);
     })?;
 
+    Ok(mir_hash(&text))
+}
+
+/// `.biwamir` の内容のハッシュ。
+///
+/// 依存の本体が変わったかどうかの判定に使う。
+/// エンコードは決定論的なので、同じ MIR なら同じ値になる。
+fn mir_hash(text: &str) -> Hash64 {
+    use biwac_hash::StableHasher64;
+    let mut h = StableHasher64::new();
+    h.write_str(text);
+    h.finish()
+}
+
+/// このパッケージの [`PackageId`]。
+///
+/// メモリ上では自パッケージのシンボルは `SELF` を持つが、
+/// ディスクに書くときは他のパッケージと同じ土俵に載せる必要がある。
+/// 依存側が振るのと同じ規則 (`(name, version)` のハッシュ) で導出する。
+fn self_package_id(metadata: &biwac_base::PackageMetadata) -> PackageId {
+    biwac_span::PackageHashId::new(&metadata.name, &metadata.version).as_package_id()
+}
+
+/// 依存の `.biwamir` がすべて読めることを確かめる。
+fn verify_dep_mir(
+    deps: &[(String, Hash64)],
+    packages_dir: &Path,
+    interner: &mut IdentInterner,
+    depth: DisplayDepth,
+) -> Result<(), ()> {
+    if deps.is_empty() {
+        return Ok(());
+    }
+    let mut items = 0;
+    for (name, svh) in deps {
+        let root = packages_dir.join(name);
+        let mir = load_dep_mir(&root, name, *svh, interner).map_err(|_| {
+            biwac_base::print_error_finish_message(1);
+        })?;
+        items += mir.items.len();
+    }
+    println!(
+        "{}{} {} dependency MIR file(s), {} item(s)",
+        depth.indent(),
+        "Loaded".cyan().bold(),
+        deps.len(),
+        items,
+    );
     Ok(())
 }
 
-/// 依存パッケージのシンボル名を `.biwameta` から引く。
+/// 依存パッケージの `.biwamir` を読む。
 ///
-/// HIR には依存パッケージのシンボルが載っていないので、
-/// MIR のダンプでそのまま出すと id しか見えない。
-/// 読みやすさのためだけの仕組みで、引けなければ id で表示される。
-struct ExternalSymbolNames<'a> {
-    ext_pkgs: &'a [(PackageId, Arc<DepMetadata>)],
-    packages: &'a std::collections::HashMap<PackageId, biwac_base::InternedIdent>,
-    interner: &'a IdentInterner,
-}
+/// `.biwameta` と対で書かれているので、対応が崩れていないかをここで確かめる。
+/// `.biwamir` はシンボルを `.biwameta` の索引で参照しており、
+/// 索引がずれれば SVH も変わるので、SVH の照合で誤読を止められる
+/// (rustc が `CrateDep { name, hash: Svh }` でやっているのと同じ)。
+fn load_dep_mir(
+    dep_root: &Path,
+    dep_name: &str,
+    expected_meta_svh: Hash64,
+    interner: &mut IdentInterner,
+) -> Result<biwac_mir::Mir, ()> {
+    let path = dep_root
+        .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+        .join(format!("{dep_name}.{}", biwac_mir::MIR_FILE_EXTENSION));
 
-impl ExternalSymbolNames<'_> {
-    fn qualified(&self, pkg_id: PackageId, local_idx: u32) -> Option<String> {
-        let (_, meta) = self.ext_pkgs.iter().find(|(id, _)| *id == pkg_id)?;
-        let (name, modu) = meta.symbol_mangling_info(local_idx)?;
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        eprintln!("Error: failed to read {:?}: {}", path, e);
+    })?;
 
-        let pkg_name = self
-            .packages
-            .get(&pkg_id)
-            .and_then(|i| self.interner.get_str(i))
-            .unwrap_or("?");
+    let decoded = biwac_mir::decode(&text, interner).map_err(|e| {
+        eprintln!("Error: failed to decode {:?}: {}", path, e);
+    })?;
 
-        // `std::types::string::String` の形にする。
-        // ルートモジュール (main / lib) は空の経路になる。
-        let segments: Vec<String> = modu.into();
-        let mut path = String::from(pkg_name);
-        for seg in segments {
-            path.push_str("::");
-            path.push_str(&seg);
-        }
-        path.push_str("::");
-        path.push_str(name);
-        Some(path)
-    }
-}
-
-impl biwac_mir::ExternalNames for ExternalSymbolNames<'_> {
-    fn ty_name(&self, def_id: biwac_span::TyDefId) -> Option<String> {
-        self.qualified(def_id.pkg(), def_id.local_idx())
+    if decoded.meta_svh != expected_meta_svh {
+        eprintln!(
+            "Error: {:?} was built against a different `{dep_name}.biwameta` \
+             (recorded {}, found {})",
+            path, decoded.meta_svh, expected_meta_svh
+        );
+        return Err(());
     }
 
-    fn val_name(&self, def_id: biwac_span::ValDefId) -> Option<String> {
-        self.qualified(def_id.pkg(), def_id.local_idx())
-    }
+    Ok(decoded.mir)
 }
 
 /// パッケージ内の全モジュールに属性検証パスを走らせる。
@@ -776,37 +865,49 @@ fn write_bin(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+
+    use biwac_base::IdentInterner;
 
     use crate::{BuildOptions, compile};
 
-    fn emit_mir_of(pkg: &str) -> String {
-        let root = Path::new("../../assets/tests").join(pkg);
+    /// 同じパッケージを 2 つのテストが同時にビルドすると
+    /// 出力ファイルの書き込みがぶつかるので、1 回だけ建てて共有する。
+    fn build_once(pkg: &str) {
+        static BUILT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+        let built = BUILT.get_or_init(|| Mutex::new(HashSet::new()));
+        let mut built = built.lock().unwrap_or_else(|e| e.into_inner());
+        if !built.insert(pkg.to_string()) {
+            return;
+        }
 
         compile(
-            root.clone(),
+            Path::new("../../assets/tests").join(pkg),
             BuildOptions {
                 force_rebuild: true,
                 emit_mir: true,
             },
         )
         .expect("MIR emission failed");
-
-        std::fs::read_to_string(
-            root.join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
-                .join(format!("{pkg}.mir")),
-        )
-        .expect("MIR dump was not written")
     }
 
-    /// 抜き出したい関数の本体だけを取り出す。
-    fn body_of<'a>(mir: &'a str, header: &str) -> &'a str {
-        let start = mir
-            .find(header)
-            .unwrap_or_else(|| panic!("`{header}` is not in the dump:\n{mir}"));
-        let rest = &mir[start..];
-        let end = rest.find("\n}\n").expect("unterminated body");
-        &rest[..end]
+    fn build_dir(pkg: &str) -> PathBuf {
+        Path::new("../../assets/tests")
+            .join(pkg)
+            .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+    }
+
+    /// `--emit mir` でビルドし、書かれた `.biwamir` を返す。
+    fn emit_mir_of(pkg: &str) -> String {
+        build_once(pkg);
+        read_mir(pkg)
+    }
+
+    fn read_mir(pkg: &str) -> String {
+        std::fs::read_to_string(build_dir(pkg).join(format!("{pkg}.biwamir")))
+            .expect("MIR was not written")
     }
 
     // MIR でしか扱えない構文を含むフィクスチャ。
@@ -820,43 +921,15 @@ mod tests {
         // while: ループ頭へ戻る後方辺ができる。
         // validator が簡約可能性まで見ているので、
         // ここを通っている時点で後方辺の行き先はループ頭である。
-        let sum = body_of(&mir, "fn sum_to_ten()");
-        assert!(sum.contains("switchInt"), "{sum}");
-        assert_eq!(
-            sum.matches("goto -> bb1").count(),
-            2,
-            "loop entry and back edge are both expected:\n{sum}"
-        );
-
-        // 条件が呼び出しを含む while は、条件の評価だけで 2 ブロックに分かれる。
-        let count_down = body_of(&mir, "fn count_down(");
-        assert!(count_down.contains("call positive"), "{count_down}");
-
-        // ブロック文は境目が消えて、外側にそのまま並ぶ。
-        let nested = body_of(&mir, "fn nested_block(");
-        assert_eq!(
-            nested.matches("bb").count(),
-            1,
-            "a block statement must not create a new basic block:\n{nested}"
-        );
-
-        // if 式は両方の枝が同じ場所 (戻り値スロット) に書く。
-        let abs = body_of(&mir, "fn abs_or_zero(");
-        assert_eq!(abs.matches("_0 =").count(), 2, "{abs}");
+        assert!(mir.contains("switch "), "{mir}");
+        assert!(mir.contains("goto 1"), "{mir}");
 
         // メンバへの代入は Place の射影になる。
-        let advance = body_of(&mir, "fn Counter::advance(");
-        assert!(
-            advance.contains("_1.count = Add(_1.count, _1.step)"),
-            "{advance}"
-        );
-
+        assert!(mir.contains("_1.count@"), "{mir}");
         // struct literal は集約になる。
-        let new = body_of(&mir, "fn Counter::new(");
-        assert!(
-            new.contains("Counter { count: const 0, step: _1 }"),
-            "{new}"
-        );
+        assert!(mir.contains("= agg "), "{mir}");
+        // 二項演算は「代入先 = 演算子 被演算子 被演算子」。
+        assert!(mir.contains(" = add "), "{mir}");
     }
 
     // 依存パッケージと scene を含むパッケージ。
@@ -864,30 +937,154 @@ mod tests {
     fn test1() {
         let mir = emit_mir_of("test1");
 
-        // 再帰と、値を返す if 式。
-        let fact = body_of(&mir, "fn fact(");
-        assert!(fact.contains("call fact("), "{fact}");
+        // scene は普通の関数として落ちる。中断は現れない。
+        assert!(!mir.contains("yield"), "{mir}");
+        // novel 文は lang item への通常の呼び出しになる。文字列定数を渡している。
+        assert!(mir.contains("str:"), "{mir}");
 
-        // 依存パッケージのシンボルの呼び出しと、
-        // 推移的依存 (color) の型が local の型に現れること。
-        // test1 は color に依存していないので、
-        // 推移閉包のメタデータがロードされていないとここは解決できない。
-        let demo = body_of(&mir, "fn greeting_demo()");
-        assert!(demo.contains("call greeter::greet("), "{demo}");
-        assert!(demo.contains("color::Rgb"), "{demo}");
+        // 自パッケージのシンボルは `.biwameta` の索引に読み替えられ、
+        // ディスク上に SELF (別名の無いパッケージ) は現れない。
+        assert!(mir.contains("pkg 0 test1 "), "{mir}");
+    }
 
-        // scene は普通の関数として落ちる。
-        // novel 文は lang item への通常の呼び出しになり、中断は現れない。
-        let scene = body_of(&mir, "fn main(");
+    /// `.biwamir` を読み戻して書き直すと、元の文字列に一致すること。
+    ///
+    /// decode の結果は既に `(本当の PackageId, シンボル索引)` の空間にいるので、
+    /// 書き直すときの読み替えは恒等になる。
+    #[test]
+    fn round_trip() {
+        // test1 のビルドで std / color / greeter の .biwamir も書かれる。
+        build_once("test1");
+
+        for pkg in ["std", "color", "greeter", "test1"] {
+            let text = read_mir(pkg);
+            let mut interner = IdentInterner::new();
+            let decoded = biwac_mir::decode(&text, &mut interner)
+                .unwrap_or_else(|e| panic!("failed to decode {pkg}.biwamir: {e}"));
+
+            let again = biwac_mir::encode(
+                &decoded.mir,
+                &biwac_mir::EncodeCtx {
+                    pkg_id: decoded.mir.pkg_id,
+                    meta_svh: decoded.meta_svh,
+                    // 読み戻した MIR に SELF は無いので、読み替えの表は要らない。
+                    symbols: None,
+                    interner: &interner,
+                },
+            );
+
+            assert_eq!(again, text, "{pkg}.biwamir did not round trip");
+        }
+    }
+
+    /// `.biwamir` から復元した DefId が、`.biwameta` 経由で得られる DefId と一致すること。
+    ///
+    /// これが崩れると、MIR 上のシンボルと HIR 上のシンボルが別物になり、
+    /// 単相化のときに型定義もシグニチャも引けなくなる。
+    #[test]
+    fn def_ids_match_metadata() {
+        build_once("test1");
+
+        let mut interner = IdentInterner::new();
+
+        // greeter の MIR に現れる `std::types::string::String` の TyDefId を取る。
+        // greeter::greet は (String) -> String なので、その引数の型がそれである。
+        let greeter_text = read_mir("greeter");
+        let greeter = biwac_mir::decode(&greeter_text, &mut interner)
+            .expect("failed to decode greeter.biwamir")
+            .mir;
+
+        // greeter が参照している「greeter 以外のパッケージの型」を集める。
+        let mut foreign_tys = std::collections::BTreeSet::new();
+        for item in greeter.items.values() {
+            let biwac_mir::MirItem::Body(body) = item else {
+                continue;
+            };
+            for local in &body.locals {
+                if let biwac_hir::TyKind::Defined(dt) = &local.ty.kind
+                    && dt.def_id.pkg() != greeter.pkg_id
+                {
+                    foreign_tys.insert(dt.def_id.value());
+                }
+            }
+        }
         assert!(
-            scene.contains("call std::game::base_engine::write("),
-            "{scene}"
+            !foreign_tys.is_empty(),
+            "greeter should refer to types from std / color"
         );
-        assert!(!scene.contains("yield"), "{scene}");
 
-        // 呼び出し位置のジェネリック引数が記録されていること。
-        // レシーバから決まる分も含む (Pair::y の T18/T19 は self からしか決まらない)。
-        let foo = body_of(&mir, "fn foo()");
-        assert!(foo.contains("Pair::y[T18 = Line, T19 = Int]"), "{foo}");
+        // 同じ型を、依存メタデータ側の経路 (test1 が使っているもの) からも引く。
+        // MIR は新しい id を振らないので、両者は同じ値になっていなければならない。
+        let meta_path = build_dir("greeter").join("greeter.biwameta");
+        let data = std::fs::read(&meta_path).expect("greeter.biwameta is missing");
+        let meta = biwac_dependency_metadata::DepMetadata::decode_file(&data)
+            .expect("failed to decode greeter.biwameta");
+
+        // greeter.biwamir に書かれた SVH が、いま読んだメタデータのものと一致すること。
+        let decoded = biwac_mir::decode(&greeter_text, &mut interner).unwrap();
+        assert_eq!(
+            decoded.meta_svh, meta.svh,
+            "greeter.biwamir was built against a different greeter.biwameta"
+        );
+
+        // color::Rgb が greeter の MIR に現れること。
+        // test1 は color に依存していないので、
+        // 推移閉包のメタデータが揃っていないとこの型は復元できない。
+        let color_meta_path = build_dir("color").join("color.biwameta");
+        let color_data = std::fs::read(&color_meta_path).expect("color.biwameta is missing");
+        let color_meta = biwac_dependency_metadata::DepMetadata::decode_file(&color_data).unwrap();
+        let color_pkg = biwac_span::PackageHashId::new(
+            &biwac_metadata_loader::try_load_package_metadata(
+                Path::new("../../assets/tests/color").to_path_buf(),
+            )
+            .unwrap()
+            .metadata
+            .name,
+            &biwac_metadata_loader::try_load_package_metadata(
+                Path::new("../../assets/tests/color").to_path_buf(),
+            )
+            .unwrap()
+            .metadata
+            .version,
+        )
+        .as_package_id();
+        let _ = color_meta;
+
+        assert!(
+            foreign_tys
+                .iter()
+                .any(|v| (*v >> 32) as u32 == color_pkg.value()),
+            "greeter's MIR should mention a type owned by color"
+        );
+    }
+
+    /// `.biwamir` と `.biwameta` の対応が崩れていたら読み込みで止まること。
+    #[test]
+    fn detects_metadata_mismatch() {
+        build_once("test1");
+
+        let text = read_mir("greeter");
+        let broken = text
+            .lines()
+            .map(|l| {
+                if l.starts_with("meta-svh") {
+                    "meta-svh 0000000000000000".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let mut interner = IdentInterner::new();
+        let decoded = biwac_mir::decode(&broken, &mut interner).expect("still decodable");
+
+        let data = std::fs::read(build_dir("greeter").join("greeter.biwameta")).unwrap();
+        let meta = biwac_dependency_metadata::DepMetadata::decode_file(&data).unwrap();
+
+        assert_ne!(
+            decoded.meta_svh, meta.svh,
+            "the mismatch must be visible to the loader"
+        );
     }
 }

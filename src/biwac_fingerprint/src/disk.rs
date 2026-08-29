@@ -10,14 +10,14 @@
 //!
 //! 物理レイアウト:
 //!   [MAGIC: 4B][version: u32 LE]
-//!   [compiler: u64][manifest: u64][own_svh: u64]
-//!   [dep_count: u32][(pkg_id: u32, svh: u64); dep_count]
+//!   [compiler: u64][manifest: u64][own_svh: u64][own_mir: u64]
+//!   [dep_count: u32][(pkg_id: u32, svh: u64, mir: u64); dep_count]
 //!   [src_count: u32][(path_len: u32, path bytes, len: u64, hash: u64); src_count]
 
 use biwac_base::PackageId;
 use biwac_hash::Hash64;
 
-use crate::{BIWAC_FINGERPRINT_FORMAT_VERSION, Fingerprint, SourceEntry};
+use crate::{BIWAC_FINGERPRINT_FORMAT_VERSION, Fingerprint, PackageHashes, SourceEntry};
 
 pub const BIWAC_FINGERPRINT_MAGIC: &[u8; 4] = b"bwfp";
 
@@ -94,12 +94,14 @@ impl Fingerprint {
 
         buf.extend_from_slice(&self.compiler.as_u64().to_le_bytes());
         buf.extend_from_slice(&self.manifest.as_u64().to_le_bytes());
-        buf.extend_from_slice(&self.own_svh.as_u64().to_le_bytes());
+        buf.extend_from_slice(&self.own.svh.as_u64().to_le_bytes());
+        buf.extend_from_slice(&self.own.mir.as_u64().to_le_bytes());
 
         buf.extend_from_slice(&(self.deps.len() as u32).to_le_bytes());
-        for (pkg_id, svh) in &self.deps {
+        for (pkg_id, hashes) in &self.deps {
             buf.extend_from_slice(&pkg_id.value().to_le_bytes());
-            buf.extend_from_slice(&svh.as_u64().to_le_bytes());
+            buf.extend_from_slice(&hashes.svh.as_u64().to_le_bytes());
+            buf.extend_from_slice(&hashes.mir.as_u64().to_le_bytes());
         }
 
         buf.extend_from_slice(&(self.sources.len() as u32).to_le_bytes());
@@ -125,13 +127,20 @@ impl Fingerprint {
 
         let compiler = r.hash()?;
         let manifest = r.hash()?;
-        let own_svh = r.hash()?;
+        let own = PackageHashes {
+            svh: r.hash()?,
+            mir: r.hash()?,
+        };
 
         let dep_count = r.u32()?;
         let mut deps = Vec::with_capacity(dep_count as usize);
         for _ in 0..dep_count {
             let pkg_id = PackageId::new(r.u32()?);
-            deps.push((pkg_id, r.hash()?));
+            let hashes = PackageHashes {
+                svh: r.hash()?,
+                mir: r.hash()?,
+            };
+            deps.push((pkg_id, hashes));
         }
 
         let src_count = r.u32()?;
@@ -146,7 +155,7 @@ impl Fingerprint {
         Ok(Self {
             compiler,
             manifest,
-            own_svh,
+            own,
             deps,
             sources,
         })
@@ -162,10 +171,25 @@ mod tests {
         let fp = Fingerprint {
             compiler: Hash64::from_u64(1),
             manifest: Hash64::from_u64(2),
-            own_svh: Hash64::from_u64(3),
+            own: PackageHashes {
+                svh: Hash64::from_u64(3),
+                mir: Hash64::from_u64(4),
+            },
             deps: vec![
-                (PackageId::new(7), Hash64::from_u64(70)),
-                (PackageId::new(9), Hash64::from_u64(90)),
+                (
+                    PackageId::new(7),
+                    PackageHashes {
+                        svh: Hash64::from_u64(70),
+                        mir: Hash64::from_u64(71),
+                    },
+                ),
+                (
+                    PackageId::new(9),
+                    PackageHashes {
+                        svh: Hash64::from_u64(90),
+                        mir: Hash64::from_u64(91),
+                    },
+                ),
             ],
             sources: vec![
                 SourceEntry {

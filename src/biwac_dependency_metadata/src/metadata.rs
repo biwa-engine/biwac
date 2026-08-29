@@ -54,13 +54,20 @@ impl DepMetadata {
     ///
     /// `dep_svhs` はビルド時の依存グラフ (推移閉包) の各パッケージの SVH。
     /// 差分ビルドの鮮度判定に使うため、そのままファイルに記録する。
+    /// `.biwameta` を組み立てる。
+    ///
+    /// 併せて [`SymbolIndexMap`] を返す。ここで決まったシンボルの採番が
+    /// 「下流から見たこのパッケージの DefId」そのものであり、
+    /// `.biwamir` を書くときに同じ採番が要るためである。
     pub fn new(
         hir: &biwac_hir::Hir,
         source_holder: &biwac_base::SourceHolder,
         interner: &biwac_base::IdentInterner,
         lang_item_table: &biwac_lang_item::LangItemTable,
         dep_svhs: &[(biwac_base::PackageId, biwac_hash::Hash64)],
-    ) -> Self {
+    ) -> (Self, crate::SymbolIndexMap) {
+        let mut symbol_index = crate::SymbolIndexMap::new();
+
         use biwac_base::ModPath;
         use biwac_hir::{AssocValDefKind, TyDefKind, ValDefKind};
         use biwac_span::{GenDefId, LocalGenDefId, TyDefId, ValDefId};
@@ -104,7 +111,6 @@ impl DepMetadata {
         struct StructItem<'h> {
             def_id: TyDefId,
             def: &'h biwac_hir::StructDef,
-            def_impl: &'h biwac_hir::DefinedTyImpl,
         }
         let mut struct_items: Vec<StructItem> = hir
             .tys
@@ -115,7 +121,6 @@ impl DepMetadata {
                     Some(StructItem {
                         def_id: *def_id,
                         def: s.as_ref(),
-                        def_impl,
                     })
                 } else {
                     None
@@ -133,7 +138,6 @@ impl DepMetadata {
         struct AliasItem<'h> {
             def_id: TyDefId,
             def: &'h biwac_hir::NativeTypeAliasDef,
-            def_impl: &'h biwac_hir::DefinedTyImpl,
         }
         let mut alias_items: Vec<AliasItem> = hir
             .tys
@@ -144,7 +148,6 @@ impl DepMetadata {
                     Some(AliasItem {
                         def_id: *def_id,
                         def: a.as_ref(),
-                        def_impl,
                     })
                 } else {
                     None
@@ -157,10 +160,12 @@ impl DepMetadata {
         let mut next_idx = 0u32;
         for item in &struct_items {
             ty_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
+            symbol_index.insert_ty(item.def_id, next_idx);
             next_idx += 1;
         }
         for item in &alias_items {
             ty_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
+            symbol_index.insert_ty(item.def_id, next_idx);
             next_idx += 1;
         }
 
@@ -176,16 +181,25 @@ impl DepMetadata {
             impl_self_ty: biwac_hir::Ty,
         }
         let mut assoc_fn_items: Vec<AssocFnItem> = Vec::new();
+        // 所属する型ではなく、**関連関数自身の ValDefId** でこのパッケージのものかを決める。
+        //
         // struct と native type alias のどちらも impl block を持てる
-        // (`impl String { fn concat(..) }`)。
-        let assoc_parents: Vec<(TyDefId, &biwac_hir::DefinedTyImpl)> = struct_items
-            .iter()
-            .map(|i| (i.def_id, i.def_impl))
-            .chain(alias_items.iter().map(|i| (i.def_id, i.def_impl)))
-            .collect();
+        // (`impl String { fn concat(..) }`) が、それだけでは足りない。
+        // `impl Int { fn sqrt(self) }` のようにプリミティブ型への実装もあり、
+        // その場合 所属する型は組み込みパッケージのものになるが、
+        // 関数自身はこのパッケージが定義している。
+        // これを表に載せないと、`.biwamir` から参照できるシンボル索引が無くなる。
+        //
+        // (プリミティブ型への実装は将来 std に限定される予定で、
+        //  そうなればこの経路は std のビルドでしか通らなくなる)
+        let assoc_parents: Vec<(TyDefId, &biwac_hir::DefinedTyImpl)> =
+            hir.tys.iter().map(|(id, i)| (*id, i)).collect();
         for (parent_ty_def_id, parent_impl) in &assoc_parents {
             for impl_list in parent_impl.vals.values() {
                 for (val_def_id, pair) in &impl_list.vals {
+                    if !val_def_id.pkg().is_self() {
+                        continue;
+                    }
                     let (name, sig, ig) = match &pair.val_content {
                         AssocValDefKind::Fn(f) => {
                             (&f.name, &f.signature, f.impl_genargs.as_slice())
@@ -210,6 +224,7 @@ impl DepMetadata {
         let mut val_to_sym: HashMap<ValDefId, DiskSymbolIndex> = HashMap::new();
         for item in &assoc_fn_items {
             val_to_sym.insert(item.val_def_id, DiskSymbolIndex(next_idx));
+            symbol_index.insert_val(item.val_def_id, next_idx);
             next_idx += 1;
         }
 
@@ -242,6 +257,7 @@ impl DepMetadata {
 
         for item in &top_fn_items {
             val_to_sym.insert(item.val_def_id, DiskSymbolIndex(next_idx));
+            symbol_index.insert_val(item.val_def_id, next_idx);
             next_idx += 1;
         }
 
@@ -253,6 +269,7 @@ impl DepMetadata {
         let mut mod_path_to_sym: HashMap<ModPath, DiskSymbolIndex> = HashMap::new();
         for mp in &mod_paths_sorted {
             mod_path_to_sym.insert(mp.clone(), DiskSymbolIndex(next_idx));
+            symbol_index.insert_module(mp.clone(), next_idx);
             next_idx += 1;
         }
 
@@ -356,6 +373,12 @@ impl DepMetadata {
                 .enumerate()
                 .map(|(i, gid)| (*gid, i as u32))
                 .collect();
+            // 消費側は ext_gen_id(所属シンボル, 序数) で id を合成するので、
+            // .biwamir も同じ組を書けるように記録しておく。
+            let struct_sym = ty_to_sym.get(&item.def_id).map(|s| s.0).unwrap_or(0);
+            for (gid, ord) in &gen_ord {
+                symbol_index.insert_ty_genarg(*gid, struct_sym, *ord);
+            }
             let empty_loc_gen: HashMap<LocalGenDefId, u32> = HashMap::new();
 
             let name_str = interner.get_str(&item.def.name.id).unwrap_or("");
@@ -496,6 +519,7 @@ impl DepMetadata {
 
         // --- assoc fn ボディ ---
         for item in &assoc_fn_items {
+            let fn_sym = val_to_sym.get(&item.val_def_id).map(|s| s.0).unwrap_or(0);
             let fn_data = impl_encode_fn_data(
                 item.name,
                 item.signature,
@@ -507,6 +531,8 @@ impl DepMetadata {
                 &mut strings,
                 interner,
                 &mut ext_syms,
+                fn_sym,
+                &mut symbol_index,
             );
             let body = SymbolBody::Fn(fn_data);
             push_body(
@@ -520,6 +546,7 @@ impl DepMetadata {
 
         // --- top-level fn ボディ ---
         for item in &top_fn_items {
+            let fn_sym = val_to_sym.get(&item.val_def_id).map(|s| s.0).unwrap_or(0);
             let fn_data = impl_encode_fn_data(
                 item.name,
                 item.signature,
@@ -531,6 +558,8 @@ impl DepMetadata {
                 &mut strings,
                 interner,
                 &mut ext_syms,
+                fn_sym,
+                &mut symbol_index,
             );
             let body = SymbolBody::Fn(fn_data);
             push_body(
@@ -624,7 +653,7 @@ impl DepMetadata {
         // SVH は組み上がったシンボル表から計算する。
         // デコード側でも同じ関数で再計算できるので、必要なら検証もできる。
         me.svh = me.compute_svh();
-        me
+        (me, symbol_index)
     }
 
     // --- Decode ---
@@ -1513,6 +1542,21 @@ fn ext_gen_id(struct_sym_idx: u32, ordinal: u32) -> u32 {
     (struct_sym_idx << 10) | ordinal
 }
 
+/// [`ext_gen_id`] / [`ext_loc_gen_id`] の合成規則。
+///
+/// ジェネリック引数には `.biwameta` 上のシンボル索引が無く、
+/// 「所属するシンボルと、その中での序数」から id を合成している。
+/// `.biwamir` も同じ組でジェネリック引数を書くので、
+/// 合成と分解をここに集める。
+pub fn compose_genarg_local_idx(owner_sym_idx: u32, ordinal: u32) -> u32 {
+    (owner_sym_idx << 10) | ordinal
+}
+
+/// [`compose_genarg_local_idx`] の逆。`(所属シンボル, 序数)` を返す。
+pub fn decompose_genarg_local_idx(local_idx: u32) -> (u32, u32) {
+    (local_idx >> 10, local_idx & 0x3FF)
+}
+
 /// 外部パッケージの fn ローカルジェネリクス引数 ID エンコード。
 fn ext_loc_gen_id(fn_sym_idx: u32, ordinal: u32) -> u32 {
     (fn_sym_idx << 10) | ordinal
@@ -1810,6 +1854,7 @@ fn impl_self_ty_of(
     biwac_hir::Ty::new(kind, span.clone())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn impl_encode_fn_data(
     name: &biwac_hir::Ident,
     signature: &biwac_hir::FnSignature,
@@ -1822,6 +1867,11 @@ fn impl_encode_fn_data(
     strings: &mut StringTable,
     interner: &biwac_base::IdentInterner,
     ext: &mut ExtSymBuilder,
+    // この関数自身のシンボル索引と、ジェネリック引数の採番の記録先。
+    // 消費側は ext_loc_gen_id(所属シンボル, 序数) で id を合成するので、
+    // .biwamir も同じ組を書けるようにここで記録する。
+    fn_sym: u32,
+    symbol_index: &mut crate::SymbolIndexMap,
 ) -> format::DiskFnData {
     use biwac_span::LocalGenDefId;
     use codec::DiskVec;
@@ -1853,6 +1903,10 @@ fn impl_encode_fn_data(
         .enumerate()
         .map(|(i, (_, lgid))| (*lgid, i as u32))
         .collect();
+
+    for (lgid, ord) in &loc_gen_ord {
+        symbol_index.insert_fn_genarg(fn_sym, *lgid, *ord);
+    }
 
     let disk_genargs = DiskVec(
         all_genargs

@@ -11,6 +11,9 @@
 //! 3. 依存グラフ (推移閉包) の各パッケージの SVH — 上流のインタフェース変更
 //! 4. `src/**/*.biwa` の内容 — 自パッケージのソース変更
 //!
+//! 依存の **本体** (`.biwamir`) のハッシュも記録するが、比較するかどうかは
+//! ターゲット次第である。[`Fingerprint::freshness`] の `compare_mir` を参照。
+//!
 //! 3 が推移閉包なのは、パッケージのビルドが直接依存だけでなく
 //! 推移閉包すべてのメタデータを読むからである
 //! (推移的な依存が定義した lang item も取り込む)。
@@ -40,7 +43,7 @@ pub use disk::FingerprintDecodeError;
 /// フィンガープリントファイルの形式版数。
 ///
 /// 形式を変えたら上げる。
-pub const BIWAC_FINGERPRINT_FORMAT_VERSION: u32 = 1;
+pub const BIWAC_FINGERPRINT_FORMAT_VERSION: u32 = 2;
 
 /// 出力に影響する **コンパイラ側の変更** を表す版数。
 ///
@@ -59,6 +62,21 @@ pub fn fingerprint_path(build_dir: &Path, pkg_name: &str) -> PathBuf {
     build_dir.join(format!("{pkg_name}.{FINGERPRINT_FILE_EXTENSION}"))
 }
 
+/// あるパッケージが下流に対して見せる 2 つのハッシュ。
+///
+/// インタフェースと本体を分けて持つのは、両者で伝播の仕方が違うからである。
+/// TypeScript の出力には依存の本体が入らないので、
+/// 依存の関数の中身が変わっても下流を建て直す必要はない。
+/// 単相化するターゲット (WASM 等) は依存の本体を自分の出力に取り込むので、
+/// そちらでは `mir` の変化も伝播しなければならない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageHashes {
+    /// `.biwameta` の SVH。シグニチャだけを見たハッシュ。
+    pub svh: Hash64,
+    /// `.biwamir` のハッシュ。関数の本体まで含む。
+    pub mir: Hash64,
+}
+
 /// 1 パッケージ分の、前回ビルド時の状態。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fingerprint {
@@ -66,11 +84,11 @@ pub struct Fingerprint {
     pub compiler: Hash64,
     /// 正規化した `biwa-package.json`
     pub manifest: Hash64,
-    /// 前回生成した `.biwameta` の SVH。
+    /// 前回のビルドで生成したもののハッシュ。
     /// fresh と判定したときはこれを下流へそのまま渡す。
-    pub own_svh: Hash64,
-    /// 依存グラフ (推移閉包) の各パッケージの SVH。id 昇順。
-    pub deps: Vec<(PackageId, Hash64)>,
+    pub own: PackageHashes,
+    /// 依存グラフ (推移閉包) の各パッケージのハッシュ。id 昇順。
+    pub deps: Vec<(PackageId, PackageHashes)>,
     /// `src/**/*.biwa` の一覧。パス昇順。
     pub sources: Vec<SourceEntry>,
 }
@@ -87,9 +105,9 @@ pub struct SourceEntry {
 /// 鮮度の判定結果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Freshness {
-    /// 再ビルド不要。`.biwameta` をそのまま使える。
-    /// 持っているのは前回の SVH で、下流の判定にそのまま渡せる。
-    Fresh(Hash64),
+    /// 再ビルド不要。`.biwameta` と `.biwamir` をそのまま使える。
+    /// 持っているのは前回のハッシュで、下流の判定にそのまま渡せる。
+    Fresh(PackageHashes),
     /// 再ビルドが必要。
     Stale(StaleReason),
 }
@@ -112,6 +130,9 @@ pub enum StaleReason {
     ManifestChanged,
     /// 依存のインタフェースが変わった、あるいは依存グラフの構成が変わった
     DependencyChanged,
+    /// 依存の関数の本体が変わった。
+    /// 依存の本体を自分の出力に取り込むターゲットでのみ再ビルドの理由になる。
+    DependencyBodyChanged,
     /// ソースファイルが変わった
     SourceChanged { path: String },
     /// ソースファイルが増減した
@@ -129,6 +150,7 @@ impl StaleReason {
             Self::CompilerChanged => "the compiler changed".to_string(),
             Self::ManifestChanged => "biwa-package.json changed".to_string(),
             Self::DependencyChanged => "a dependency changed".to_string(),
+            Self::DependencyBodyChanged => "a dependency's function bodies changed".to_string(),
             Self::SourceChanged { path } => format!("`{path}` changed"),
             Self::SourceSetChanged => "the set of source files changed".to_string(),
             Self::Forced => "forced by --rebuild".to_string(),
@@ -250,8 +272,8 @@ impl Fingerprint {
     pub fn of_build(
         compiler: Hash64,
         metadata: &PackageMetadata,
-        own_svh: Hash64,
-        deps: &[(PackageId, Hash64)],
+        own: PackageHashes,
+        deps: &[(PackageId, PackageHashes)],
         sources: Vec<SourceEntry>,
     ) -> Self {
         let mut deps = deps.to_vec();
@@ -260,7 +282,7 @@ impl Fingerprint {
         Self {
             compiler,
             manifest: manifest_hash(metadata),
-            own_svh,
+            own,
             deps,
             sources,
         }
@@ -269,13 +291,19 @@ impl Fingerprint {
     /// 前回のフィンガープリント (`self`) と今回の状況を突き合わせる。
     ///
     /// `sources` は今回集めたもの。
-    /// 一致すれば前回の SVH を返し、そのパッケージのビルドを飛ばせる。
+    /// 一致すれば前回のハッシュを返し、そのパッケージのビルドを飛ばせる。
+    ///
+    /// `compare_mir` は「依存の本体を自分の出力に取り込むターゲットか」である。
+    /// 真なら依存の `.biwamir` のハッシュも比較する。
+    /// 偽のときに比較してしまうと、依存の関数の中身を直しただけで
+    /// 下流が丸ごと建て直ることになる (出力は変わらないのに)。
     pub fn freshness(
         &self,
         compiler: Hash64,
         metadata: &PackageMetadata,
-        deps: &[(PackageId, Hash64)],
+        deps: &[(PackageId, PackageHashes)],
         sources: &[SourceEntry],
+        compare_mir: bool,
     ) -> Freshness {
         if self.compiler != compiler {
             return Freshness::Stale(StaleReason::CompilerChanged);
@@ -286,8 +314,16 @@ impl Fingerprint {
 
         let mut deps = deps.to_vec();
         deps.sort_by_key(|(pkg_id, _)| pkg_id.value());
-        if self.deps != deps {
+        if self.deps.len() != deps.len() {
             return Freshness::Stale(StaleReason::DependencyChanged);
+        }
+        for (before, now) in self.deps.iter().zip(&deps) {
+            if before.0 != now.0 || before.1.svh != now.1.svh {
+                return Freshness::Stale(StaleReason::DependencyChanged);
+            }
+            if compare_mir && before.1.mir != now.1.mir {
+                return Freshness::Stale(StaleReason::DependencyBodyChanged);
+            }
         }
 
         if self.sources.len() != sources.len() {
@@ -304,6 +340,6 @@ impl Fingerprint {
             }
         }
 
-        Freshness::Fresh(self.own_svh)
+        Freshness::Fresh(self.own)
     }
 }

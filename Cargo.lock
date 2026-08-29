@@ -247,6 +247,8 @@ name = "biwac_mir"
 version = "0.1.0"
 dependencies = [
  "biwac_base",
+ "biwac_dependency_metadata",
+ "biwac_hash",
  "biwac_hir",
  "biwac_span",
 ]
