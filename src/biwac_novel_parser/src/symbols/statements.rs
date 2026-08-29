@@ -33,8 +33,11 @@ impl<'src> NovelSourceStream<'src> {
                             Some(_) => {
                                 // `>>` だけを取り除く。字下げと行末の改行は本文の一部として残す。
                                 let cut = line.rfind(WAIT_COMMAND).expect("suffix was found");
-                                let msg =
-                                    format!("{}{}", &line[..cut], &line[cut + WAIT_COMMAND.len()..]);
+                                let msg = format!(
+                                    "{}{}",
+                                    &line[..cut],
+                                    &line[cut + WAIT_COMMAND.len()..]
+                                );
 
                                 Ok(vec![
                                     NovelStmt::NovelWrite(NovelMessage {

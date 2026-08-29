@@ -53,20 +53,23 @@ impl BiwacError for TokenizeError {
 
                 let file_name = modsrc.modu.file_name();
 
-                Report::build(ReportKind::Error, (file_name.as_str(), span.begin()..span.end()))
-                    .with_message("`{{` must be the last thing on its line.")
-                    .with_label(
-                        Label::new((file_name.as_str(), span.begin()..span.end()))
-                            .with_message("the body must start on the next line")
-                            .with_color(Color::Red),
-                    )
-                    .with_note(
-                        "a `{{ ... }}` block is closed by a line starting with `}}`, \
+                Report::build(
+                    ReportKind::Error,
+                    (file_name.as_str(), span.begin()..span.end()),
+                )
+                .with_message("`{{` must be the last thing on its line.")
+                .with_label(
+                    Label::new((file_name.as_str(), span.begin()..span.end()))
+                        .with_message("the body must start on the next line")
+                        .with_color(Color::Red),
+                )
+                .with_note(
+                    "a `{{ ... }}` block is closed by a line starting with `}}`, \
                          so it cannot be written on a single line",
-                    )
-                    .finish()
-                    .print((file_name.as_str(), Source::from(&modsrc.src)))
-                    .unwrap();
+                )
+                .finish()
+                .print((file_name.as_str(), Source::from(&modsrc.src)))
+                .unwrap();
             }
 
             Self::DslCloseNotFound { span } => {
@@ -74,17 +77,20 @@ impl BiwacError for TokenizeError {
 
                 let file_name = modsrc.modu.file_name();
 
-                Report::build(ReportKind::Error, (file_name.as_str(), span.begin()..span.end()))
-                    .with_message("Closing `}}` expected, but not found.")
-                    .with_label(
-                        Label::new((file_name.as_str(), span.begin()..span.end()))
-                            .with_message("this block is never closed")
-                            .with_color(Color::Red),
-                    )
-                    .with_note("`}}` must be at the start of a line (leading whitespace is allowed)")
-                    .finish()
-                    .print((file_name.as_str(), Source::from(&modsrc.src)))
-                    .unwrap();
+                Report::build(
+                    ReportKind::Error,
+                    (file_name.as_str(), span.begin()..span.end()),
+                )
+                .with_message("Closing `}}` expected, but not found.")
+                .with_label(
+                    Label::new((file_name.as_str(), span.begin()..span.end()))
+                        .with_message("this block is never closed")
+                        .with_color(Color::Red),
+                )
+                .with_note("`}}` must be at the start of a line (leading whitespace is allowed)")
+                .finish()
+                .print((file_name.as_str(), Source::from(&modsrc.src)))
+                .unwrap();
             }
         }
     }

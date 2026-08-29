@@ -120,10 +120,8 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
                         // 放っておくと後続の定義まで DSL に飲み込まれ、
                         // 「定義が無い」という遠い場所のエラーになる。
                         let body_begin_idx = i + 2;
-                        let rest_of_line = src[body_begin_idx..]
-                            .split('\n')
-                            .next()
-                            .unwrap_or_default();
+                        let rest_of_line =
+                            src[body_begin_idx..].split('\n').next().unwrap_or_default();
                         if !rest_of_line.trim().is_empty() {
                             return Err(TokenizeError::DslOpenNotAtLineEnd {
                                 span: Span::new(mod_id, i, body_begin_idx),

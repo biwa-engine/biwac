@@ -188,34 +188,35 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                     ))
                 }
                 Primary::FnCall(c) => {
-                    let call = oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
-                        oxc_ast::ast::CallExpression {
-                            span: span(),
-                            callee: oxc_ast::ast::Expression::Identifier(
-                                oxc_allocator::Box::new_in(
-                                    oxc_ast::ast::IdentifierReference {
-                                        span: span(),
-                                        name: oxc_span::Ident::new_const(
-                                            ctx.allocator
-                                                .alloc_str(&c.callee.as_oxc_local(ctx, fctx)),
-                                        ),
-                                        reference_id: Cell::new(None),
-                                    },
+                    let call =
+                        oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
+                            oxc_ast::ast::CallExpression {
+                                span: span(),
+                                callee: oxc_ast::ast::Expression::Identifier(
+                                    oxc_allocator::Box::new_in(
+                                        oxc_ast::ast::IdentifierReference {
+                                            span: span(),
+                                            name: oxc_span::Ident::new_const(
+                                                ctx.allocator
+                                                    .alloc_str(&c.callee.as_oxc_local(ctx, fctx)),
+                                            ),
+                                            reference_id: Cell::new(None),
+                                        },
+                                        ctx.allocator,
+                                    ),
+                                ),
+                                type_arguments: None,
+                                arguments: oxc_allocator::Vec::from_iter_in(
+                                    c.args.iter().map(|a| {
+                                        oxc_ast::ast::Argument::from(a.as_oxc_local(ctx, fctx))
+                                    }),
                                     ctx.allocator,
                                 ),
-                            ),
-                            type_arguments: None,
-                            arguments: oxc_allocator::Vec::from_iter_in(
-                                c.args.iter().map(|a| {
-                                    oxc_ast::ast::Argument::from(a.as_oxc_local(ctx, fctx))
-                                }),
-                                ctx.allocator,
-                            ),
-                            optional: false,
-                            pure: false,
-                        },
-                        ctx.allocator,
-                    ));
+                                optional: false,
+                                pure: false,
+                            },
+                            ctx.allocator,
+                        ));
 
                     // scene は generator なので、呼ぶ側が委譲しなければならない。
                     // 呼び出し先が出した syscall はそのまま外側の kernel まで抜ける。

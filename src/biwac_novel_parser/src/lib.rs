@@ -141,7 +141,10 @@ impl<'src> NovelSourceStream<'src> {
         //
         // 各 idx はバイトインデックスなので、文字数を取る chars().nth() には渡せない
         // (マルチバイト文字を含む行で位置がずれる)
-        match self.src[self.line_begin_idx + tmp_idx_in_line..].chars().next() {
+        match self.src[self.line_begin_idx + tmp_idx_in_line..]
+            .chars()
+            .next()
+        {
             Some('#') => {
                 self.idx = self.line_begin_idx + tmp_idx_in_line + 1;
                 Some(NovelLineKind::GeneralCommand)
