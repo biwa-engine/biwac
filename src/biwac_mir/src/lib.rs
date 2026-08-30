@@ -83,6 +83,18 @@ pub struct Mir {
     /// 文字列の表現の仕方 (TypeScript のリテラル / WASM のデータセグメント / GC array) は
     /// ターゲットごとに違うので、MIR は中身の文字列を持つだけにする。
     pub strings: StringPool,
+
+    /// モジュール全体に前置されるネイティブコード。
+    ///
+    /// どのシンボルからも参照されないが、生成物の先頭に置かれるものである。
+    /// wasm ではホスト関数の import 宣言がここに入る。
+    ///
+    /// 単相化するターゲットでは **依存パッケージのものも要る**。
+    /// std が宣言した import を実際に使うのは、std の関数を取り込んだ
+    /// 下流の生成物だからである。したがって `.biwamir` に載せて運ぶ。
+    ///
+    /// 宣言順に並ぶ。
+    pub module_natives: Vec<String>,
 }
 
 impl Mir {
@@ -92,6 +104,7 @@ impl Mir {
             pkg_id,
             items: BTreeMap::new(),
             strings: StringPool::default(),
+            module_natives: Vec::new(),
         }
     }
 }

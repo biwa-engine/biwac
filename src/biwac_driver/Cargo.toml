@@ -24,5 +24,6 @@ biwac_generator = { path = "../biwac_generator"}
 colored.workspace = true
 
 [features]
-default = [ "typescript" ]
+default = [ "typescript", "wasm" ]
 typescript = [ "biwac_generator/typescript" ]
+wasm = [ "biwac_generator/wasm" ]

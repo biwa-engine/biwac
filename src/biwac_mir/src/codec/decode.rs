@@ -50,6 +50,7 @@ struct Decoder<'a> {
     self_pkg: Option<PackageId>,
     meta_svh: Option<Hash64>,
     strings: StringPool,
+    module_natives: Vec<String>,
     tys: Vec<Ty>,
     gas: Vec<GenArgs>,
     items: Vec<(ValDefId, MirItem)>,
@@ -68,6 +69,7 @@ pub(super) fn decode(
         self_pkg: None,
         meta_svh: None,
         strings: StringPool::default(),
+        module_natives: Vec::new(),
         tys: Vec::new(),
         gas: Vec::new(),
         items: Vec::new(),
@@ -158,6 +160,12 @@ impl Decoder<'_> {
                 let v = u64::from_str_radix(s, 16)
                     .map_err(|_| self.error(format!("`{s}` is not a hex hash")))?;
                 self.meta_svh = Some(Hash64::from_u64(v));
+            }
+            "modnative" => {
+                // modnative "..."
+                let rest = self.after_tokens(toks, 1)?;
+                let code = self.unescape(&rest)?;
+                self.module_natives.push(code);
             }
             "str" => {
                 // str <索引> "..."
@@ -879,6 +887,7 @@ impl Decoder<'_> {
 
         let mut mir = Mir::new(pkg_name, pkg_id);
         mir.strings = self.strings;
+        mir.module_natives = self.module_natives;
         for (def_id, item) in self.items {
             mir.items.insert(def_id, item);
         }

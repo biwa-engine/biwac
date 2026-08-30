@@ -18,9 +18,10 @@ oxc_ast = { workspace = true, optional = true }
 oxc_span = { workspace = true, optional = true }
 oxc_allocator = { workspace = true, optional = true }
 oxc_parser = { workspace = true, optional = true }
-wasm-encoder = { workspace = true, optional = true }
+wat = { workspace = true, optional = true }
+wasmparser = { workspace = true, optional = true }
 
 [features]
 default = [ "typescript", "wasm" ]
 typescript = [ "dep:oxc_codegen", "dep:oxc_ast", "dep:oxc_span", "dep:oxc_allocator", "dep:oxc_parser" ]
-wasm = [ "dep:wasm-encoder" ]
+wasm = [ "dep:wat", "dep:wasmparser" ]

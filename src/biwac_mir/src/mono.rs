@@ -62,6 +62,14 @@ pub struct MonoMir {
 
     /// エントリポイント (`scene main`) の実体索引。
     pub entry: Option<usize>,
+
+    /// モジュール全体に前置されるネイティブコード。
+    ///
+    /// 実体を提供したパッケージのものだけを、
+    /// [`biwac_base::PackageId`] 昇順 (自パッケージが最後) に並べる。
+    /// 使われないパッケージの import まで並べると、
+    /// ホストが用意していない関数を要求してインスタンス化に失敗する。
+    pub module_natives: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

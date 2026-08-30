@@ -18,5 +18,6 @@ biwac_driver = { path = "../biwac_driver"}
 clap.workspace = true
 
 [features]
-default = [ "typescript" ]
-typescript = [ "biwac_generator/typescript" ]
+default = [ "typescript", "wasm" ]
+typescript = [ "biwac_generator/typescript", "biwac_driver/typescript" ]
+wasm = [ "biwac_generator/wasm", "biwac_driver/wasm" ]

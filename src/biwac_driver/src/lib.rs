@@ -692,7 +692,7 @@ fn load_analyze_and_codegen_single_package(
             // ライブラリは wasm の成果物を持たない。
             // 単相化はプログラム全体の操作で、根を持つのは playable だけである。
             if pkg_kind.is_playable() {
-                let _mono = monomorphize_program(
+                let mono = monomorphize_program(
                     &hir,
                     &mir,
                     &ext_pkgs_for_ty,
@@ -701,14 +701,40 @@ fn load_analyze_and_codegen_single_package(
                     interner,
                 )?;
 
-                // TODO: 単相化した MIR から .wat を生成し、
-                // wat クレートで .wasm にする。
-                eprintln!(
-                    "Error: the wasm backend cannot emit code yet \
-                     (monomorphization runs; code generation is not implemented)"
+                // マングリングは TypeScript と同じものを使う。
+                // ホスト側の実装がターゲット間で対応付けやすくなる。
+                let mangler =
+                    biwac_generator::mangle::Mangler::new(&hir, interner, &srcs, &ext_pkgs_for_ty);
+
+                let wat = biwac_generator::arch::wasm::emit(&mono, &mangler).map_err(|e| {
+                    eprintln!("Error: wasm code generation failed: {e}");
+                    biwac_base::print_error_finish_message(1);
+                })?;
+
+                // .wat は成果物として残す。デバッグではこちらを読む。
+                let wat_path = target_dir(&build_dir_path, options.target)
+                    .join(format!("{}.wat", metadata.metadata.name.value()));
+                std::fs::write(&wat_path, &wat).map_err(|e| {
+                    eprintln!("Error: failed to write {:?}: {}", wat_path, e);
+                    biwac_base::print_error_finish_message(1);
+                })?;
+
+                // アセンブルと検証はその場で行う。外部ツールは要らない。
+                let binary = biwac_generator::arch::wasm::assemble(&wat).map_err(|e| {
+                    eprintln!("Error: {e}");
+                    eprintln!("  (see {})", wat_path.display());
+                    biwac_base::print_error_finish_message(1);
+                })?;
+
+                let path = bin_path(
+                    &build_dir_path,
+                    options.target,
+                    metadata.metadata.name.value(),
                 );
-                biwac_base::print_error_finish_message(1);
-                return Err(());
+                std::fs::write(&path, binary).map_err(|e| {
+                    eprintln!("Error: failed to write {:?}: {}", path, e);
+                    biwac_base::print_error_finish_message(1);
+                })?;
             }
         }
     }
@@ -1398,6 +1424,78 @@ mod tests {
         let ty_keys =
             |m: &MonoMir| format!("{:?}", m.types.iter().map(|t| &t.key).collect::<Vec<_>>());
         assert_eq!(ty_keys(&mono), ty_keys(&again), "type order must be stable");
+    }
+
+    /// wasm ターゲットで、検証を通る wasm が出ること。
+    #[test]
+    fn wasm_output() {
+        let root = Path::new("../../assets/tests/test1");
+        with_build_lock(|_| {
+            compile(
+                root.to_path_buf(),
+                BuildOptions {
+                    force_rebuild: true,
+                    emit_mir: false,
+                    target: biwac_base::Target::Wasm,
+                },
+            )
+            .expect("wasm build failed");
+        });
+
+        let dir = root
+            .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+            .join(biwac_base::Target::Wasm.build_subdir());
+
+        // .wat はデバッグ用に残る。
+        let wat = std::fs::read_to_string(dir.join("test1.wat")).expect(".wat was not written");
+        assert!(wat.starts_with("(module"), "{wat}");
+        // ホスト関数の import 名は std のソースが決めている。
+        assert!(
+            wat.contains("(import \"biwa:engine\" \"sys_write\""),
+            "{wat}"
+        );
+        // 単相化されているので、同じ struct の複数の実体が別々の型になる。
+        assert!(wat.contains("(rec"), "{wat}");
+        assert!(wat.contains("struct.new"), "{wat}");
+        // エントリポイントが export される。
+        assert!(wat.contains("(export \"__biwa_entrypoint\""), "{wat}");
+
+        // .wasm は検証を通ったものである
+        // (通っていなければ compile がエラーになっている)。
+        let binary = std::fs::read(dir.join("test1.wasm")).expect(".wasm was not written");
+        assert_eq!(&binary[..4], b"\0asm", "not a wasm binary");
+        assert!(binary.len() > 100, "suspiciously small wasm output");
+    }
+
+    /// ライブラリは wasm の成果物を持たないこと。
+    ///
+    /// 単相化はプログラム全体の操作で、根を持つのは playable だけである。
+    #[test]
+    fn library_has_no_wasm_output() {
+        let root = Path::new("../../assets/tests/std");
+        with_build_lock(|_| {
+            compile(
+                root.to_path_buf(),
+                BuildOptions {
+                    force_rebuild: true,
+                    emit_mir: false,
+                    target: biwac_base::Target::Wasm,
+                },
+            )
+            .expect("wasm build of a library should succeed");
+        });
+
+        let dir = root
+            .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+            .join(biwac_base::Target::Wasm.build_subdir());
+        assert!(
+            dir.join("std.biwamir").is_file(),
+            "the MIR is still produced"
+        );
+        assert!(
+            !dir.join("std.wasm").exists(),
+            "a library must not produce a wasm binary"
+        );
     }
 
     /// ライブラリでは単相化が走らないこと (根が無い)。

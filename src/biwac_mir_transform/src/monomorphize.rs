@@ -199,11 +199,42 @@ impl<'a> Collector<'a> {
 
         let entry = entry_key.and_then(|k| self.instances.iter().position(|i| i.key == k));
 
+        // 実体を提供したパッケージの前置コードだけを集める。
+        //
+        // 使われないパッケージの import まで並べると、
+        // ホストが用意していない関数を要求してインスタンス化に失敗する。
+        let mut contributing: Vec<PackageId> = self
+            .instances
+            .iter()
+            .map(|i| i.key.def_id.pkg())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        contributing.sort_by_key(|p| {
+            // 自パッケージ (SELF = 0) を最後に置く。
+            // 依存が宣言したものを先に並べるほうが読みやすい。
+            if p.is_self() { u32::MAX } else { p.value() }
+        });
+
+        let mut module_natives = Vec::new();
+        for pkg in contributing {
+            let natives = if pkg.is_self() {
+                &self.own.module_natives
+            } else {
+                match self.dep_of(pkg) {
+                    Some((_, mir)) => &mir.module_natives,
+                    None => continue,
+                }
+            };
+            module_natives.extend(natives.iter().cloned());
+        }
+
         Ok(MonoMir {
             instances: self.instances,
             types: self.types,
             strings: self.strings,
             entry,
+            module_natives,
         })
     }
 

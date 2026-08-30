@@ -59,6 +59,16 @@ pub fn build(hir: &Hir, lang_items: &LangItemTable, pkg_id: PackageId) -> Mir {
         }
     }
 
+    // モジュール全体に前置されるネイティブコード。
+    // どのシンボルからも参照されないが、生成物の先頭に置かれる。
+    // 単相化するターゲットでは依存パッケージのものも要るので、
+    // `.biwamir` に載せて下流へ運ぶ。
+    mir.module_natives = hir
+        .module_global_natives
+        .iter()
+        .map(|n| n.native.clone())
+        .collect();
+
     symbols.sort_by_key(|(def_id, _)| def_id.value());
 
     for (def_id, source) in symbols {

@@ -34,6 +34,8 @@
 //! pkg 1 color 9182736455      # 参照する他パッケージ。PackageId 昇順
 //! meta-svh a3f19c0e7b2d4851   # 自パッケージの .biwameta の SVH
 //!
+//! modnative "(import \"biwa:engine\" \"sys_write\" (func $sys_write (param externref)))"
+//!
 //! str 0 "Hello\n"
 //!
 //! ty 0 int
@@ -85,7 +87,7 @@ use biwac_hash::Hash64;
 
 use crate::Mir;
 
-pub const BIWAC_MIR_FORMAT_VERSION: u32 = 1;
+pub const BIWAC_MIR_FORMAT_VERSION: u32 = 2;
 
 pub const MIR_FILE_EXTENSION: &str = "biwamir";
 

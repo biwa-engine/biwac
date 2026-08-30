@@ -130,6 +130,13 @@ pub(super) fn encode(mir: &Mir, ctx: &EncodeCtx) -> String {
     }
     let _ = writeln!(out, "meta-svh {:016x}", ctx.meta_svh.as_u64());
 
+    if !mir.module_natives.is_empty() {
+        out.push('\n');
+        for native in &mir.module_natives {
+            let _ = writeln!(out, "modnative {native:?}");
+        }
+    }
+
     if !mir.strings.is_empty() {
         out.push('\n');
         for (id, s) in mir.strings.iter() {
