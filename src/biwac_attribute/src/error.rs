@@ -66,6 +66,12 @@ pub enum AttrError {
     /// 本来この不整合は起こらない。
     /// 将来 parser を変更した際に静かに壊れないための不変条件チェックである。
     MissingNativeAttribute { target: Target, span: Span },
+
+    /// `[[native(arch = "...")]]` の arch がコンパイラの知らないターゲットである。
+    ///
+    /// 綴りを間違えると「どのターゲットでも使われない native」になり、
+    /// 黙って消えてしまうので、ここで止める。
+    UnknownArch { arch: String, span: Span },
 }
 
 impl AttrError {
@@ -78,6 +84,7 @@ impl AttrError {
             | Self::UnexpectedValue { span, .. }
             | Self::MissingValue { span, .. }
             | Self::InvalidTarget { span, .. }
+            | Self::UnknownArch { span, .. }
             | Self::DuplicatedAttribute { span, .. }
             | Self::MissingNativeAttribute { span, .. } => span,
         }
@@ -107,6 +114,11 @@ impl AttrError {
             Self::UnknownKey { attr, key, .. } => {
                 format!("attribute `{}` has no key `{}`", attr.name(), key)
             }
+            Self::UnknownArch { arch, .. } => format!(
+                "unknown arch `{}` (known targets: {})",
+                arch,
+                biwac_base::describe_targets(biwac_base::Target::ALL)
+            ),
             Self::InvalidValueKind {
                 attr,
                 key,

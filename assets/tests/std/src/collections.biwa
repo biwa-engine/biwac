@@ -5,9 +5,20 @@ type Vec[T] = {{
   Array<T>
 }};
 
+// 可変長のコンテナはホストが持つ。
+[[native(arch="wasm")]]
+type Vec[T] = {{
+  externref
+}};
+
 [[native(arch="typescript")]]
 type Map[K, V] = {{
   Map<K, V>
+}};
+
+[[native(arch="wasm")]]
+type Map[K, V] = {{
+  externref
 }};
 
 impl[K, V] Map[K, V] {
@@ -15,7 +26,15 @@ impl[K, V] Map[K, V] {
   fn insert(self, key: K, value: V) {{
     self.set(key, value);
   }}
-  
+
+  [[native(arch="wasm")]]
+  fn insert(self, key: K, value: V) {{
+    local.get 0
+    local.get 1
+    local.get 2
+    call $sys_map_insert
+  }}
+
   // T? ( Option[T] ) のtypescript実装では None は null として扱われる
   // Map.prototype.get(key)は値がなければundefinedを返すので、nullに変換
   [[native(arch="typescript")]]
@@ -26,5 +45,12 @@ impl[K, V] Map[K, V] {
     } else {
       return null;
     }
+  }}
+
+  [[native(arch="wasm")]]
+  fn get(self, key: K) -> Option[V] {{
+    local.get 0
+    local.get 1
+    call $sys_map_get
   }}
 }

@@ -66,13 +66,24 @@ fn test1() {
         })
         .collect();
 
-    let pkg = biwac_package_loader::Pkg::try_load(
+    let mut pkg = biwac_package_loader::Pkg::try_load(
         &metadata,
         &mut interner,
         &mut srcs,
         pkg_root_path.to_path_buf(),
     )
     .unwrap();
+
+    // driver と同じく、選択されていない arch の native を落としてから名前解決する。
+    // std は同じ名前で arch 違いの native を並べているので、
+    // 落とさずに渡すとシンボルが衝突する。
+    pkg.walk_modules_mut(|module| {
+        biwac_attribute::retain_for_target(
+            &mut module.ast,
+            biwac_base::Target::TypeScript,
+            &interner,
+        );
+    });
 
     let _hir = NameResolver::new(&metadata, external_packages, pkg_name, pkg)
         .unwrap()

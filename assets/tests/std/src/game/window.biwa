@@ -24,11 +24,23 @@ impl Window {
     // TODO:
     return 0;
   }}
-  
+
+  [[native(arch="wasm")]]
+  fn width(self) -> Uint {{
+    ;; TODO:
+    i32.const 0
+  }}
+
   [[native(arch="typescript")]]
   fn height(self) -> Uint {{
     // TODO:
     return 0;
+  }}
+
+  [[native(arch="wasm")]]
+  fn height(self) -> Uint {{
+    ;; TODO:
+    i32.const 0
   }}
 }
 
@@ -39,6 +51,11 @@ impl Canvas {
   fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]) {{
     console.log("TODO");
   }}
+
+  [[native(arch="wasm")]]
+  fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]) {{
+    ;; TODO:
+  }}
 }
 
 struct MessageWindow {}
@@ -48,25 +65,50 @@ impl MessageWindow {
   fn append(self, text: String, font: Font, size: Uint, speed: Uint) {{
     console.log("TODO");
   }}
+
+  [[native(arch="wasm")]]
+  fn append(self, text: String, font: Font, size: Uint, speed: Uint) {{
+    ;; TODO:
+  }}
   
   [[native(arch="typescript")]]
   fn clear(self) {{
     console.log("TODO");
+  }}
+
+  [[native(arch="wasm")]]
+  fn clear(self) {{
+    ;; TODO:
   }}
   
   [[native(arch="typescript")]]
   fn flush(self) {{
     console.log("TODO");
   }}
+
+  [[native(arch="wasm")]]
+  fn flush(self) {{
+    ;; TODO:
+  }}
   
   [[native(arch="typescript")]]
   fn set_talker_name(self, name: String) {{
     console.log("TODO");
   }}
+
+  [[native(arch="wasm")]]
+  fn set_talker_name(self, name: String) {{
+    ;; TODO:
+  }}
   
   [[native(arch="typescript")]]
   fn set_talker_image(self, image: Image) {{
     console.log("TODO");
+  }}
+
+  [[native(arch="wasm")]]
+  fn set_talker_image(self, image: Image) {{
+    ;; TODO:
   }}
 }
 

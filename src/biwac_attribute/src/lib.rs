@@ -1,9 +1,11 @@
 mod check;
 mod error;
+mod retain;
 mod table;
 
 pub use check::{check_mod_ast, lang_key, native_arch};
 pub use error::AttrError;
+pub use retain::retain_for_target;
 pub use table::{AttrShape, AttrValueKind, KnownAttr, attr_names};
 
 // この crate は「どの属性が存在し、何を取り、どこに付けられるか」の

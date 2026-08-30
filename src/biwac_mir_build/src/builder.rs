@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use biwac_ast::{BinOperator, UnOperator};
 use biwac_hir::{
-    BlockExpr, Callee as HirCallee, DecledVar, DefinedTy, Expr, ExprId, ExprVal, FnBody, FnDef,
-    FnSignature, Literal, NativeFnDef, NovelSceneDef, Primary, Stmt, Ty, TyKind, VarIdKind,
+    BlockExpr, Callee as HirCallee, DecledVar, Expr, ExprId, ExprVal, FnBody, FnDef, FnSignature,
+    Literal, NativeFnDef, NovelSceneDef, Primary, Stmt, Ty, TyKind, VarIdKind,
 };
 use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_mir::{
@@ -475,9 +475,13 @@ impl<'a> BodyBuilder<'a> {
             )
         }));
 
-        // 記述子は捨てる。捨てる先にも型が要るので syscall 型の一時変数を作る。
-        let syscall_ty = self.lang_item_ty(LangItem::Syscall, span.clone());
-        let dest = self.new_temp(syscall_ty, span.clone());
+        // 結果は捨てる。捨てる先にも場所が要るので Void の一時変数を作る。
+        //
+        // 呼び先が値を返すかどうかはターゲットによって違う
+        // (TypeScript は syscall の記述子を返し、wasm は何も返さない)。
+        // ここで型を決め打ちにできないので、
+        // 「Void の場所への代入は値を捨てる」という約束にしてある。
+        let dest = self.new_temp(Ty::new(TyKind::Void, span.clone()), span.clone());
 
         let next = self.new_block();
         self.terminate(
@@ -494,22 +498,6 @@ impl<'a> BodyBuilder<'a> {
             span,
         );
         next
-    }
-
-    fn lang_item_ty(&self, item: LangItem, span: Span) -> Ty {
-        let def_id = self.lang_items.get(&item).unwrap_or_else(|| {
-            panic!(
-                "compiler bug: lang item `{}` is missing at MIR building",
-                item.key()
-            )
-        });
-        Ty::new(
-            TyKind::Defined(DefinedTy {
-                def_id: biwac_span::TyDefId::new(def_id),
-                genargs: Vec::new(),
-            }),
-            span,
-        )
     }
 
     // ---- 場所 ----

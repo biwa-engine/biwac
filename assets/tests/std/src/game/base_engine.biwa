@@ -18,6 +18,26 @@
   import { Sys, type BiwaSyscall } from "@biwa/engine/vm/syscall";
 }}
 
+// wasm ではエンジンの API をホスト関数の import として宣言する。
+//
+// import の名前空間 (`biwa:engine`) は std とエンジンが合意するものであり、
+// コンパイラは関知しない。コンパイラはこの宣言をそのまま生成物の先頭に置く。
+//
+// wasm には中断の仕組みが無く、その必要も無い。
+// エンジン呼び出しは同期的なホスト関数の呼び出しで、
+// 完了までブロックするか積んで即座に返るかはエンジンの都合である。
+// したがって typescript 版と違い syscall の記述子を返さない。
+[[native(arch="wasm")]]
+{{
+  (import "biwa:engine" "sys_write" (func $sys_write (param externref)))
+  (import "biwa:engine" "sys_wait" (func $sys_wait))
+  (import "biwa:engine" "sys_create_image" (func $sys_create_image (param externref i32 i32)))
+  (import "biwa:engine" "sys_string_concat"
+    (func $sys_string_concat (param externref externref) (result externref)))
+  (import "biwa:engine" "sys_map_insert" (func $sys_map_insert (param externref anyref anyref)))
+  (import "biwa:engine" "sys_map_get" (func $sys_map_get (param externref anyref) (result anyref)))
+}}
+
 import package::types::string::String;
 
 // syscall の記述子。中身はエンジンとの規約であり、Biwa 側からは不透明。
@@ -25,6 +45,18 @@ import package::types::string::String;
 [[native(arch="typescript")]]
 type Syscall = {{
   BiwaSyscall
+}};
+
+// wasm では syscall の記述子という概念が要らない
+// (エンジン呼び出しがそのままホスト関数の呼び出しになる) が、
+// lang item `syscall` は今のところターゲットに関係なく要求されるので、
+// 満たすためだけのダミーを置いておく。
+//
+// TODO: 要求する lang item を arch ごとに変えられるようにして、これを消す。
+[[lang="syscall"]]
+[[native(arch="wasm")]]
+type Syscall = {{
+  i32
 }};
 
 // 中断しない syscall。積んで即座に返る。
@@ -36,6 +68,14 @@ fn create_image(path: String, x: Int, y: Int) {{
   });
 }}
 
+[[native(arch="wasm")]]
+fn create_image(path: String, x: Int, y: Int) {{
+  local.get 0
+  local.get 1
+  local.get 2
+  call $sys_create_image
+}}
+
 // scene 内で直接記述されたテキスト (novel statement) の展開先。
 // コンパイラのみが呼び出すことを想定しており、
 // ゲーム開発者やサードパーティが直接呼ぶことは想定していない。
@@ -45,6 +85,15 @@ fn write(msg: String) -> Syscall {{
   return { sys: Sys.Write, args: [msg] };
 }}
 
+// arch ごとに native が選ばれるので、シグニチャがターゲット間で違ってよい。
+// wasm では記述子を返す必要が無いので戻り値なしにする。
+[[lang="write"]]
+[[native(arch="wasm")]]
+fn write(msg: String) {{
+  local.get 0
+  call $sys_write
+}}
+
 // novel statement の待ち (クリック待ち) の展開先。
 // write と同じくコンパイラのみが呼び出す。
 // エンジンはクリックが来るまで scene を再開しない。
@@ -52,4 +101,10 @@ fn write(msg: String) -> Syscall {{
 [[native(arch="typescript")]]
 fn wait() -> Syscall {{
   return { sys: Sys.Wait, args: [] };
+}}
+
+[[lang="wait"]]
+[[native(arch="wasm")]]
+fn wait() {{
+  call $sys_wait
 }}

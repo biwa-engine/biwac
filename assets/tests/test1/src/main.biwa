@@ -27,6 +27,16 @@ fn native_add(x: Int, y: Int) -> Int {{
   return x + y;
 }}
 
+// 同じ名前で arch 違いの native を並べる。
+// 選ばれていない arch のものは def collection の前に落とされるので、
+// シンボルは衝突しない。
+[[native(arch="wasm")]]
+fn native_add(x: Int, y: Int) -> Int {{
+  local.get 0
+  local.get 1
+  i32.add
+}}
+
 // 依存パッケージ greeter の API を使う。
 //
 // greeter のシグニチャには greeter 自身ではなく

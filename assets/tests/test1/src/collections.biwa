@@ -3,16 +3,32 @@ type Vec[T] = {{
   Array<T>
 }};
 
+[[native(arch="wasm")]]
+type Vec[T] = {{
+  externref
+}};
+
 impl[T] Vec[T] {
   [[native(arch="typescript")]]
   fn push(self, v: T) {{
     self.push(v);
     return;
   }}
-  
+
+  [[native(arch="wasm")]]
+  fn push(self, v: T) {{
+    ;; TODO: エンジン側の Vec API に繋ぐ
+  }}
+
   [[native(arch="typescript")]]
   fn new() -> Self {{
     return [];
+  }}
+
+  [[native(arch="wasm")]]
+  fn new() -> Self {{
+    ;; TODO: エンジン側の Vec API に繋ぐ
+    ref.null extern
   }}
 }
 

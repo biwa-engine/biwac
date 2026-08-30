@@ -46,6 +46,23 @@ impl LoadedModule {
         children.sort_by_key(|(_, m)| m.mod_id);
         children
     }
+
+    /// 自身と全子孫モジュールを深さ優先で走査する (可変)。
+    ///
+    /// AST を書き換えるパス (arch による native の刈り込みなど) が使う。
+    pub fn walk_mut(&mut self, f: &mut impl FnMut(&mut LoadedModule)) {
+        f(self);
+        // 走査順は決定論的でなければならない。
+        // 子の書き換えが順序に依存しない場合でも、
+        // 診断の出る順序が実行ごとに変わると追いにくい。
+        let mut ids: Vec<InternedIdent> = self.children.keys().copied().collect();
+        ids.sort_by_key(|id| self.children[id].mod_id);
+        for id in ids {
+            if let Some(child) = self.children.get_mut(&id) {
+                child.walk_mut(f);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -58,6 +75,11 @@ impl Pkg {
     /// パッケージ内の全モジュールを深さ優先で走査する。
     pub fn walk_modules(&self, mut f: impl FnMut(&LoadedModule)) {
         self.root_module.walk(&mut f);
+    }
+
+    /// パッケージ内の全モジュールを深さ優先で走査する (可変)。
+    pub fn walk_modules_mut(&mut self, mut f: impl FnMut(&mut LoadedModule)) {
+        self.root_module.walk_mut(&mut f);
     }
 }
 

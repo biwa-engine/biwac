@@ -6,14 +6,37 @@ type Option[T] = {{
   T | null
 }};
 
+// wasm では null 可能な anyref にする。null が none である。
+//
+// これは enum が入るまでの暫定である。
+// anyref に入れられるのは WasmGC の参照型だけなので、
+// Option[Int] や Option[String] (externref は別の型階層) は
+// バックエンドがエラーにする。
+[[native(arch="wasm")]]
+type Option[T] = {{
+  anyref
+}};
+
 impl[T] Option[T] {
   [[native(arch="typescript")]]
   fn is_some(self) -> Bool {{
     return self !== null;
   }}
 
+  [[native(arch="wasm")]]
+  fn is_some(self) -> Bool {{
+    local.get 0
+    ref.is_null
+    i32.eqz
+  }}
+
   [[native(arch="typescript")]]
   fn none() -> Self {{
     return null;
+  }}
+
+  [[native(arch="wasm")]]
+  fn none() -> Self {{
+    ref.null any
   }}
 }

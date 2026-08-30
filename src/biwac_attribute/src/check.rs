@@ -104,6 +104,10 @@ fn check(
         }
 
         check_shape(known, attr, interner, errors);
+
+        if known == KnownAttr::Native {
+            check_arch(attr, interner, errors);
+        }
     }
 
     // ネイティブ定義には [[native]] が付いている必要がある。
@@ -208,6 +212,33 @@ pub fn native_arch<'a>(attrs: &'a Attrs, interner: &IdentInterner) -> Option<(&'
         .find(|a| interner.get_str(&a.key.id) == Some("arch"))
         .and_then(|a| a.val.as_ref())
         .and_then(|v| v.as_str().map(|s| (s, v.span().clone())))
+}
+
+/// `[[native(arch = "...")]]` の arch がコンパイラの知る名前か検証する。
+///
+/// 検証は [`biwac_base::Target::ALL`] に対して行う。
+/// cargo feature で絞った「このビルドで生成できるターゲット」ではない。
+/// `typescript` feature だけでビルドしたコンパイラでも、
+/// std に書かれた `arch = "wasm"` は正当な記述でなければならないためである。
+fn check_arch(attr: &Attribute, interner: &IdentInterner, errors: &mut Vec<AttrError>) {
+    let AttrBody::List(args) = &attr.body else {
+        return;
+    };
+
+    for arg in args {
+        if interner.get_str(&arg.key.id) != Some("arch") {
+            continue;
+        }
+        let Some(val) = &arg.val else { continue };
+        let Some(name) = val.as_str() else { continue };
+
+        if biwac_base::Target::from_name(name).is_none() {
+            errors.push(AttrError::UnknownArch {
+                arch: name.to_string(),
+                span: val.span().clone(),
+            });
+        }
+    }
 }
 
 /// `[[lang="..."]]` のキー文字列を取り出す。

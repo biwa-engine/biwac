@@ -1189,7 +1189,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     /// 呼び出し式そのものは HIR にまだ存在せず (Stmt::NovelWrite のまま)、
     /// codegen が lang item を引いて実際の呼び出しを生成する。
     /// ここでは「その関数が存在し、想定した引数を取る」ことだけを確かめる。
-    fn check_novel_call(&mut self, item: LangItem, args: &[Ty], span: &Span) -> TyResult<()> {
+    fn check_novel_call(&mut self, item: LangItem, args: &[Ty], _span: &Span) -> TyResult<()> {
         let def_id = self.tctx.require_val(item)?;
 
         // codegen はこの関数の呼び出しを出力するので import が必要になる。
@@ -1205,20 +1205,25 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             .get_value_ty(&def_id)
             .ok_or(TyError::MissingLangItem { item })?;
 
-        // 戻り値は syscall の記述子である。
-        // scene はこれを yield してエンジンに制御を渡す。
-        let syscall = self.tctx.lang_item_ty(LangItem::Syscall, span.clone())?;
-
-        let expected = Ty::new(
-            TyKind::Fn(FnTy {
-                args: args.to_vec(),
-                rty: Box::new(syscall),
-                genargs: Vec::new(),
-            }),
-            span.clone(),
-        );
-
-        self.unify(callee, expected)?;
+        // 戻り値には触らない。
+        //
+        // TypeScript では syscall の記述子を返し、scene がそれを yield して
+        // エンジンに制御を渡す。wasm ではエンジン呼び出しがそのまま
+        // ホスト関数の呼び出しになるので、返すものが無い。
+        // arch ごとに native が選ばれるためシグニチャが違ってよく、
+        // ここで戻り値を固定してはいけない。
+        //
+        // どちらにせよ novel statement は結果を捨てるので、
+        // 「その関数が存在し、想定した引数を取る」ことだけを確かめれば足りる。
+        let TyKind::Fn(callee_fty) = callee.kind else {
+            return Err(TyError::MissingLangItem { item });
+        };
+        if callee_fty.args.len() != args.len() {
+            return Err(TyError::MissingLangItem { item });
+        }
+        for (declared, actual) in callee_fty.args.into_iter().zip(args.iter().cloned()) {
+            self.unify(declared, actual)?;
+        }
 
         Ok(())
     }

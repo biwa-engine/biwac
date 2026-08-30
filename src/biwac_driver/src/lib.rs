@@ -3,12 +3,11 @@ mod dep_graph;
 use colored::Colorize;
 use std::{
     collections::HashSet,
-    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use biwac_base::{IdentInterner, PackageId, PackageName, SourceHolder};
+use biwac_base::{IdentInterner, PackageId, PackageName, SourceHolder, Target};
 use biwac_dependency_metadata::{DepMetadata, ExternalPackage, SymbolIndexMap};
 use biwac_fingerprint::{Fingerprint, Freshness, PackageHashes, SourceEntry, StaleReason};
 use biwac_hash::Hash64;
@@ -16,7 +15,7 @@ use biwac_hash::Hash64;
 use dep_graph::DepGraph;
 
 /// ビルドの振る舞いの指定。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct BuildOptions {
     /// 鮮度判定を飛ばして全パッケージを建て直す。
     pub force_rebuild: bool,
@@ -26,18 +25,24 @@ pub struct BuildOptions {
     /// `.biwamir` 自体は毎ビルド書かれるので、これは
     /// 「既定の出力を作らずに MIR だけ確かめたい」ときの指定である。
     pub emit_mir: bool,
+
+    /// コード生成のターゲット。
+    ///
+    /// `arch` の切り落としでシンボルの集合が変わるので、
+    /// `.biwameta` や `.biwamir` を含む中間生成物もすべてターゲット依存である。
+    /// 成果物はターゲットごとのディレクトリに分けて置く。
+    pub target: Target,
 }
 
-/// このターゲットが、依存パッケージの **関数の本体** を
-/// 自分の出力に取り込むかどうか。
-///
-/// 単相化するターゲット (WASM 等) では依存の本体が自分の出力に混ざるので、
-/// 依存の `.biwamir` が変われば建て直さなければならない。
-/// TypeScript は `greeter.ts` に std の本体を入れないので、
-/// 依存の関数の中身が変わっても建て直す必要がない。
-///
-/// `--target` を入れるときに、ここがターゲットごとの分岐になる。
-const TARGET_CONSUMES_DEP_MIR: bool = false;
+impl Default for BuildOptions {
+    fn default() -> Self {
+        Self {
+            force_rebuild: false,
+            emit_mir: false,
+            target: Target::TypeScript,
+        }
+    }
+}
 
 /// このコンパイラの同一性。
 ///
@@ -146,13 +151,14 @@ pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> 
     // 再ビルドしたものだけでなく **グラフの全パッケージ** を対象にする。
     // キャッシュが効いた依存の .ts も要るし、
     // 依存から外れたパッケージの .ts は消さなければならない。
-    let build_dir_path = prepare_build_dir(&pkg_root_path)?;
+    let build_dir_path = prepare_build_dir(&pkg_root_path, options.target)?;
     if !options.emit_mir {
         collect_dep_bins(
             &dep_graph.all_packages(),
             metadata.metadata.name.value(),
             &packages_dir,
             &build_dir_path,
+            options.target,
         )?;
     }
 
@@ -206,7 +212,7 @@ fn build_or_reuse_package(
         })?;
     let pkg_name = metadata.metadata.name.value().to_string();
 
-    let build_dir_path = prepare_build_dir(&pkg_root)?;
+    let build_dir_path = prepare_build_dir(&pkg_root, options.target)?;
 
     // このパッケージのビルドが読むことになる依存の集合 = 推移閉包。
     //
@@ -229,6 +235,11 @@ fn build_or_reuse_package(
         biwac_base::print_error_finish_message(1);
     })?;
 
+    // wasm では単相化がプログラム全体の操作なので、
+    // 根を持たないライブラリからは成果物が出ない。
+    let produces_binary =
+        is_playable_package(&pkg_root) || options.target.library_produces_binary();
+
     let freshness = check_freshness(
         &build_dir_path,
         &pkg_name,
@@ -236,6 +247,7 @@ fn build_or_reuse_package(
         &dep_hashes,
         &sources,
         options,
+        produces_binary,
     );
 
     if let Freshness::Fresh(hashes) = freshness {
@@ -278,14 +290,16 @@ fn build_or_reuse_package(
         &direct_dep_names,
         dep_graph,
         packages_dir,
+        options.target,
         &mut interner,
     )?;
 
     // 依存の `.biwamir` を読む。
     //
     // 単相化の入力であり、同時に「書き出した MIR が読み戻せるか」の検査でもある。
-    // 既定のビルド (TypeScript) は単相化を通らないので読まない。
-    let dep_mirs = if options.emit_mir {
+    // 依存の本体を取り込むターゲット (wasm) では必須で、
+    // そうでないターゲットでも `--emit mir` のときは検査のために読む。
+    let dep_mirs = if options.emit_mir || options.target.consumes_dependency_mir() {
         let deps: Vec<(PackageId, String, Hash64)> = external_packages
             .iter()
             .filter_map(|p| {
@@ -296,7 +310,7 @@ fn build_or_reuse_package(
                 ))
             })
             .collect();
-        load_dep_mirs(&deps, packages_dir, &mut interner, depth)?
+        load_dep_mirs(&deps, packages_dir, options.target, &mut interner, depth)?
     } else {
         Vec::new()
     };
@@ -327,7 +341,10 @@ fn build_or_reuse_package(
         &dep_hashes,
         sources,
     );
-    let fp_path = biwac_fingerprint::fingerprint_path(&build_dir_path, &pkg_name);
+    let fp_path = biwac_fingerprint::fingerprint_path(
+        &target_dir(&build_dir_path, options.target),
+        &pkg_name,
+    );
     std::fs::write(&fp_path, fingerprint.encode_file()).map_err(|e| {
         eprintln!("Error: failed to write {:?}: {}", fp_path, e);
         biwac_base::print_error_finish_message(1);
@@ -347,14 +364,17 @@ fn check_freshness(
     dep_hashes: &[(PackageId, PackageHashes)],
     sources: &[SourceEntry],
     options: BuildOptions,
+    // このターゲットでこのパッケージが成果物を持つか。
+    produces_binary: bool,
 ) -> Freshness {
     if options.force_rebuild {
         return Freshness::Stale(StaleReason::Forced);
     }
 
     // シグニチャと本体のキャッシュが無ければ、記録があっても意味がない。
-    if !metadata_path(build_dir_path, pkg_name).exists()
-        || !mir_path(build_dir_path, pkg_name).exists()
+    let target = options.target;
+    if !metadata_path(build_dir_path, target, pkg_name).exists()
+        || !mir_path(build_dir_path, target, pkg_name).exists()
     {
         return Freshness::Stale(StaleReason::NoPreviousBuild);
     }
@@ -362,11 +382,15 @@ fn check_freshness(
     // 生成物が消えていれば、記録がどうであれ建て直す。
     // 出力ディレクトリだけ消したときに「Fresh」と言い張って、
     // 生成物が無いまま成功してしまうのを防ぐ。
-    if !bin_path(build_dir_path, pkg_name).exists() {
+    //
+    // ただし、そのターゲットでそのパッケージが成果物を持つとは限らない。
+    // wasm は単相化を通すので、根を持たないライブラリからは何も出ない。
+    if produces_binary && !bin_path(build_dir_path, target, pkg_name).exists() {
         return Freshness::Stale(StaleReason::MissingOutput);
     }
 
-    let fp_path = biwac_fingerprint::fingerprint_path(build_dir_path, pkg_name);
+    let fp_path =
+        biwac_fingerprint::fingerprint_path(&target_dir(build_dir_path, target), pkg_name);
     let Ok(data) = std::fs::read(&fp_path) else {
         return Freshness::Stale(StaleReason::NoPreviousBuild);
     };
@@ -380,31 +404,49 @@ fn check_freshness(
         metadata,
         dep_hashes,
         sources,
-        TARGET_CONSUMES_DEP_MIR,
+        options.target.consumes_dependency_mir(),
     )
 }
 
-fn metadata_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
-    build_dir_path.join(format!("{pkg_name}.biwameta"))
+/// playable (`main.biwa` を持つ) パッケージか。
+///
+/// パッケージを読み込む前に知りたいので、ルートモジュールの有無で判定する。
+/// 判定規則は [`biwac_package_loader`] のものと同じである。
+fn is_playable_package(pkg_root: &Path) -> bool {
+    pkg_root
+        .join("src")
+        .join(format!(
+            "{}.{}",
+            biwac_base::BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME,
+            biwac_base::BIWA_EXTENSION
+        ))
+        .is_file()
+}
+
+/// ターゲットごとの中間生成物と成果物を入れるディレクトリ。
+///
+/// `arch` の切り落としでシンボルの集合がターゲットごとに変わるので、
+/// `.biwameta` も `.biwamir` もターゲット依存である。
+/// ここで分けておけば、ターゲットを切り替えても互いのキャッシュを壊さない。
+fn target_dir(build_dir_path: &Path, target: Target) -> PathBuf {
+    build_dir_path.join(target.build_subdir())
+}
+
+fn metadata_path(build_dir_path: &Path, target: Target, pkg_name: &str) -> PathBuf {
+    target_dir(build_dir_path, target).join(format!("{pkg_name}.biwameta"))
 }
 
 /// MIR のキャッシュ。`.biwameta` と対で置かれる。
-fn mir_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
-    build_dir_path.join(format!("{pkg_name}.{}", biwac_mir::MIR_FILE_EXTENSION))
+fn mir_path(build_dir_path: &Path, target: Target, pkg_name: &str) -> PathBuf {
+    target_dir(build_dir_path, target).join(format!("{pkg_name}.{}", biwac_mir::MIR_FILE_EXTENSION))
 }
 
 /// codegen の出力先。
-fn bin_path(build_dir_path: &Path, pkg_name: &str) -> PathBuf {
-    if cfg!(feature = "typescript") {
-        build_dir_path
-            .join("typescript")
-            .join(format!("{pkg_name}.ts"))
-    } else {
-        todo!()
-    }
+fn bin_path(build_dir_path: &Path, target: Target, pkg_name: &str) -> PathBuf {
+    target_dir(build_dir_path, target).join(format!("{pkg_name}.{}", target.bin_extension()))
 }
 
-fn prepare_build_dir(pkg_root: &Path) -> Result<PathBuf, ()> {
+fn prepare_build_dir(pkg_root: &Path, target: Target) -> Result<PathBuf, ()> {
     let build_dir_path = pkg_root.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
     if build_dir_path.exists() && !build_dir_path.is_dir() {
         panic!(
@@ -415,8 +457,9 @@ fn prepare_build_dir(pkg_root: &Path) -> Result<PathBuf, ()> {
                 .expect("broken build directory path")
         );
     }
-    std::fs::create_dir_all(&build_dir_path).map_err(|e| {
-        eprintln!("Error: failed to create {:?}: {}", build_dir_path, e);
+    let dir = target_dir(&build_dir_path, target);
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        eprintln!("Error: failed to create {:?}: {}", dir, e);
         biwac_base::print_error_finish_message(1);
     })?;
     Ok(build_dir_path)
@@ -435,6 +478,7 @@ fn load_external_packages(
     direct_dep_names: &[String],
     dep_graph: &DepGraph,
     packages_dir: &Path,
+    target: Target,
     interner: &mut IdentInterner,
 ) -> Result<Vec<ExternalPackage>, ()> {
     let mut packages = Vec::with_capacity(transitive_deps.len());
@@ -443,7 +487,7 @@ fn load_external_packages(
             continue;
         };
         let dep_root = packages_dir.join(name);
-        let meta = load_dep_metadata(&dep_root, name)?;
+        let meta = load_dep_metadata(&dep_root, target, name)?;
         packages.push(ExternalPackage {
             ident: interner.get_or_insert(name),
             pkg_id,
@@ -456,9 +500,10 @@ fn load_external_packages(
 }
 
 /// Loads a .biwameta file from a built dependency's build directory.
-fn load_dep_metadata(dep_root: &Path, dep_name: &str) -> Result<DepMetadata, ()> {
+fn load_dep_metadata(dep_root: &Path, target: Target, dep_name: &str) -> Result<DepMetadata, ()> {
     let meta_path = dep_root
         .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+        .join(target.build_subdir())
         .join(format!("{}.biwameta", dep_name));
     let data = std::fs::read(&meta_path).map_err(|e| {
         eprintln!("Error: failed to read {:?}: {}", meta_path, e);
@@ -480,6 +525,7 @@ fn persist_dep_metadata(
     interner: &biwac_base::IdentInterner,
     dep_hashes: &[(PackageId, PackageHashes)],
     build_dir_path: &Path,
+    target: Target,
     metadata: &biwac_base::MetadataHolder,
 ) -> Result<(Hash64, SymbolIndexMap), ()> {
     // `.biwameta` が記録するのはインタフェースの伝播に使う SVH だけである。
@@ -488,7 +534,7 @@ fn persist_dep_metadata(
     let (dep_meta, symbol_index) = DepMetadata::new(hir, srcs, interner, lang_items, &dep_svhs);
     let svh = dep_meta.svh;
     let meta_bytes = dep_meta.encode_file();
-    let meta_path = metadata_path(build_dir_path, metadata.metadata.name.value());
+    let meta_path = metadata_path(build_dir_path, target, metadata.metadata.name.value());
     std::fs::write(&meta_path, meta_bytes)
         .map_err(|e| {
             eprintln!("Error: failed to write {:?}: {}", meta_path, e);
@@ -517,13 +563,26 @@ fn load_analyze_and_codegen_single_package(
     let mut srcs = SourceHolder::default();
     let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
 
-    let pkg = biwac_package_loader::Pkg::try_load(metadata, interner, &mut srcs, pkg_root_path)
+    let mut pkg = biwac_package_loader::Pkg::try_load(metadata, interner, &mut srcs, pkg_root_path)
         .map_err(|e| e.print_error_messages())?;
 
     // Attribute check: AST から HIR への lowering の前に、
     // 既知の属性か / キー・値型 / 付与対象を検証する。
     // 後段の lang item 回収はこれを通過していることを前提にできる。
     check_attributes(&pkg, interner, &srcs, metadata)?;
+
+    // 選択されていない arch の native をここで落とす。
+    //
+    // std は同じ名前で arch 違いの native を並べるので、
+    // このまま名前解決に渡すとシンボルが衝突する。
+    // def collection より前に刈り込んでおけば、
+    // 以降のパスは「残っているのは選択された arch のものだけ」を前提にできる。
+    {
+        let target = options.target;
+        pkg.walk_modules_mut(|module| {
+            biwac_attribute::retain_for_target(&mut module.ast, target, interner);
+        });
+    }
 
     let pkg_kind = pkg.pkg_kind;
     let root_mod_id = pkg.root_module.mod_id;
@@ -554,6 +613,7 @@ fn load_analyze_and_codegen_single_package(
         interner,
         dep_hashes,
         &build_dir_path,
+        options.target,
         metadata,
     )?;
 
@@ -573,6 +633,7 @@ fn load_analyze_and_codegen_single_package(
         &symbol_index,
         svh,
         &build_dir_path,
+        options.target,
         metadata,
     )?;
     let hashes = PackageHashes { svh, mir: mir_hash };
@@ -604,20 +665,53 @@ fn load_analyze_and_codegen_single_package(
         return Ok(hashes);
     }
 
-    // codegen も lang item を使う。
-    // novel statement を std の関数呼び出しに展開するため。
-    // 外部パッケージのメタデータはシンボル名のマングリングに使う
-    // (外部シンボルは HIR に無く span もダミーのため)。
-    let bin = biwac_generator::arch::typescript::generate(
-        &hir,
-        interner,
-        &srcs,
-        &ext_pkgs_for_ty,
-        &lang_items,
-        &well_known_scenes,
-    );
+    match options.target {
+        Target::TypeScript => {
+            // codegen も lang item を使う。
+            // novel statement を std の関数呼び出しに展開するため。
+            // 外部パッケージのメタデータはシンボル名のマングリングに使う
+            // (外部シンボルは HIR に無く span もダミーのため)。
+            let bin = biwac_generator::arch::typescript::generate(
+                &hir,
+                interner,
+                &srcs,
+                &ext_pkgs_for_ty,
+                &lang_items,
+                &well_known_scenes,
+            );
 
-    write_bin(build_dir_path.to_path_buf(), &metadata.metadata.name, &bin).unwrap();
+            write_bin(
+                &build_dir_path,
+                options.target,
+                &metadata.metadata.name,
+                &bin,
+            )
+            .unwrap();
+        }
+        Target::Wasm => {
+            // ライブラリは wasm の成果物を持たない。
+            // 単相化はプログラム全体の操作で、根を持つのは playable だけである。
+            if pkg_kind.is_playable() {
+                let _mono = monomorphize_program(
+                    &hir,
+                    &mir,
+                    &ext_pkgs_for_ty,
+                    &dep_mirs,
+                    &well_known_scenes,
+                    interner,
+                )?;
+
+                // TODO: 単相化した MIR から .wat を生成し、
+                // wat クレートで .wasm にする。
+                eprintln!(
+                    "Error: the wasm backend cannot emit code yet \
+                     (monomorphization runs; code generation is not implemented)"
+                );
+                biwac_base::print_error_finish_message(1);
+                return Err(());
+            }
+        }
+    }
 
     Ok(hashes)
 }
@@ -637,6 +731,7 @@ fn persist_mir(
     symbol_index: &SymbolIndexMap,
     meta_svh: Hash64,
     build_dir_path: &Path,
+    target: Target,
     metadata: &biwac_base::MetadataHolder,
 ) -> Result<(Hash64, biwac_mir::Mir), ()> {
     let pkg_id = self_package_id(&metadata.metadata);
@@ -671,7 +766,7 @@ fn persist_mir(
         },
     );
 
-    let path = mir_path(build_dir_path, metadata.metadata.name.value());
+    let path = mir_path(build_dir_path, target, metadata.metadata.name.value());
     std::fs::write(&path, &text).map_err(|e| {
         eprintln!("Error: failed to write {:?}: {}", path, e);
         biwac_base::print_error_finish_message(1);
@@ -760,6 +855,7 @@ fn self_package_id(metadata: &biwac_base::PackageMetadata) -> PackageId {
 fn load_dep_mirs(
     deps: &[(PackageId, String, Hash64)],
     packages_dir: &Path,
+    target: Target,
     interner: &mut IdentInterner,
     depth: DisplayDepth,
 ) -> Result<Vec<(PackageId, biwac_mir::Mir)>, ()> {
@@ -770,7 +866,7 @@ fn load_dep_mirs(
     let mut items = 0;
     for (pkg_id, name, svh) in deps {
         let root = packages_dir.join(name);
-        let mir = load_dep_mir(&root, name, *svh, interner).map_err(|_| {
+        let mir = load_dep_mir(&root, target, name, *svh, interner).map_err(|_| {
             biwac_base::print_error_finish_message(1);
         })?;
         items += mir.items.len();
@@ -794,12 +890,14 @@ fn load_dep_mirs(
 /// (rustc が `CrateDep { name, hash: Svh }` でやっているのと同じ)。
 fn load_dep_mir(
     dep_root: &Path,
+    target: Target,
     dep_name: &str,
     expected_meta_svh: Hash64,
     interner: &mut IdentInterner,
 ) -> Result<biwac_mir::Mir, ()> {
     let path = dep_root
         .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+        .join(target.build_subdir())
         .join(format!("{dep_name}.{}", biwac_mir::MIR_FILE_EXTENSION));
 
     let text = std::fs::read_to_string(&path).map_err(|e| {
@@ -880,22 +978,23 @@ fn collect_dep_bins(
     self_pkg_name: &str,
     packages_dir: &Path,
     build_dir_path: &Path,
+    target: Target,
 ) -> Result<(), ()> {
-    if !cfg!(feature = "typescript") {
+    if !target.collects_dependency_binaries() {
         return Ok(());
     }
 
-    let dst_dir = build_dir_path.join("typescript");
+    let dst_dir = target_dir(build_dir_path, target);
     std::fs::create_dir_all(&dst_dir).map_err(|e| {
         eprintln!("Error: failed to create {:?}: {}", dst_dir, e);
     })?;
 
     for dep_name in dep_names {
-        let file_name = format!("{}.ts", dep_name);
+        let file_name = format!("{}.{}", dep_name, target.bin_extension());
         let src = packages_dir
             .join(dep_name)
             .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
-            .join("typescript")
+            .join(target.build_subdir())
             .join(&file_name);
         let dst = dst_dir.join(&file_name);
 
@@ -906,15 +1005,16 @@ fn collect_dep_bins(
 
     // グラフから消えたパッケージの生成物を掃除する。
     // 残したままだと、依存を外したのに古いコードが出力に紛れ続ける。
-    let mut keep: HashSet<String> = dep_names.iter().map(|n| format!("{n}.ts")).collect();
-    keep.insert(format!("{self_pkg_name}.ts"));
+    let ext = target.bin_extension();
+    let mut keep: HashSet<String> = dep_names.iter().map(|n| format!("{n}.{ext}")).collect();
+    keep.insert(format!("{self_pkg_name}.{ext}"));
 
     let Ok(entries) = std::fs::read_dir(&dst_dir) else {
         return Ok(());
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("ts") {
+        if path.extension().and_then(|e| e.to_str()) != Some(ext) {
             continue;
         }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -929,35 +1029,13 @@ fn collect_dep_bins(
 }
 
 fn write_bin(
-    build_dir_path: PathBuf,
+    build_dir_path: &Path,
+    target: Target,
     pkg_name: &PackageName,
     bin: &str,
 ) -> Result<(), std::io::Error> {
-    if cfg!(feature = "typescript") {
-        let dstpath = build_dir_path.join(Path::new("typescript"));
-        if !dstpath.exists() {
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .create(dstpath.clone())
-                .unwrap();
-        } else if !dstpath.is_dir() {
-            panic!(
-                "Destination directory broken, conflicted file found: `{}`",
-                dstpath
-                    .as_os_str()
-                    .to_str()
-                    .expect("broken build directory path")
-            );
-        }
-
-        let binpath = dstpath.join(Path::new(&format!("{}.ts", pkg_name.value())));
-
-        let mut f = std::fs::File::create(binpath).unwrap();
-
-        f.write_all(bin.as_bytes())
-    } else {
-        todo!()
-    }
+    let path = bin_path(build_dir_path, target, pkg_name.value());
+    std::fs::write(path, bin)
 }
 
 #[cfg(test)]
@@ -1012,6 +1090,7 @@ mod tests {
             BuildOptions {
                 force_rebuild: true,
                 emit_mir: true,
+                target: biwac_base::Target::TypeScript,
             },
         )
         .expect("MIR emission failed");
@@ -1030,6 +1109,7 @@ mod tests {
         Path::new("../../assets/tests")
             .join(pkg)
             .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+            .join(biwac_base::Target::TypeScript.build_subdir())
     }
 
     /// `--emit mir` でビルドし、書かれた `.biwamir` を返す。

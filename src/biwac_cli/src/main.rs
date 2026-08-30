@@ -23,12 +23,50 @@ struct Args {
     /// 指定すると鮮度に関わらず建て直しになる。
     #[arg(long, value_enum)]
     emit: Option<EmitKind>,
+
+    /// Code generation target.
+    ///
+    /// 選べるのはこのコンパイラが生成できるターゲット
+    /// (cargo feature で決まる) のうちの 1 つである。
+    /// 候補が 1 つしか無ければ省略できる。
+    #[arg(long)]
+    target: Option<String>,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 enum EmitKind {
-    /// MIR のテキスト表現を `<build dir>/<package>.mir` に書き出す。
+    /// MIR のテキスト表現を `<build dir>/<target>/<package>.biwamir` に書き出す。
     Mir,
+}
+
+/// `--target` を解決する。
+///
+/// 候補が 1 つしか無ければ省略できる。
+/// 複数あるのに省略されたら、どれを作りたいのか決められないのでエラーにする。
+fn resolve_target(requested: Option<&str>) -> Result<biwac_base::Target, String> {
+    let available = biwac_generator::available_targets();
+
+    match requested {
+        Some(name) => match biwac_base::Target::from_name(name) {
+            Some(t) if available.contains(&t) => Ok(t),
+            Some(t) => Err(format!(
+                "target `{t}` is not available in this build of biwac (available: {})",
+                biwac_base::describe_targets(&available)
+            )),
+            None => Err(format!(
+                "unknown target `{name}` (available: {})",
+                biwac_base::describe_targets(&available)
+            )),
+        },
+        None => match available.as_slice() {
+            [only] => Ok(*only),
+            [] => Err("this build of biwac has no code generation target".to_string()),
+            many => Err(format!(
+                "--target is required because this build of biwac can produce {}",
+                biwac_base::describe_targets(many)
+            )),
+        },
+    }
 }
 
 fn main() {
@@ -46,11 +84,20 @@ fn main() {
         );
     }
 
+    let target = match resolve_target(args.target.as_deref()) {
+        Ok(t) => t,
+        Err(message) => {
+            eprintln!("Error: {message}");
+            exit(1);
+        }
+    };
+
     let res = biwac_driver::compile(
         pkg_root_path.to_path_buf(),
         biwac_driver::BuildOptions {
             force_rebuild: args.rebuild,
             emit_mir: args.emit == Some(EmitKind::Mir),
+            target,
         },
     );
 
