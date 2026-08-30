@@ -42,7 +42,9 @@ regex = "1.12.3"
 clap = { version = "4.5.61", features = ["derive"] }
 ariadne = "0.6.0"
 colored = "3.1.1"
+wasm-encoder = "0.258.0"
 
 [workspace.features]
-default = [ "typescript" ]
+default = [ "typescript", "wasm" ]
 typescript = [ "biwac_generator/typescript" ]
+wasm = [ "biwac_generator/wasm" ]

@@ -12,12 +12,15 @@ biwac_hir = { path = "../biwac_hir"}
 biwac_scene = { path = "../biwac_scene"}
 biwac_lang_item = { path = "../biwac_lang_item"}
 biwac_dependency_metadata = { path = "../biwac_dependency_metadata"}
+biwac_mir = { path = "../biwac_mir"}
 oxc_codegen = { workspace = true, optional = true }
 oxc_ast = { workspace = true, optional = true }
 oxc_span = { workspace = true, optional = true }
 oxc_allocator = { workspace = true, optional = true }
 oxc_parser = { workspace = true, optional = true }
+wasm-encoder = { workspace = true, optional = true }
 
 [features]
-default = [ "typescript" ]
+default = [ "typescript", "wasm" ]
 typescript = [ "dep:oxc_codegen", "dep:oxc_ast", "dep:oxc_span", "dep:oxc_allocator", "dep:oxc_parser" ]
+wasm = [ "dep:wasm-encoder" ]

@@ -3,6 +3,7 @@ mod ident;
 mod module;
 mod package;
 mod src;
+mod target;
 
 pub use error::{BiwacError, ErrorContext, ErrorHolder, print_error_finish_message};
 pub use ident::{IdentInterner, InternedIdent};
@@ -12,6 +13,7 @@ pub use package::{
     PackageNameError, PackageVersion, PackageVersionError,
 };
 pub use src::{ModId, ModSource, SourceHolder};
+pub use target::{Target, describe_targets};
 
 pub const BIWA_BINARY_PACKAGE_ROOT_MODULE_NAME: &str = "main";
 pub const BIWA_LIBRARY_PACKAGE_ROOT_MODULE_NAME: &str = "lib";
