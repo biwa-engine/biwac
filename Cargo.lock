@@ -301,6 +301,7 @@ dependencies = [
 name = "biwac_novel_parser"
 version = "0.1.0"
 dependencies = [
+ "ariadne",
  "biwac_ast",
  "biwac_base",
  "biwac_hir",

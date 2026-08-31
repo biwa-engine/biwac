@@ -58,3 +58,22 @@ impl ModId {
         (self.0 & 0xFFFF_FFFF) as u32
     }
 }
+
+impl ModSource {
+    /// バイトオフセットを文字数 (char) ベースのオフセットに変換する。
+    ///
+    /// [`biwac_span::Span`] はソース文字列のバイトオフセットを保持しているが、
+    /// 診断表示に使う ariadne の [`ariadne::Source`] は文字数ベースの
+    /// オフセットを期待している。
+    /// そのまま渡すと、マルチバイト文字を含む行より後ろの位置が
+    /// バイト数と文字数の差だけ後方にずれてしまう。
+    ///
+    /// 文字境界でないオフセットを渡されても panic しないように、
+    /// 開始位置が `byte_offset` より前にある文字を数える形で実装している。
+    pub fn char_offset(&self, byte_offset: usize) -> usize {
+        self.src
+            .char_indices()
+            .take_while(|(i, _)| *i < byte_offset)
+            .count()
+    }
+}

@@ -25,8 +25,8 @@ impl BiwacError for ParseError<'_> {
                 let modsrc = ctx.srcs.mods.get(&found.span.module()).unwrap();
 
                 let file_name = modsrc.modu.file_name();
-                let begin = found.span.begin();
-                let end = found.span.end();
+                let begin = modsrc.char_offset(found.span.begin());
+                let end = modsrc.char_offset(found.span.end());
 
                 Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
                     .with_message("Unexpected token found.")
@@ -60,7 +60,7 @@ impl BiwacError for ParseError<'_> {
                 let modsrc = ctx.srcs.mods.get(mod_id).unwrap();
 
                 let file_name = modsrc.modu.file_name();
-                let begin = modsrc.src.len();
+                let begin = modsrc.char_offset(modsrc.src.len());
                 let end = begin;
 
                 Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
@@ -86,8 +86,8 @@ impl BiwacError for ParseError<'_> {
                     .print((file_name.as_str(), Source::from(&modsrc.src)))
                     .unwrap();
             }
-            Self::NovelParseError(_) => {
-                todo!()
+            Self::NovelParseError(e) => {
+                e.print_error_message(ctx);
             }
         }
     }

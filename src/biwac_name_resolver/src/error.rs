@@ -162,8 +162,8 @@ impl BiwacError for ResolveError {
                 let modsrc = ctx.srcs.mods.get(&ident.span.module()).unwrap();
 
                 let file_name = modsrc.modu.file_name();
-                let begin = ident.span.begin();
-                let end = ident.span.end();
+                let begin = modsrc.char_offset(ident.span.begin());
+                let end = modsrc.char_offset(ident.span.end());
                 let ident_str = ctx.interner.get_str(&ident.id).unwrap();
 
                 Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
@@ -188,8 +188,8 @@ impl BiwacError for ResolveError {
                             let modsrc = ctx.srcs.mods.get(&segment.ident.span.module()).unwrap();
 
                             let file_name = modsrc.modu.file_name();
-                            let begin = segment.ident.span.begin();
-                            let end = segment.ident.span.end();
+                            let begin = modsrc.char_offset(segment.ident.span.begin());
+                            let end = modsrc.char_offset(segment.ident.span.end());
                             let ident_str = ctx.interner.get_str(&segment.ident.id).unwrap();
 
                             Report::build(ReportKind::Error, (file_name.as_str(), begin..end))

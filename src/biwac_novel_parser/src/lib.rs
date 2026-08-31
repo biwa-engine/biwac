@@ -1,40 +1,14 @@
 use biwac_base::IdentInterner;
 use biwac_span::Span;
 
-use crate::token::{CharKind, NCodeTkKindName, NCodeToken};
+use crate::token::NCodeToken;
 
+mod error;
 mod symbols;
 mod token;
 mod types;
 
-#[derive(Debug, Clone)]
-pub enum NovelParseError {
-    InvalidToken {
-        expecteds: Vec<NCodeTkKindName>,
-        found: Box<NCodeToken>,
-    },
-    InvalidChar {
-        expecteds: Vec<CharKind>,
-        found: CharKind,
-        span: Span,
-    },
-    InvalidLineEnd {
-        expecteds: Vec<NCodeTkKindName>,
-        span: Span,
-    },
-    LineEndExpected {
-        found: Box<NCodeToken>,
-    },
-    GeneralCommandLineOnlyPrefix {
-        span: Span,
-    },
-    InvalidCloseLine {
-        span: Span,
-    },
-    CloseLineExpected {
-        span: Span,
-    },
-}
+pub use error::NovelParseError;
 
 #[derive(Debug)]
 pub struct NovelSourceStream<'src> {

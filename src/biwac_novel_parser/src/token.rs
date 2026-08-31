@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use biwac_ast::{AbsolutePathHeader, Ident, Path};
 use biwac_span::Span;
 
@@ -11,48 +13,47 @@ pub struct NCodeToken {
 
 #[derive(Debug, Clone)]
 pub enum NCodeTkKind {
-    Ident(String),       // <identifier>
-    LiteralInteger(u64), // integer literal
-    #[allow(dead_code)]
+    Ident(String),         // <identifier>
+    LiteralInteger(u64),   // integer literal
     LiteralString(String), // string literal
-    KwTrue,              // bool literal `TRUE`
-    KwFalse,             // bool literal `FALSE`
-    KwPackage,           // package
-    KwLet,               // let
-    KwIf,                // if
-    KwElse,              // else
-    KwWhile,             // while
-    KwEndScene,          // endscene
-    KwUint,              // Uint (reserved word of type)
-    KwInt,               // Int (reserved word of type)
-    KwFloat,             // Float (reserved word of type)
-    KwBool,              // Bool (reserved word of type)
-    MarkLPare,           // (
-    MarkRPare,           // )
-    MarkLBrace,          // {
-    MarkRBrace,          // }
-    MarkLBracket,        // [
-    MarkRBracket,        // ]
-    MarkPlus,            // +
-    MarkMinus,           // -
-    MarkAsterisk,        // *
-    MarkSlash,           // /
-    MarkPercent,         // %
-    MarkAmpersand,       // &
-    MarkLesser,          // <
-    MarkGreater,         // >
-    MarkLesEq,           // <=
-    MarkGrtEq,           // >=
-    MarkEqual,           // ==
-    MarkNotEq,           // !=
-    MarkAssign,          // =
-    MarkNot,             // !
-    MarkComma,           // ,
-    MarkDot,             // .
-    MarkArrow,           // ->
-    MarkColon,           // :
-    MarkSemiColon,       // ;
-    MarkDoubleColon,     // ::
+    KwTrue,                // bool literal `TRUE`
+    KwFalse,               // bool literal `FALSE`
+    KwPackage,             // package
+    KwLet,                 // let
+    KwIf,                  // if
+    KwElse,                // else
+    KwWhile,               // while
+    KwEndScene,            // endscene
+    KwUint,                // Uint (reserved word of type)
+    KwInt,                 // Int (reserved word of type)
+    KwFloat,               // Float (reserved word of type)
+    KwBool,                // Bool (reserved word of type)
+    MarkLPare,             // (
+    MarkRPare,             // )
+    MarkLBrace,            // {
+    MarkRBrace,            // }
+    MarkLBracket,          // [
+    MarkRBracket,          // ]
+    MarkPlus,              // +
+    MarkMinus,             // -
+    MarkAsterisk,          // *
+    MarkSlash,             // /
+    MarkPercent,           // %
+    MarkAmpersand,         // &
+    MarkLesser,            // <
+    MarkGreater,           // >
+    MarkLesEq,             // <=
+    MarkGrtEq,             // >=
+    MarkEqual,             // ==
+    MarkNotEq,             // !=
+    MarkAssign,            // =
+    MarkNot,               // !
+    MarkComma,             // ,
+    MarkDot,               // .
+    MarkArrow,             // ->
+    MarkColon,             // :
+    MarkSemiColon,         // ;
+    MarkDoubleColon,       // ::
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +210,34 @@ impl<'src> NovelSourceStream<'src> {
                     _ => (Some(NCodeTkKind::MarkNot), 1),
                 },
 
+                // `"` 始まりなら、行内で閉じる文字列リテラルでなければならない
+                // NOTE: 通常コード側の字句解析 (biwac_lexer) と同様、
+                // エスケープシーケンスは未対応である
+                '"' => {
+                    let mut token_len = 1; // 開き `"` の分
+                    let mut val = String::new();
+                    let mut closed = false;
+
+                    for c in remain_chars.by_ref() {
+                        token_len += c.len_utf8();
+
+                        if c == '"' {
+                            closed = true;
+                            break;
+                        }
+
+                        val.push(c);
+                    }
+
+                    if !closed {
+                        return Err(NovelParseError::StringLiteralNotClosed {
+                            span: self.current_span(1),
+                        });
+                    }
+
+                    (Some(NCodeTkKind::LiteralString(val)), token_len)
+                }
+
                 // 数字始まりなら、数値リテラルでなければならない
                 '0'..='9' => {
                     let mut token_len = 1;
@@ -306,7 +335,7 @@ impl<'src> NovelSourceStream<'src> {
                                 CharKind::Mark,
                                 CharKind::WhiteSpace,
                             ],
-                            found: CharKind::Others,
+                            found: char_kind(c),
                             span: self.current_span(1),
                         });
                     }
@@ -354,6 +383,19 @@ fn char_kind(c: char) -> CharKind {
             } else {
                 CharKind::Others
             }
+        }
+    }
+}
+
+impl CharKind {
+    pub fn pattern(&self) -> &str {
+        match self {
+            Self::Numeric => "numeric character [0-9]",
+            Self::Alpha => "alphabetic character [a-zA-Z]",
+            Self::UnderScore => "underscore `_`",
+            Self::Mark => "mark character",
+            Self::WhiteSpace => "whitespace character",
+            Self::Others => "other character",
         }
     }
 }
@@ -479,5 +521,72 @@ impl<'src> NovelSourceStream<'src> {
                 return Ok(Path::new(abs_header, segments));
             }
         }
+    }
+}
+
+impl NCodeTkKind {
+    pub fn pattern(&self) -> String {
+        match self {
+            Self::Ident(ident) => {
+                format!("<identifier> `{ident}`")
+            }
+            Self::LiteralInteger(i) => format!("<integer-literal> `{i}`"),
+            Self::LiteralString(s) => format!("<string-literal> `\"{s}\"`"),
+            _ => format!("`{}`", self.as_kind_name().pattern()),
+        }
+    }
+}
+
+impl NCodeTkKindName {
+    fn pattern(&self) -> &str {
+        match self {
+            Self::Ident => "<identifier>",
+            Self::LiteralInteger => "<integer-literal>",
+            Self::LiteralString => "<string-literal>",
+            Self::KwTrue => "TRUE",
+            Self::KwFalse => "FALSE",
+            Self::KwPackage => "package",
+            Self::KwLet => "let",
+            Self::KwIf => "if",
+            Self::KwElse => "else",
+            Self::KwWhile => "while",
+            Self::KwEndScene => "endscene",
+            Self::KwUint => "Uint",
+            Self::KwInt => "Int",
+            Self::KwFloat => "Float",
+            Self::KwBool => "Bool",
+            Self::MarkLPare => "(",
+            Self::MarkRPare => ")",
+            Self::MarkLBrace => "{",
+            Self::MarkRBrace => "}",
+            Self::MarkLBracket => "[",
+            Self::MarkRBracket => "]",
+            Self::MarkPlus => "+",
+            Self::MarkMinus => "-",
+            Self::MarkAsterisk => "*",
+            Self::MarkSlash => "/",
+            Self::MarkPercent => "%",
+            Self::MarkAmpersand => "&",
+            Self::MarkLesser => "<",
+            Self::MarkGreater => ">",
+            Self::MarkLesEq => "<=",
+            Self::MarkGrtEq => ">=",
+            Self::MarkEqual => "==",
+            Self::MarkNotEq => "!=",
+            Self::MarkAssign => "=",
+            Self::MarkNot => "!",
+            Self::MarkComma => ",",
+            Self::MarkDot => ".",
+            Self::MarkArrow => "->",
+            Self::MarkColon => ":",
+            Self::MarkSemiColon => ";",
+            Self::MarkDoubleColon => "::",
+        }
+    }
+}
+
+impl Display for NCodeTkKindName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}`", self.pattern())
     }
 }
