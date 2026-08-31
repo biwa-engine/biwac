@@ -10,14 +10,18 @@ mod types;
 
 pub use error::NovelParseError;
 
+const BIWAC_NOVEL_INDENT_STEP_DEPTH: usize = 4;
+
 #[derive(Debug)]
 pub struct NovelSourceStream<'src> {
     span: Span,
-    // 理想的なフォーマットでのインデント位置
+    // 現在のネストの深さ
+    // ネストの深さから理想的なフォーマットでのインデントが決定される
+    // 理想的なフォーマットでのインデント位置は、
     // ネストするたびに空白文字 ' ' 4?文字分下がることになっている
     // この位置からのさらなるインデントは、
     // 生ノベルテキストの場合はノベルテキスト自体だとして、表示に反映される
-    indent_depth: usize,
+    nest_depth: usize,
     peeked: Option<Option<NCodeToken>>,
 
     src: &'src str,
@@ -41,7 +45,7 @@ impl<'src> NovelSourceStream<'src> {
     pub fn new(src: &'src str, span: Span, interner: &'src mut IdentInterner) -> Self {
         Self {
             span,
-            indent_depth: 4,
+            nest_depth: 1, // scene の中であるため1階層分ネスト
             peeked: None,
 
             src,
@@ -86,7 +90,7 @@ impl<'src> NovelSourceStream<'src> {
             // 現在のインデント位置または空白文字でなくなるまで、
             // 先頭をtrimする
             for (i, c) in next_line.char_indices() {
-                if i <= self.indent_depth && c.is_whitespace() {
+                if i <= self.indent_depth() && c.is_whitespace() {
                     self.idx += i;
                 } else {
                     break;
@@ -142,5 +146,17 @@ impl<'src> NovelSourceStream<'src> {
             self.span.begin() + self.idx,
             self.span.begin() + self.idx + token_len,
         )
+    }
+
+    fn indent_depth(&self) -> usize {
+        self.nest_depth * BIWAC_NOVEL_INDENT_STEP_DEPTH
+    }
+
+    fn indent_enter(&mut self) {
+        self.nest_depth += 1;
+    }
+
+    fn indent_return(&mut self) {
+        self.nest_depth = self.nest_depth.saturating_sub(1);
     }
 }

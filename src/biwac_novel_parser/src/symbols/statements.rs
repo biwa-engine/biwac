@@ -21,6 +21,13 @@ impl<'src> NovelSourceStream<'src> {
 
                         let line = &self.src[self.line_begin_idx..self.next_line_begin_idx];
                         let span = self.current_span(line.len()); // FIXME
+                        let trimed = line.trim_start();
+                        // 行頭の空白は最大でネスト分のインデント分まではトリムする
+                        let line = if line.len() - trimed.len() > self.indent_depth() {
+                            &line[self.indent_depth()..]
+                        } else {
+                            trimed
+                        };
 
                         // wait コマンド `>>`。
                         //
@@ -56,6 +63,7 @@ impl<'src> NovelSourceStream<'src> {
                     NovelLineKind::GeneralCommand => match self.peek_token()? {
                         Some(t) => match t.kind {
                             NCodeTkKind::KwIf => {
+                                self.indent_enter();
                                 Ok(vec![NovelStmt::If(self.consume_if_statement()?)])
                             }
                             NCodeTkKind::KwLet => Ok(vec![NovelStmt::VarDecl(
@@ -118,7 +126,10 @@ impl<'src> NovelSourceStream<'src> {
 
                     // } 行が予期せぬときに来た場合、
                     // 内側スコープの終了を考えて空で返す
-                    NovelLineKind::BlockClose => Ok(Vec::new()),
+                    NovelLineKind::BlockClose => {
+                        self.indent_return();
+                        Ok(Vec::new())
+                    }
                 }
             })
             .transpose()
