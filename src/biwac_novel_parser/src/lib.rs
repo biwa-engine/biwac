@@ -31,6 +31,7 @@ pub struct NovelSourceStream<'src> {
     idx: usize,                 // DSL部分の文字列スライス src のインデックス
     line_begin_idx: usize,      // 同じく
     next_line_begin_idx: usize, // 同じく
+    line_comment_begin: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,7 @@ impl<'src> NovelSourceStream<'src> {
             idx: 0,
             line_begin_idx: 0,
             next_line_begin_idx: 0, // == line_begin_idx ならまだ検索してない
+            line_comment_begin: false,
         }
     }
 
@@ -75,6 +77,7 @@ impl<'src> NovelSourceStream<'src> {
         if self.next_line_begin_idx >= self.src.len() {
             None
         } else {
+            self.line_comment_begin = false;
             self.line_begin_idx = self.next_line_begin_idx;
             self.next_line_begin_idx = self.src.len();
             for (i, c) in self.src[self.line_begin_idx..].char_indices() {
@@ -97,7 +100,12 @@ impl<'src> NovelSourceStream<'src> {
                 }
             }
 
-            self.line_kind()
+            // `//` で始まるなら行コメントとして行ごと無視する
+            if next_line.trim_start().starts_with("//") {
+                self.next_line()
+            } else {
+                self.line_kind()
+            }
         }
     }
 

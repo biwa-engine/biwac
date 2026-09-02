@@ -115,12 +115,12 @@ impl<'src> NovelSourceStream<'src> {
             None => {
                 self.peek_token()?;
 
+                // SAFETY: .peek_token() で .peeked は必ず Some になっている
                 let t = self.peeked.take().unwrap();
                 if let Some(t) = &t {
                     self.idx = t.span.end() - self.span.begin();
                 }
 
-                // SAFETY: .next_peek() で .peeked は必ず Some になっている
                 Ok(t)
             }
         }
@@ -138,7 +138,7 @@ impl<'src> NovelSourceStream<'src> {
     // ノベルモード中のコードについては、おそらく実際には変換すればLL(1)として表せるだろうが、
     // パーサの実装のしやすさからpeekは用いたい。
     pub(crate) fn peek_token(&mut self) -> Result<Option<&NCodeToken>, NovelParseError> {
-        if self.idx >= self.next_line_begin_idx {
+        if self.idx >= self.next_line_begin_idx || self.line_comment_begin {
             self.peeked = Some(None);
             return Ok(None);
         };
@@ -161,7 +161,14 @@ impl<'src> NovelSourceStream<'src> {
                 ']' => (Some(NCodeTkKind::MarkRBracket), 1),
                 '+' => (Some(NCodeTkKind::MarkPlus), 1),
                 '*' => (Some(NCodeTkKind::MarkAsterisk), 1),
-                '/' => (Some(NCodeTkKind::MarkSlash), 1),
+                '/' => match remain_chars.peek() {
+                    // `//` 以降は行コメント
+                    Some('/') => {
+                        self.line_comment_begin = true;
+                        (None, 0)
+                    }
+                    _ => (Some(NCodeTkKind::MarkSlash), 1),
+                },
                 '%' => (Some(NCodeTkKind::MarkPercent), 1),
                 '&' => (Some(NCodeTkKind::MarkAmpersand), 1),
                 ';' => (Some(NCodeTkKind::MarkSemiColon), 1),
