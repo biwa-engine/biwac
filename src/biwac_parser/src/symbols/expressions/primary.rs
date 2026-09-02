@@ -56,7 +56,10 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     },
                 ))))
             }
-            TkKind::Ident(_) => {
+            // `package::` から始まる絶対パスも式に書ける。
+            // `package` は識別子ではなくキーワードなので、ここで拾わないと
+            // `consume_qualified_identifier` に辿り着けない。
+            TkKind::Ident(_) | TkKind::KwPackage => {
                 let begin = t.span.clone();
                 let path = self.consume_qualified_identifier()?;
 
@@ -160,8 +163,9 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
 
                 Ok(expr)
             }
-            _ => Err(ParseError::InvalidEOF {
-                mod_id,
+            // 実際にはトークンがある。EOF として報告すると
+            // 位置がファイル末尾になって原因が追えないので、そのトークンを指す。
+            _ => Err(ParseError::InvalidToken {
                 expecteds: vec![
                     TkKindName::Ident,
                     TkKindName::LiteralInteger,
@@ -170,6 +174,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     TkKindName::KwBoolFalse,
                     TkKindName::MarkLPare,
                 ],
+                found: t.clone(),
             }),
         }
     }

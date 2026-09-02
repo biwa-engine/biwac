@@ -177,10 +177,14 @@ impl PackageModuleView for DepMetadataModuleView {
         let name_str = interner.get_str(&name)?;
         let hdr = self.dep.sym_hdrs.get(local_ty_idx as usize)?;
         let body = self.dep.sym_bodies.get(local_ty_idx as usize, hdr).ok()?;
-        let SymbolBody::Struct(ref struct_data) = *body else {
-            return None;
+        // native type alias (`type Vec[T] = {{ ... }};`) も assoc fns を持つ。
+        // struct だけを見ていると `Vec::new()` が外のパッケージから引けない。
+        let assoc_symbols = match *body {
+            SymbolBody::Struct(ref struct_data) => &struct_data.assoc_symbols.0,
+            SymbolBody::NativeTypeAlias(ref alias_data) => &alias_data.assoc_symbols.0,
+            _ => return None,
         };
-        for &assoc_sym_idx in &struct_data.assoc_symbols.0 {
+        for &assoc_sym_idx in assoc_symbols {
             let assoc_hdr = self.dep.sym_hdrs.get(assoc_sym_idx.0 as usize)?;
             let assoc_body = self
                 .dep

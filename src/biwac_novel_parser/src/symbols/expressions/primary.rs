@@ -59,7 +59,10 @@ impl<'src> NovelSourceStream<'src> {
                     },
                 ))))
             }
-            NCodeTkKind::Ident(_) => {
+            // `package::` から始まる絶対パスも式に書ける。
+            // `package` は識別子ではなくキーワードなので、ここで拾わないと
+            // `consume_qualified_identifier` に辿り着けない。
+            NCodeTkKind::Ident(_) | NCodeTkKind::KwPackage => {
                 let begin = t.span.clone();
                 let path = self.consume_qualified_identifier()?;
 

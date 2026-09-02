@@ -10,26 +10,31 @@ use crate::resolving::{
     def_collector::DefCollector,
 };
 
+/// 1 つのブロックが持つ変数の名前空間。
+///
+/// VarId の採番は [`FnResolveCtx`] が一元的に行う。
+/// スコープごとにカウンタを持たせると、内側のブロックが
+/// 古いカウンタから採番して外側の変数と番号が衝突する。
 #[derive(Debug)]
 struct VariableScope {
     vars: HashMap<InternedIdent, (VarId, Span)>,
-    next_var_id: u32,
 }
 
 impl VariableScope {
-    fn new(next_var_id: u32) -> Self {
+    fn new() -> Self {
         Self {
             vars: HashMap::new(),
-            next_var_id,
         }
     }
 
-    fn declare_variable(&mut self, ident: &biwac_ast::Ident) -> Result<VarId, ResolveError> {
+    fn declare_variable(
+        &mut self,
+        ident: &biwac_ast::Ident,
+        var_id: VarId,
+    ) -> Result<VarId, ResolveError> {
         match self.vars.entry(ident.id) {
             Entry::Vacant(e) => {
-                let var_id = VarId::new(self.next_var_id);
                 e.insert((var_id, ident.span.clone()));
-                self.next_var_id += 1;
 
                 Ok(var_id)
             }
@@ -131,11 +136,13 @@ impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
         };
 
         // because 0 is reserved for `self`, normal variable must be 1 or bigger.
-        let mut base_scope = VariableScope::new(1);
+        let mut base_scope = VariableScope::new();
+        let mut next_var_id = 1;
 
         for arg in args {
-            match base_scope.declare_variable(&arg.id) {
+            match base_scope.declare_variable(&arg.id, VarId::new(next_var_id)) {
                 Ok(var_id) => {
+                    next_var_id += 1;
                     arg.var_id.set(var_id).unwrap();
                 }
                 Err(e) => {
@@ -148,7 +155,7 @@ impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
             Ok(Self {
                 ctx,
                 genargs,
-                next_var_id: base_scope.next_var_id,
+                next_var_id,
                 scopes: vec![base_scope],
                 self_var,
             })
@@ -160,19 +167,28 @@ impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
 
 impl<'ctx, C: ResolveCtx> LocalResolveCtx for FnResolveCtx<'ctx, C> {
     fn declare_variable(&mut self, ident: &biwac_ast::Ident) -> Result<VarId, ResolveError> {
-        self.scopes.last_mut().unwrap().declare_variable(ident)
+        let var_id = VarId::new(self.next_var_id);
+        let declared = self
+            .scopes
+            .last_mut()
+            .unwrap()
+            .declare_variable(ident, var_id)?;
+        self.next_var_id += 1;
+
+        Ok(declared)
     }
 
     fn inner_scope<F: FnOnce(&mut Self) -> Result<(), Vec<ResolveError>>>(
         &mut self,
         f: F,
     ) -> Result<(), Vec<ResolveError>> {
-        self.scopes.push(VariableScope::new(self.next_var_id));
+        // 番号は関数全体で通し。ブロックを抜けても戻さない
+        // (戻すと、内側で使った番号を外側の変数が再び使ってしまう)。
+        self.scopes.push(VariableScope::new());
 
         let res = f(self);
 
-        let scope = self.scopes.pop().unwrap();
-        self.next_var_id = scope.next_var_id;
+        self.scopes.pop().unwrap();
 
         res
     }

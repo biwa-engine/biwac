@@ -421,7 +421,10 @@ impl Encoder<'_> {
                 TyEntry::Fn { args, rty }
             }
             TyKind::Infer(_) => {
-                panic!("compiler bug: an inference type reached MIR encoding")
+                panic!(
+                    "compiler bug: an inference type reached MIR encoding (owner symbol {:?})",
+                    self.owner
+                )
             }
         };
 

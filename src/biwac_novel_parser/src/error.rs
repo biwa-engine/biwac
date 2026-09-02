@@ -133,7 +133,104 @@ impl BiwacError for NovelParseError {
                     .print((file_name.as_str(), Source::from(&modsrc.src)))
                     .unwrap();
             }
-            _ => todo!(),
+            Self::InvalidLineEnd { expecteds, span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("The line ended in the middle of an expression.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message(if expecteds.is_empty() {
+                                "More is expected here.".to_string()
+                            } else {
+                                format!("Expected {} here.", format_token_kinds(expecteds))
+                            })
+                            .with_color(Color::Red),
+                    )
+                    .with_note("a command line in a scene block must fit on one line")
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::LineEndExpected { found } => {
+                let modsrc = ctx.srcs.mods.get(&found.span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(found.span.begin());
+                let end = modsrc.char_offset(found.span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("Unexpected token found.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message(format!(
+                                "Expected the end of the line, but found {}.",
+                                found.kind.pattern()
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::GeneralCommandLineOnlyPrefix { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("This command line has no command.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("`#` must be followed by a statement.")
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::InvalidCloseLine { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("The line closing the scene block has something else on it.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("`}}` must be alone on its line.")
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::CloseLineExpected { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("This scene block is not closed.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("`}}` expected")
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
         }
     }
 }

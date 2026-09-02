@@ -286,9 +286,11 @@ impl<'a> Emitter<'a> {
             let _ = write!(sig, " (result {})", self.wasm_ty(&n.rty)?);
         }
 
+        let body = self.expand_native_placeholders(n)?;
+
         let mut out = format!("  (func ${name}{sig}\n");
         // 本体は std が書いた WAT をそのまま置く。
-        for line in n.native_body.lines() {
+        for line in body.lines() {
             let line = line.trim_end();
             if line.trim().is_empty() {
                 continue;
@@ -296,6 +298,44 @@ impl<'a> Emitter<'a> {
             let _ = writeln!(out, "    {}", line.trim_start());
         }
         out.push_str("  )\n");
+        Ok(out)
+    }
+
+    /// native の本体に書かれた型のプレースホルダを、この単相化での実際の型に置き換える。
+    ///
+    /// ジェネリックな native は 1 つの本体を全ての単相化で共有するので、
+    /// 本体の中に具体的な型名を書けない。しかし
+    /// `Option[T]::unwrap` のように **anyref から T へ落とす**には
+    /// `ref.cast` の即値として T の型が要る。そこだけを埋められるようにする。
+    ///
+    /// - `%ret%`      戻り値の型
+    /// - `%param0%`.. 引数の型。番号は `local.get` と同じで、self があれば 0 が self
+    ///
+    /// wat に `%` は現れないので、区切りとして使っている。
+    fn expand_native_placeholders(&self, n: &NativeItem) -> Result<String, WasmError> {
+        let body = &n.native_body;
+        if !body.contains('%') {
+            return Ok(body.clone());
+        }
+
+        let mut out = body.clone();
+
+        if out.contains("%ret%") {
+            if Self::is_void(&n.rty) {
+                return Err(WasmError::UnsupportedType {
+                    ty: "%ret% in a native with no return value".to_string(),
+                });
+            }
+            out = out.replace("%ret%", &self.wasm_ty(&n.rty)?);
+        }
+
+        for (i, ty) in n.self_ty.iter().chain(n.args.iter()).enumerate() {
+            let key = format!("%param{i}%");
+            if out.contains(&key) {
+                out = out.replace(&key, &self.wasm_ty(ty)?);
+            }
+        }
+
         Ok(out)
     }
 

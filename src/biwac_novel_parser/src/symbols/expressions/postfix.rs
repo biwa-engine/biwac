@@ -23,12 +23,16 @@ impl<'src> NovelSourceStream<'src> {
                         if let NCodeTkKind::MarkLPare = t.kind {
                             let (args, span) = self.consume_arguments()?;
 
-                            Ok(Exprs::Primary(Primary::MethodCall(MethodCall {
-                                span: Span::merge(&expr.span(), &span),
-                                left: Box::new(expr),
-                                method: mem_or_method,
-                                args,
-                            })))
+                            // メソッド呼び出しの後ろにも後置演算子が続きうる。
+                            // `a.b().c()` や `a.b().c` を切らないよう、ここでも再帰する。
+                            Ok(self.consume_postfix_after_expression(Exprs::Primary(
+                                Primary::MethodCall(MethodCall {
+                                    span: Span::merge(&expr.span(), &span),
+                                    left: Box::new(expr),
+                                    method: mem_or_method,
+                                    args,
+                                }),
+                            ))?)
                         } else {
                             Ok(self.consume_postfix_after_expression(Exprs::Primary(
                                 Primary::MemberAccess(MemberAccess {

@@ -1043,21 +1043,18 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                             })
                             .cloned()?;
 
-                        // NOTE: ジェネリック型 TyKind::Gen(GenDefId) の場合、
-                        // ジェネリック引数列の位置から GenDefId -> TyKind を割り当て
-                        if let TyKind::Gen(gid) = &ty.kind {
-                            let idx = struct_.genargs.iter().position(|g| g == gid).expect(
-                                "compiler bug: undefined generic type found in struct member",
-                            );
-
-                            if defined_ty.genargs.len() == struct_.genargs.len() {
-                                Ok(defined_ty.genargs.get(idx).unwrap().clone())
-                            } else {
-                                panic!("compiler bug: generic argument length mismatched")
-                            }
-                        } else {
-                            Ok(ty)
-                        }
+                        // NOTE: メンバの型に現れるジェネリック型 TyKind::Gen(GenDefId) を、
+                        // ジェネリック引数列の位置から実際の型引数に置き換える。
+                        //
+                        // メンバの型が `P` そのものとは限らない。
+                        // `chara: Character[P]` のように別の型の引数として現れることがあるので、
+                        // 型の中まで辿る必要がある。
+                        // 置き換え漏れがあると Gen のまま単一化に流れ込んで落ちる。
+                        Ok(substitute_struct_gens(
+                            &ty,
+                            &struct_.genargs,
+                            &defined_ty.genargs,
+                        ))
                     }
                     TyDefKind::NativeTypeAlias(_) => {
                         // native type alias にはメンバアクセスできない
@@ -1244,6 +1241,48 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     }
 }
 
+/// 構造体のメンバの型に現れるジェネリック型を、実際の型引数で置き換える。
+///
+/// メンバの型が型引数そのもの (`props: P`) とは限らず、
+/// `chara: Character[P]` のように別の型の引数として現れることがあるので、
+/// 型の中を再帰的に辿る。
+fn substitute_struct_gens(ty: &Ty, params: &[GenDefId], args: &[Ty]) -> Ty {
+    let kind = match &ty.kind {
+        TyKind::Gen(gid) => {
+            let idx = params
+                .iter()
+                .position(|g| g == gid)
+                .expect("compiler bug: undefined generic type found in struct member");
+
+            if params.len() != args.len() {
+                panic!("compiler bug: generic argument length mismatched")
+            }
+
+            return Ty::new(args[idx].kind.clone(), ty.span.clone());
+        }
+        TyKind::Defined(dt) => TyKind::Defined(DefinedTy {
+            def_id: dt.def_id,
+            genargs: dt
+                .genargs
+                .iter()
+                .map(|g| substitute_struct_gens(g, params, args))
+                .collect(),
+        }),
+        TyKind::Fn(fty) => TyKind::Fn(FnTy {
+            args: fty
+                .args
+                .iter()
+                .map(|a| substitute_struct_gens(a, params, args))
+                .collect(),
+            rty: Box::new(substitute_struct_gens(&fty.rty, params, args)),
+            genargs: fty.genargs.clone(),
+        }),
+        _ => ty.kind.clone(),
+    };
+
+    Ty::new(kind, ty.span.clone())
+}
+
 fn occurs(v: &TyVar, tk: &TyKind) -> bool {
     match &tk {
         TyKind::Infer(i) => match i {
@@ -1357,6 +1396,20 @@ impl<'a> TyCtx<'a> {
     }
 
     pub fn infer(mut self) -> TyResult<Hir> {
+        // 構造体のメンバの型も codegen が型注釈として出力するため、
+        // 外部パッケージのものは import が要る
+        // (関数のシグネチャだけを見ていると、メンバにしか現れない型を取りこぼす)。
+        {
+            let mut deps = self.hir.deps_recorder.borrow_mut();
+            for ty_impl in self.hir.tys.values() {
+                if let Some(TyDefKind::Struct(struct_def)) = &ty_impl.ty_content {
+                    for member_ty in struct_def.members.values() {
+                        deps.depends_on_ty(member_ty);
+                    }
+                }
+            }
+        }
+
         // 普通の関数について
         // 型推論し、その結果を一時的に保持
         let mut fn_ty_infos = vec![];

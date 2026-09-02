@@ -1173,10 +1173,11 @@ impl DepMetadata {
                 ValDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(assoc_sym_idx)));
 
             // impl 対象のジェネリック引数は self 型の genargs そのもの。
-            let impl_genarg_pattern: Vec<biwac_hir::Ty> = self
-                .impl_decode_impl_self_ty(fn_data, assoc_sym_idx, pkg_id)
-                .map(|ty| match ty.kind {
-                    biwac_hir::TyKind::Defined(dt) => dt.genargs,
+            let impl_self_ty = self.impl_decode_impl_self_ty(fn_data, assoc_sym_idx, pkg_id);
+            let impl_genarg_pattern: Vec<biwac_hir::Ty> = impl_self_ty
+                .as_ref()
+                .map(|ty| match &ty.kind {
+                    biwac_hir::TyKind::Defined(dt) => dt.genargs.clone(),
                     // プリミティブ型の impl はジェネリック引数を取らない
                     _ => Vec::new(),
                 })
@@ -1410,10 +1411,13 @@ impl DepMetadata {
 
         FnSignature {
             args,
-            // TODO: メソッドの self_ty は disk format から復元していない。
-            //       現状の型推論では self_ty は参照されないため問題ないが、
-            //       将来 emit 等で必要になった場合は disk format への追加が必要。
-            self_ty: None,
+            // メソッドなら impl の self 型を入れる。トップレベル関数なら None になる。
+            //
+            // メソッド呼び出しの単一化はレシーバを第 1 引数として含めるので、
+            // ここが空だと impl ブロックのジェネリック引数がレシーバから決まらず、
+            // 戻り値が `Self` のメソッドで型変数が解けないまま残る
+            // (単相化に必要な割り当てが記録されず、MIR の符号化まで漏れる)。
+            self_ty: self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id),
             rty,
             genargs,
             span: Span::dummy(),
