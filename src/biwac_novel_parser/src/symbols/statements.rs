@@ -5,29 +5,33 @@ mod vardecl;
 use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelMessage, NovelStmt, NovelWait};
 use biwac_span::Span;
 
-use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKind};
+use crate::{
+    NCodeTokenOption, NovelLineHandler, NovelLineKind, NovelLineOption, NovelParseError,
+    NovelSourceStream, token::NCodeTkKind,
+};
 
 /// ノベルテキスト中の待ちコマンド。
 const WAIT_COMMAND: &str = ">>";
 
+pub(crate) enum ParsedNovelStmt {
+    // novel mode の範囲の末尾に来ている場合は EndOfRange を返すため、
+    // Stmts { stmts } は !stmts.is_empty() な Vec を常に返す
+    Stmts { stmts: Vec<NovelStmt> },
+    ExitBlock { line_handler: NovelLineHandler },
+    EndOfRange { span: Span },
+}
+
 impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn consume_statements(&mut self) -> Result<Vec<NovelStmt>, NovelParseError> {
-        self.next_line()
-            .map(|line_kind| {
-                match line_kind {
+    pub(crate) fn consume_statements(&mut self) -> Result<ParsedNovelStmt, NovelParseError> {
+        match self.next_line() {
+            NovelLineOption::Some(line_handler) => {
+                match line_handler.kind() {
                     NovelLineKind::RawNovel => {
                         // TODO:
                         // - 埋め込み式 $(expr) をパース
 
-                        let line = &self.src[self.line_begin_idx..self.next_line_begin_idx];
-                        let span = self.current_span(line.len()); // FIXME
-                        let trimed = line.trim_start();
-                        // 行頭の空白は最大でネスト分のインデント分まではトリムする
-                        let line = if line.len() - trimed.len() > self.indent_depth() {
-                            &line[self.indent_depth()..]
-                        } else {
-                            trimed
-                        };
+                        let line = self.line_str(&line_handler);
+                        let span = self.line_span(&line_handler);
 
                         // wait コマンド `>>`。
                         //
@@ -35,9 +39,17 @@ impl<'src> NovelSourceStream<'src> {
                         // 本文の後ろに付いていればその行を書いてから待つ。
                         match line.trim_end().strip_suffix(WAIT_COMMAND) {
                             Some(before) if before.trim().is_empty() => {
-                                Ok(vec![NovelStmt::NovelWait(NovelWait { span })])
+                                Ok(ParsedNovelStmt::Stmts {
+                                    stmts: vec![NovelStmt::NovelWait(NovelWait {
+                                        span: Span::new(
+                                            span.module(),
+                                            span.begin() + before.len(),
+                                            span.end(),
+                                        ),
+                                    })],
+                                })
                             }
-                            Some(_) => {
+                            Some(before) => {
                                 // `>>` だけを取り除く。字下げと行末の改行は本文の一部として残す。
                                 let cut = line.rfind(WAIT_COMMAND).expect("suffix was found");
                                 let msg = format!(
@@ -46,32 +58,48 @@ impl<'src> NovelSourceStream<'src> {
                                     &line[cut + WAIT_COMMAND.len()..]
                                 );
 
-                                Ok(vec![
-                                    NovelStmt::NovelWrite(NovelMessage {
-                                        msg,
-                                        span: span.clone(),
-                                    }),
-                                    NovelStmt::NovelWait(NovelWait { span }),
-                                ])
+                                Ok(ParsedNovelStmt::Stmts {
+                                    stmts: vec![
+                                        NovelStmt::NovelWrite(NovelMessage {
+                                            msg,
+                                            span: span.clone(),
+                                        }),
+                                        NovelStmt::NovelWait(NovelWait {
+                                            span: Span::new(
+                                                span.module(),
+                                                span.begin() + before.len(),
+                                                span.end(),
+                                            ),
+                                        }),
+                                    ],
+                                })
                             }
-                            None => Ok(vec![NovelStmt::NovelWrite(NovelMessage {
-                                msg: line.to_string(),
-                                span,
-                            })]),
+                            None => Ok(ParsedNovelStmt::Stmts {
+                                stmts: vec![NovelStmt::NovelWrite(NovelMessage {
+                                    msg: line.to_string(),
+                                    span,
+                                })],
+                            }),
                         }
                     }
                     NovelLineKind::GeneralCommand => match self.peek_token()? {
-                        Some(t) => match t.kind {
+                        NCodeTokenOption::Some(t) => match t.kind {
                             NCodeTkKind::KwIf => {
                                 self.indent_enter();
-                                Ok(vec![NovelStmt::If(self.consume_if_statement()?)])
+                                Ok(ParsedNovelStmt::Stmts {
+                                    stmts: vec![NovelStmt::If(self.consume_if_statement()?)],
+                                })
                             }
-                            NCodeTkKind::KwLet => Ok(vec![NovelStmt::VarDecl(
-                                self.consume_variable_declaration_statment()?,
-                            )]),
-                            NCodeTkKind::KwEndScene => Ok(vec![NovelStmt::NovelEndScene(
-                                self.consume_end_scene_statment()?,
-                            )]),
+                            NCodeTkKind::KwLet => Ok(ParsedNovelStmt::Stmts {
+                                stmts: vec![NovelStmt::VarDecl(
+                                    self.consume_variable_declaration_statment()?,
+                                )],
+                            }),
+                            NCodeTkKind::KwEndScene => Ok(ParsedNovelStmt::Stmts {
+                                stmts: vec![NovelStmt::NovelEndScene(
+                                    self.consume_end_scene_statment()?,
+                                )],
+                            }),
                             // WARN: 意味のある式の実行(副作用のある関数の呼び出しなど)に限定するため、
                             // パーサの段階で
                             // - <identifier> 以外禁止とする
@@ -80,7 +108,7 @@ impl<'src> NovelSourceStream<'src> {
                             _ => {
                                 let expr = self.consume_expression()?;
 
-                                if let Some(t) = self.peek_token()?.cloned()
+                                if let NCodeTokenOption::Some(t) = self.peek_token()?.cloned()
                                     && let NCodeTkKind::MarkAssign = t.kind
                                 {
                                     // <primary> "=" <expression>
@@ -93,11 +121,13 @@ impl<'src> NovelSourceStream<'src> {
                                         // <END_OF_LINE>
                                         self.must_be_line_end()?;
 
-                                        Ok(vec![NovelStmt::Assign(AssignStmt {
-                                            span: Span::merge(&dst.span(), &src.span()),
-                                            dst,
-                                            src,
-                                        })])
+                                        Ok(ParsedNovelStmt::Stmts {
+                                            stmts: vec![NovelStmt::Assign(AssignStmt {
+                                                span: Span::merge(&dst.span(), &src.span()),
+                                                dst,
+                                                src,
+                                            })],
+                                        })
                                     } else {
                                         Err(NovelParseError::LineEndExpected {
                                             found: Box::new(t.to_owned()),
@@ -107,41 +137,46 @@ impl<'src> NovelSourceStream<'src> {
                                     // <END_OF_LINE>
                                     self.must_be_line_end()?;
 
-                                    Ok(vec![NovelStmt::Expr(ExprStmt {
-                                        span: expr.span(),
-                                        expr,
-                                    })])
+                                    Ok(ParsedNovelStmt::Stmts {
+                                        stmts: vec![NovelStmt::Expr(ExprStmt {
+                                            span: expr.span(),
+                                            expr,
+                                        })],
+                                    })
                                 }
                             }
                         },
 
                         // # 以降に何もないとき
-                        None => Err(NovelParseError::GeneralCommandLineOnlyPrefix {
-                            span: self.current_span(1),
-                        }),
+                        NCodeTokenOption::None { .. } => {
+                            Err(NovelParseError::GeneralCommandLineOnlyPrefix {
+                                span: self.line_span(&line_handler),
+                            })
+                        }
                     },
                     NovelLineKind::CharaCommand => {
                         todo!()
                     }
 
-                    // } 行が予期せぬときに来た場合、
-                    // 内側スコープの終了を考えて空で返す
+                    // } 行が来た場合、内側スコープの終了
                     NovelLineKind::BlockClose => {
                         self.indent_return();
-                        Ok(Vec::new())
+                        Ok(ParsedNovelStmt::ExitBlock { line_handler })
                     }
                 }
-            })
-            .transpose()
-            .map(|opt_stmts| opt_stmts.into_iter().flatten().collect())
+            }
+            NovelLineOption::None { span } => Ok(ParsedNovelStmt::EndOfRange { span }),
+        }
     }
 
     pub(crate) fn must_be_line_end(&mut self) -> Result<(), NovelParseError> {
         let t = self.next_token()?;
 
         match t {
-            Some(t) => Err(NovelParseError::LineEndExpected { found: Box::new(t) }),
-            None => Ok(()),
+            NCodeTokenOption::Some(t) => {
+                Err(NovelParseError::LineEndExpected { found: Box::new(t) })
+            }
+            NCodeTokenOption::None { .. } => Ok(()),
         }
     }
 }

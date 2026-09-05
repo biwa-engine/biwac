@@ -6,7 +6,7 @@ use biwac_ast::{
 };
 
 use crate::{
-    NovelParseError, NovelSourceStream,
+    NCodeTokenOption, NovelParseError, NovelSourceStream,
     token::{NCodeTkKind, NCodeTkKindName},
 };
 
@@ -14,13 +14,12 @@ use crate::{
 impl<'src> NovelSourceStream<'src> {
     pub(super) fn consume_primary_expression(&mut self) -> Result<Exprs, NovelParseError> {
         // Primary = Literal | "(" Expr ")"
-        let t = self
-            .peek_token()?
-            .cloned()
-            .ok_or(NovelParseError::InvalidLineEnd {
+        let t = self.peek_token()?.cloned().ok_or_else(|begin_idx| {
+            NovelParseError::InvalidLineEnd {
                 expecteds: vec![NCodeTkKindName::Ident, NCodeTkKindName::LiteralInteger],
-                span: self.current_span(1),
-            })?;
+                span: self.span_from(begin_idx, 1),
+            }
+        })?;
 
         match &t.kind {
             NCodeTkKind::LiteralInteger(int) => {
@@ -66,7 +65,7 @@ impl<'src> NovelSourceStream<'src> {
                 let begin = t.span.clone();
                 let path = self.consume_qualified_identifier()?;
 
-                if let Some(t2) = self.peek_token()? {
+                if let NCodeTokenOption::Some(t2) = self.peek_token()? {
                     if let NCodeTkKind::MarkLPare = t2.kind {
                         let (args, span) = self.consume_arguments()?;
 
@@ -116,7 +115,7 @@ impl<'src> NovelSourceStream<'src> {
 
         let mut args: Vec<Exprs> = vec![];
 
-        while let Some(t3) = self.peek_token()? {
+        while let NCodeTokenOption::Some(t3) = self.peek_token()? {
             if let NCodeTkKind::MarkRPare = t3.kind {
                 let end = t3.span.clone();
                 span = Span::merge(&begin, &end);
@@ -127,23 +126,29 @@ impl<'src> NovelSourceStream<'src> {
                 let expr = self.consume_expression()?;
                 args.push(expr);
 
-                if let Some(t) = self.peek_token()? {
-                    if let NCodeTkKind::MarkComma = t.kind {
-                        self.next_token()?;
-                        continue;
-                    } else if let NCodeTkKind::MarkRPare = t.kind {
-                        continue;
-                    } else {
-                        return Err(NovelParseError::InvalidToken {
+                match self.peek_token()? {
+                    NCodeTokenOption::Some(t) => {
+                        if let NCodeTkKind::MarkComma = t.kind {
+                            self.next_token()?;
+                            continue;
+                        } else if let NCodeTkKind::MarkRPare = t.kind {
+                            continue;
+                        } else {
+                            return Err(NovelParseError::InvalidToken {
+                                expecteds: vec![
+                                    NCodeTkKindName::MarkRPare,
+                                    NCodeTkKindName::MarkComma,
+                                ],
+                                found: Box::new(t.to_owned().clone()),
+                            });
+                        }
+                    }
+                    NCodeTokenOption::None { idx } => {
+                        return Err(NovelParseError::InvalidLineEnd {
                             expecteds: vec![NCodeTkKindName::MarkRPare, NCodeTkKindName::MarkComma],
-                            found: Box::new(t.to_owned().clone()),
+                            span: self.span_from(idx, 1),
                         });
                     }
-                } else {
-                    return Err(NovelParseError::InvalidLineEnd {
-                        expecteds: vec![NCodeTkKindName::MarkRPare, NCodeTkKindName::MarkComma],
-                        span: self.current_span(1),
-                    });
                 }
             }
         }
@@ -162,7 +167,7 @@ impl<'src> NovelSourceStream<'src> {
 
         let mut members: Vec<(Ident, Box<Exprs>)> = vec![];
 
-        while let Some(t3) = self.peek_token()? {
+        while let NCodeTokenOption::Some(t3) = self.peek_token()? {
             if let NCodeTkKind::MarkRBrace = t3.kind {
                 let end = t3.span.clone();
                 span = Span::merge(&begin, &end);
@@ -175,26 +180,32 @@ impl<'src> NovelSourceStream<'src> {
 
                 members.push((member, Box::new(expr)));
 
-                if let Some(t) = self.peek_token()? {
-                    if let NCodeTkKind::MarkComma = t.kind {
-                        self.next_token()?;
-                        continue;
-                    } else if let NCodeTkKind::MarkRBrace = t.kind {
-                        continue;
-                    } else {
-                        return Err(NovelParseError::InvalidToken {
+                match self.peek_token()? {
+                    NCodeTokenOption::Some(t) => {
+                        if let NCodeTkKind::MarkComma = t.kind {
+                            self.next_token()?;
+                            continue;
+                        } else if let NCodeTkKind::MarkRBrace = t.kind {
+                            continue;
+                        } else {
+                            return Err(NovelParseError::InvalidToken {
+                                expecteds: vec![
+                                    NCodeTkKindName::MarkRBrace,
+                                    NCodeTkKindName::MarkComma,
+                                ],
+                                found: Box::new(t.to_owned().clone()),
+                            });
+                        }
+                    }
+                    NCodeTokenOption::None { idx } => {
+                        return Err(NovelParseError::InvalidLineEnd {
                             expecteds: vec![
                                 NCodeTkKindName::MarkRBrace,
                                 NCodeTkKindName::MarkComma,
                             ],
-                            found: Box::new(t.to_owned().clone()),
+                            span: self.span_from(idx, 1),
                         });
                     }
-                } else {
-                    return Err(NovelParseError::InvalidLineEnd {
-                        expecteds: vec![NCodeTkKindName::MarkRBrace, NCodeTkKindName::MarkComma],
-                        span: self.current_span(1),
-                    });
                 }
             }
         }

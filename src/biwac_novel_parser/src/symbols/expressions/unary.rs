@@ -3,14 +3,14 @@ use biwac_span::Span;
 use biwac_ast::{Exprs, UnOperator, UnaryExpr};
 
 use crate::{
-    NovelParseError, NovelSourceStream,
+    NCodeTokenOption, NovelParseError, NovelSourceStream,
     token::{NCodeTkKind, NCodeTkKindName},
 };
 
 impl<'src> NovelSourceStream<'src> {
     pub(super) fn consume_unary_expression(&mut self) -> Result<Exprs, NovelParseError> {
-        if let Some(t) = self.peek_token()? {
-            match t.kind {
+        match self.peek_token()? {
+            NCodeTokenOption::Some(t) => match t.kind {
                 NCodeTkKind::MarkMinus => {
                     let begin = t.span.clone();
                     self.next_token()?;
@@ -25,12 +25,11 @@ impl<'src> NovelSourceStream<'src> {
                     }))
                 }
                 _ => self.consume_postfix_expression(),
-            }
-        } else {
-            Err(NovelParseError::InvalidLineEnd {
+            },
+            NCodeTokenOption::None { idx } => Err(NovelParseError::InvalidLineEnd {
                 expecteds: vec![NCodeTkKindName::Ident, NCodeTkKindName::MarkMinus],
-                span: self.current_span(1),
-            })
+                span: self.span_from(idx, 1),
+            }),
         }
     }
 }

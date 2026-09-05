@@ -2,7 +2,10 @@ use biwac_span::Span;
 
 use biwac_ast::{NovelBlockStmt, NovelIfStmt};
 
-use crate::{NovelLineKind, NovelParseError, NovelSourceStream, token::NCodeTkKindName};
+use crate::{
+    NovelLineKind, NovelParseError, NovelSourceStream, symbols::statements::ParsedNovelStmt,
+    token::NCodeTkKindName,
+};
 
 impl<'src> NovelSourceStream<'src> {
     //  "if" <expression> "{" <END_OF_LINE>
@@ -29,14 +32,17 @@ impl<'src> NovelSourceStream<'src> {
 
         let mut stmts = Vec::new();
         loop {
-            let ss = self.consume_statements()?;
+            let parsed = self.consume_statements()?;
 
-            if ss.is_empty() {
-                match self.line_kind() {
-                    Some(NovelLineKind::BlockClose) => {
+            match parsed {
+                ParsedNovelStmt::Stmts { stmts: ss } => {
+                    stmts.extend(ss);
+                }
+                ParsedNovelStmt::ExitBlock { line_handler } => match line_handler.kind() {
+                    NovelLineKind::BlockClose => {
                         // TODO: `}` 以降にトークンがないことを確認
 
-                        let then_end = self.current_span(1);
+                        let then_end = self.line_span(&line_handler);
 
                         return Ok(NovelIfStmt {
                             span: Span::merge(&begin, &then_end),
@@ -48,17 +54,13 @@ impl<'src> NovelSourceStream<'src> {
                             els: None,
                         });
                     }
-                    Some(_) => {
+                    _ => {
                         panic!("compiler bug");
                     }
-                    None => {
-                        return Err(NovelParseError::CloseLineExpected {
-                            span: self.current_span(1),
-                        });
-                    }
+                },
+                ParsedNovelStmt::EndOfRange { span } => {
+                    return Err(NovelParseError::CloseLineExpected { span });
                 }
-            } else {
-                stmts.extend(ss);
             }
         }
     }

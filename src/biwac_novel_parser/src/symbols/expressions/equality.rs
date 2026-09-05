@@ -1,12 +1,12 @@
 use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
-use crate::{NovelParseError, NovelSourceStream, token::NCodeTkKind};
+use crate::{NCodeTokenOption, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 
 impl<'src> NovelSourceStream<'src> {
     pub(super) fn consume_equality_expression(&mut self) -> Result<Exprs, NovelParseError> {
         let left = self.consume_relational_expression()?;
 
-        if let Some(t) = self.peek_token()? {
+        if let NCodeTokenOption::Some(t) = self.peek_token()? {
             match t.kind {
                 NCodeTkKind::MarkEqual => {
                     self.next_token()?;

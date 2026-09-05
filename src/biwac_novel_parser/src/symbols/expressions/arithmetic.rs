@@ -1,14 +1,14 @@
 use biwac_ast::{BinOperator, BinaryExpr, Exprs};
 
-use crate::{NovelParseError, NovelSourceStream, token::NCodeTkKind};
+use crate::{NCodeTokenOption, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 
 impl<'src> NovelSourceStream<'src> {
     pub(super) fn consume_arithmetic_expression(&mut self) -> Result<Exprs, NovelParseError> {
         let left = self.consume_multiplication_expression()?;
 
         let t = match self.peek_token()? {
-            Some(t) => t.clone(),
-            None => {
+            NCodeTokenOption::Some(t) => t.clone(),
+            NCodeTokenOption::None { .. } => {
                 return Ok(left);
             }
         };

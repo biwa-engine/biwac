@@ -2,7 +2,7 @@ use biwac_span::Span;
 
 use biwac_ast::{Exprs, MemberAccess, MethodCall, Primary};
 
-use crate::{NovelParseError, NovelSourceStream, token::NCodeTkKind};
+use crate::{NCodeTokenOption, NovelParseError, NovelSourceStream, token::NCodeTkKind};
 
 impl<'src> NovelSourceStream<'src> {
     pub(super) fn consume_postfix_expression(&mut self) -> Result<Exprs, NovelParseError> {
@@ -12,14 +12,14 @@ impl<'src> NovelSourceStream<'src> {
     }
 
     fn consume_postfix_after_expression(&mut self, expr: Exprs) -> Result<Exprs, NovelParseError> {
-        if let Some(t) = self.peek_token()? {
+        if let NCodeTokenOption::Some(t) = self.peek_token()? {
             match t.kind {
                 NCodeTkKind::MarkDot => {
                     self.next_token()?;
 
                     let mem_or_method = self.consume_identifier()?;
 
-                    if let Some(t) = self.peek_token()? {
+                    if let NCodeTokenOption::Some(t) = self.peek_token()? {
                         if let NCodeTkKind::MarkLPare = t.kind {
                             let (args, span) = self.consume_arguments()?;
 

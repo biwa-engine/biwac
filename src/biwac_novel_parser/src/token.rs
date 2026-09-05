@@ -1,9 +1,12 @@
+pub(crate) mod line;
+
 use std::fmt::Display;
 
 use biwac_ast::{AbsolutePathHeader, Ident, Path};
+use biwac_base::IdentInterner;
 use biwac_span::Span;
 
-use crate::{NovelParseError, NovelSourceStream};
+use crate::{NovelLineHandler, NovelLineKind, NovelParseError};
 
 #[derive(Debug, Clone)]
 pub struct NCodeToken {
@@ -101,29 +104,136 @@ pub enum NCodeTkKindName {
     MarkDoubleColon, // ::
 }
 
-impl<'src> NovelSourceStream<'src> {
-    pub(crate) fn next_token(&mut self) -> Result<Option<NCodeToken>, NovelParseError> {
-        match self.peeked.take() {
-            Some(t) => {
-                // カーソル位置を更新する
-                if let Some(t) = &t {
-                    self.idx = t.span.end() - self.span.begin();
-                }
+const BIWAC_NOVEL_INDENT_STEP_DEPTH: usize = 4;
 
-                Ok(t)
-            }
+#[derive(Debug)]
+pub struct NovelSourceStream<'src> {
+    span: Span,
+    // 現在のネストの深さ
+    // ネストの深さから理想的なフォーマットでのインデントが決定される
+    // 理想的なフォーマットでのインデント位置は、
+    // ネストするたびに空白文字 ' ' 4?文字分下がることになっている
+    // この位置からのさらなるインデントは、
+    // 生ノベルテキストの場合はノベルテキスト自体だとして、表示に反映される
+    nest_depth: usize,
+    peeked: Option<NCodeTokenOption<NCodeToken>>,
+
+    src: &'src str,
+
+    interner: &'src mut IdentInterner,
+
+    // DSL部分の文字列スライス src のインデックスで持つ:
+    current_line: NovelLineHandler,
+    next_line_begin_idx: usize,
+}
+
+#[derive(Debug)]
+pub(crate) enum NCodeTokenOption<T> {
+    Some(T),
+    None { idx: usize },
+}
+
+impl NCodeTokenOption<&NCodeToken> {
+    pub(crate) fn cloned(&self) -> NCodeTokenOption<NCodeToken> {
+        match self {
+            Self::Some(t) => NCodeTokenOption::Some(t.to_owned().clone()),
+            Self::None { idx } => NCodeTokenOption::None { idx: *idx },
+        }
+    }
+}
+
+impl NCodeTokenOption<NCodeToken> {
+    pub(crate) fn as_ref(&self) -> NCodeTokenOption<&NCodeToken> {
+        match self {
+            Self::Some(t) => NCodeTokenOption::Some(t),
+            Self::None { idx } => NCodeTokenOption::None { idx: *idx },
+        }
+    }
+}
+
+impl<T> NCodeTokenOption<T> {
+    pub(crate) fn ok_or_else<F: FnOnce(usize) -> NovelParseError>(
+        self,
+        f: F,
+    ) -> Result<T, NovelParseError> {
+        match self {
+            Self::Some(t) => Ok(t),
+            Self::None { idx } => Err(f(idx)),
+        }
+    }
+}
+
+impl<'src> NovelSourceStream<'src> {
+    pub fn new(src: &'src str, span: Span, interner: &'src mut IdentInterner) -> Self {
+        Self {
+            span,
+            nest_depth: 1, // scene の中であるため1階層分ネスト
+            peeked: None,
+
+            src,
+
+            interner,
+
+            // dummy
+            current_line: NovelLineHandler::new(0, 0, NovelLineKind::RawNovel),
+
+            next_line_begin_idx: 0,
+        }
+    }
+
+    // begin_idx は src の中での byte index
+    // ファイル全体ではない
+    pub(crate) fn span_from(&self, begin_idx: usize, token_len: usize) -> Span {
+        Span::new(
+            self.span.module(),
+            self.span.begin() + begin_idx,
+            self.span.begin() + begin_idx + token_len,
+        )
+    }
+
+    pub(crate) fn indent_depth(&self) -> usize {
+        self.nest_depth * BIWAC_NOVEL_INDENT_STEP_DEPTH
+    }
+
+    pub(crate) fn indent_enter(&mut self) {
+        self.nest_depth += 1;
+    }
+
+    pub(crate) fn indent_return(&mut self) {
+        self.nest_depth = self.nest_depth.saturating_sub(1);
+    }
+
+    pub(crate) fn next_token(&mut self) -> Result<NCodeTokenOption<NCodeToken>, NovelParseError> {
+        let t = match self.peeked.take() {
+            Some(t) => t,
             None => {
                 self.peek_token()?;
 
                 // SAFETY: .peek_token() で .peeked は必ず Some になっている
-                let t = self.peeked.take().unwrap();
-                if let Some(t) = &t {
-                    self.idx = t.span.end() - self.span.begin();
-                }
+                self.peeked.take().unwrap()
+            }
+        };
 
-                Ok(t)
+        // カーソル位置を更新する
+        if let NCodeTokenOption::Some(t) = &t {
+            // current line が末尾でかつpeekしたtokenがあるならば
+            // 継続tokenにより次の行へ継続しているので、
+            // ここで行を更新
+            if self.current_line.is_line_end() {
+                let (mut next_line, next_line_begin_idx) =
+                    self.next_line_as_continuing_command().unwrap();
+                next_line.proceed_to(t.span.end() - self.span.begin());
+                self.current_line = next_line;
+                self.next_line_begin_idx = next_line_begin_idx;
+            } else {
+                self.current_line
+                    .proceed_to(t.span.end() - self.span.begin());
+                self.current_line
+                    .set_last_token_continues_over_line(t.kind.continues_over_line());
             }
         }
+
+        Ok(t)
     }
 
     // peek_token
@@ -137,84 +247,119 @@ impl<'src> NovelSourceStream<'src> {
     // 多分LL(2)文法ということになる
     // ノベルモード中のコードについては、おそらく実際には変換すればLL(1)として表せるだろうが、
     // パーサの実装のしやすさからpeekは用いたい。
-    pub(crate) fn peek_token(&mut self) -> Result<Option<&NCodeToken>, NovelParseError> {
-        if self.idx >= self.next_line_begin_idx || self.line_comment_begin {
-            self.peeked = Some(None);
-            return Ok(None);
-        };
+    pub(crate) fn peek_token(&mut self) -> Result<NCodeTokenOption<&NCodeToken>, NovelParseError> {
+        // 行の終端であり、かつ最後のトークンは継続トークンでないなら
+        // 直ちに終了
+        if self.current_line.is_end_and_not_continued() {
+            self.peeked = Some(NCodeTokenOption::None {
+                idx: self.current_line.end_idx(),
+            });
+            return Ok(NCodeTokenOption::None {
+                idx: self.current_line.end_idx(),
+            });
+        }
 
         // peeked にキャッシュがなければ先に更新する
         // NOTE: multiple mutable borrowing
         // を回避するために、予めis_noneなら更新する方法を取らざるを得ない
         if self.peeked.is_none() {
-            let mut remain_chars = self.src[self.idx..self.next_line_begin_idx]
-                .chars()
-                .peekable();
+            let is_peeking_next_line = self.current_line.is_line_end()
+                && self.current_line.last_token_continues_over_line();
+
+            // remain_str は先頭の空白文字は trim 済み
+            let (remain_str, peeking_begin_idx) = if is_peeking_next_line {
+                // 継続トークンの場合、自動で次の行に進む
+                match self.next_line_as_continuing_command() {
+                    Some((next_line_handler, _)) => (
+                        self.line_str(&next_line_handler),
+                        next_line_handler.begin_idx(),
+                    ),
+                    None => {
+                        self.peeked = Some(NCodeTokenOption::None {
+                            idx: self.current_line.end_idx(),
+                        });
+                        return Ok(NCodeTokenOption::None {
+                            idx: self.current_line.end_idx(),
+                        });
+                    }
+                }
+            } else {
+                let current_line = self.line_str(&self.current_line);
+                let trimmed_line = current_line.trim_start();
+                (
+                    trimmed_line,
+                    self.current_line.begin_idx() + (current_line.len() - trimmed_line.len()),
+                )
+            };
+
+            if remain_str.is_empty() {
+                self.peeked = Some(NCodeTokenOption::None {
+                    idx: peeking_begin_idx,
+                });
+                return Ok(NCodeTokenOption::None {
+                    idx: peeking_begin_idx,
+                });
+            }
+
+            let mut remain_chars = remain_str.chars().peekable();
 
             // SAFETY: 現在の位置が行内であることを検査済み
             let (kind, token_len) = match remain_chars.next().unwrap() {
-                '(' => (Some(NCodeTkKind::MarkLPare), 1),
-                ')' => (Some(NCodeTkKind::MarkRPare), 1),
-                '{' => (Some(NCodeTkKind::MarkLBrace), 1),
-                '}' => (Some(NCodeTkKind::MarkRBrace), 1),
-                '[' => (Some(NCodeTkKind::MarkLBracket), 1),
-                ']' => (Some(NCodeTkKind::MarkRBracket), 1),
-                '+' => (Some(NCodeTkKind::MarkPlus), 1),
-                '*' => (Some(NCodeTkKind::MarkAsterisk), 1),
-                '/' => match remain_chars.peek() {
-                    // `//` 以降は行コメント
-                    Some('/') => {
-                        self.line_comment_begin = true;
-                        (None, 0)
-                    }
-                    _ => (Some(NCodeTkKind::MarkSlash), 1),
-                },
-                '%' => (Some(NCodeTkKind::MarkPercent), 1),
-                '&' => (Some(NCodeTkKind::MarkAmpersand), 1),
-                ';' => (Some(NCodeTkKind::MarkSemiColon), 1),
-                ',' => (Some(NCodeTkKind::MarkComma), 1),
-                '.' => (Some(NCodeTkKind::MarkDot), 1),
+                '(' => (NCodeTkKind::MarkLPare, 1),
+                ')' => (NCodeTkKind::MarkRPare, 1),
+                '{' => (NCodeTkKind::MarkLBrace, 1),
+                '}' => (NCodeTkKind::MarkRBrace, 1),
+                '[' => (NCodeTkKind::MarkLBracket, 1),
+                ']' => (NCodeTkKind::MarkRBracket, 1),
+                '+' => (NCodeTkKind::MarkPlus, 1),
+                '*' => (NCodeTkKind::MarkAsterisk, 1),
+                '/' => (NCodeTkKind::MarkSlash, 1),
+                '%' => (NCodeTkKind::MarkPercent, 1),
+                '&' => (NCodeTkKind::MarkAmpersand, 1),
+                ';' => (NCodeTkKind::MarkSemiColon, 1),
+                ',' => (NCodeTkKind::MarkComma, 1),
+                '.' => (NCodeTkKind::MarkDot, 1),
                 '-' => match remain_chars.peek() {
                     Some('>') => {
                         remain_chars.next();
-                        (Some(NCodeTkKind::MarkArrow), 2)
+                        (NCodeTkKind::MarkArrow, 2)
                     }
-                    _ => (Some(NCodeTkKind::MarkMinus), 1),
+                    _ => (NCodeTkKind::MarkMinus, 1),
                 },
                 ':' => match remain_chars.peek() {
                     Some(':') => {
                         remain_chars.next();
-                        (Some(NCodeTkKind::MarkDoubleColon), 2)
+                        (NCodeTkKind::MarkDoubleColon, 2)
                     }
-                    _ => (Some(NCodeTkKind::MarkColon), 1),
+                    _ => (NCodeTkKind::MarkColon, 1),
                 },
                 '<' => match remain_chars.peek() {
                     Some('=') => {
                         remain_chars.next();
-                        (Some(NCodeTkKind::MarkLesEq), 2)
+                        (NCodeTkKind::MarkLesEq, 2)
                     }
-                    _ => (Some(NCodeTkKind::MarkLesser), 1),
+                    _ => (NCodeTkKind::MarkLesser, 1),
                 },
                 '>' => match remain_chars.peek() {
                     Some('=') => {
                         remain_chars.next();
-                        (Some(NCodeTkKind::MarkGrtEq), 2)
+                        (NCodeTkKind::MarkGrtEq, 2)
                     }
-                    _ => (Some(NCodeTkKind::MarkGreater), 1),
+                    _ => (NCodeTkKind::MarkGreater, 1),
                 },
                 '=' => match remain_chars.peek() {
                     Some('=') => {
                         remain_chars.next();
-                        (Some(NCodeTkKind::MarkEqual), 2)
+                        (NCodeTkKind::MarkEqual, 2)
                     }
-                    _ => (Some(NCodeTkKind::MarkAssign), 1),
+                    _ => (NCodeTkKind::MarkAssign, 1),
                 },
                 '!' => match remain_chars.peek() {
                     Some('=') => {
                         remain_chars.next();
-                        (Some(NCodeTkKind::MarkNotEq), 2)
+                        (NCodeTkKind::MarkNotEq, 2)
                     }
-                    _ => (Some(NCodeTkKind::MarkNot), 1),
+                    _ => (NCodeTkKind::MarkNot, 1),
                 },
 
                 // `"` 始まりなら、行内で閉じる文字列リテラルでなければならない
@@ -238,11 +383,11 @@ impl<'src> NovelSourceStream<'src> {
 
                     if !closed {
                         return Err(NovelParseError::StringLiteralNotClosed {
-                            span: self.current_span(1),
+                            span: self.span_from(peeking_begin_idx, 1),
                         });
                     }
 
-                    (Some(NCodeTkKind::LiteralString(val)), token_len)
+                    (NCodeTkKind::LiteralString(val), token_len)
                 }
 
                 // 数字始まりなら、数値リテラルでなければならない
@@ -259,7 +404,6 @@ impl<'src> NovelSourceStream<'src> {
                             }
                             // CharKind::Alpha | CharKind::UnderScore | CharKind::Others
                             x => {
-                                self.idx += token_len;
                                 return Err(NovelParseError::InvalidChar {
                                     expecteds: vec![
                                         CharKind::Numeric,
@@ -267,18 +411,18 @@ impl<'src> NovelSourceStream<'src> {
                                         CharKind::WhiteSpace,
                                     ],
                                     found: x,
-                                    span: self.current_span(1),
+                                    span: self.span_from(peeking_begin_idx + token_len, 1),
                                 });
                             }
                         }
                     }
 
                     (
-                        Some(NCodeTkKind::LiteralInteger(
-                            self.src[self.idx..self.idx + token_len]
+                        NCodeTkKind::LiteralInteger(
+                            remain_str[..token_len]
                                 .parse()
                                 .expect("must be parsed as usize"),
-                        )),
+                        ),
                         token_len,
                     )
                 }
@@ -296,7 +440,6 @@ impl<'src> NovelSourceStream<'src> {
                                 break;
                             }
                             CharKind::Others => {
-                                self.idx += token_len;
                                 return Err(NovelParseError::InvalidChar {
                                     expecteds: vec![
                                         CharKind::Alpha,
@@ -306,60 +449,49 @@ impl<'src> NovelSourceStream<'src> {
                                         CharKind::WhiteSpace,
                                     ],
                                     found: CharKind::Others,
-                                    span: self.current_span(1),
+                                    span: self.span_from(peeking_begin_idx + token_len, 1),
                                 });
                             }
                         }
                     }
 
-                    match &self.src[self.idx..self.idx + token_len] {
-                        "TRUE" => (Some(NCodeTkKind::KwTrue), 4),
-                        "FALSE" => (Some(NCodeTkKind::KwFalse), 5),
-                        "package" => (Some(NCodeTkKind::KwPackage), 7),
-                        "let" => (Some(NCodeTkKind::KwLet), 3),
-                        "if" => (Some(NCodeTkKind::KwIf), 2),
-                        "else" => (Some(NCodeTkKind::KwElse), 4),
-                        "while" => (Some(NCodeTkKind::KwWhile), 5),
-                        "endscene" => (Some(NCodeTkKind::KwEndScene), 8),
-                        "Uint" => (Some(NCodeTkKind::KwUint), 4),
-                        "Int" => (Some(NCodeTkKind::KwInt), 3),
-                        "Float" => (Some(NCodeTkKind::KwFloat), 5),
-                        "Bool" => (Some(NCodeTkKind::KwBool), 4),
-                        x => (Some(NCodeTkKind::Ident(x.to_string())), x.chars().count()),
+                    match &remain_str[..token_len] {
+                        "TRUE" => (NCodeTkKind::KwTrue, 4),
+                        "FALSE" => (NCodeTkKind::KwFalse, 5),
+                        "package" => (NCodeTkKind::KwPackage, 7),
+                        "let" => (NCodeTkKind::KwLet, 3),
+                        "if" => (NCodeTkKind::KwIf, 2),
+                        "else" => (NCodeTkKind::KwElse, 4),
+                        "while" => (NCodeTkKind::KwWhile, 5),
+                        "endscene" => (NCodeTkKind::KwEndScene, 8),
+                        "Uint" => (NCodeTkKind::KwUint, 4),
+                        "Int" => (NCodeTkKind::KwInt, 3),
+                        "Float" => (NCodeTkKind::KwFloat, 5),
+                        "Bool" => (NCodeTkKind::KwBool, 4),
+                        x => (NCodeTkKind::Ident(x.to_string()), x.chars().count()),
                     }
                 }
 
                 c => {
-                    if c.is_whitespace() {
-                        // 空白はトークンではない
-                        (None, c.len_utf8())
-                    } else {
-                        return Err(NovelParseError::InvalidChar {
-                            expecteds: vec![
-                                CharKind::Alpha,
-                                CharKind::Numeric,
-                                CharKind::UnderScore,
-                                CharKind::Mark,
-                                CharKind::WhiteSpace,
-                            ],
-                            found: char_kind(c),
-                            span: self.current_span(1),
-                        });
-                    }
+                    // trim 済みのため空白は来ないはず
+                    return Err(NovelParseError::InvalidChar {
+                        expecteds: vec![
+                            CharKind::Alpha,
+                            CharKind::Numeric,
+                            CharKind::UnderScore,
+                            CharKind::Mark,
+                            CharKind::WhiteSpace,
+                        ],
+                        found: char_kind(c),
+                        span: self.span_from(peeking_begin_idx, 1),
+                    });
                 }
             };
 
-            if let Some(kind) = kind {
-                self.peeked = Some(Some(NCodeToken {
-                    kind,
-                    span: self.current_span(token_len),
-                }));
-            } else {
-                // NOTE: 空白文字のときは次トークンを探すために、peek内でもcursor.idxを進める
-                // そうでないとスタックオーバーフローする
-                self.idx += token_len;
-                self.peek_token()?;
-            }
+            self.peeked = Some(NCodeTokenOption::Some(NCodeToken {
+                kind,
+                span: self.span_from(peeking_begin_idx, token_len),
+            }));
         }
 
         Ok(self.peeked.as_ref().unwrap().as_ref())
@@ -460,10 +592,12 @@ impl<'src> NovelSourceStream<'src> {
         &mut self,
         kinds: Vec<NCodeTkKindName>,
     ) -> Result<NCodeToken, NovelParseError> {
-        let t: NCodeToken = self.next_token()?.ok_or(NovelParseError::InvalidLineEnd {
-            expecteds: kinds.clone(),
-            span: self.current_span(1),
-        })?;
+        let t: NCodeToken =
+            self.next_token()?
+                .ok_or_else(|begin_idx| NovelParseError::InvalidLineEnd {
+                    expecteds: kinds.clone(),
+                    span: self.span_from(begin_idx, 1),
+                })?;
 
         for kind in &kinds {
             if kind == &t.kind.as_kind_name() {
@@ -478,10 +612,12 @@ impl<'src> NovelSourceStream<'src> {
     }
 
     pub(crate) fn consume_identifier(&mut self) -> Result<Ident, NovelParseError> {
-        let t = self.next_token()?.ok_or(NovelParseError::InvalidLineEnd {
-            expecteds: vec![NCodeTkKindName::Ident],
-            span: self.current_span(1),
-        })?;
+        let t = self
+            .next_token()?
+            .ok_or_else(|begin_idx| NovelParseError::InvalidLineEnd {
+                expecteds: vec![NCodeTkKindName::Ident],
+                span: self.span_from(begin_idx, 1),
+            })?;
 
         if let NCodeTkKind::Ident(ident) = &t.kind {
             let interned = self.interner.get_or_insert(ident);
@@ -499,7 +635,7 @@ impl<'src> NovelSourceStream<'src> {
 
     pub(crate) fn consume_qualified_identifier(&mut self) -> Result<Path, NovelParseError> {
         let mut segments = vec![];
-        let abs_header = if let Some(t) = self.peek_token()?.cloned()
+        let abs_header = if let NCodeTokenOption::Some(t) = self.peek_token()?.cloned()
             && matches!(t.kind.as_kind_name(), NCodeTkKindName::KwPackage)
         {
             self.next_token()?;
@@ -516,7 +652,7 @@ impl<'src> NovelSourceStream<'src> {
         };
 
         loop {
-            if let Some(t) = self.peek_token()? {
+            if let NCodeTokenOption::Some(t) = self.peek_token()? {
                 if let NCodeTkKind::MarkDoubleColon = t.kind {
                     self.next_token()?;
                     let ident = self.consume_identifier()?;
@@ -540,6 +676,32 @@ impl NCodeTkKind {
             Self::LiteralInteger(i) => format!("<integer-literal> `{i}`"),
             Self::LiteralString(s) => format!("<string-literal> `\"{s}\"`"),
             _ => format!("`{}`", self.as_kind_name().pattern()),
+        }
+    }
+
+    pub fn continues_over_line(&self) -> bool {
+        match self {
+            Self::MarkLPare
+            | Self::MarkLBracket
+            | Self::MarkComma
+            | Self::MarkDot
+            | Self::MarkDoubleColon => true,
+            _ => false,
+            // NOTE: 将来拡大するかもしれない対象
+            // | Self::MarkLBrace
+            // | Self::MarkPlus
+            // | Self::MarkMinus
+            // | Self::MarkAsterisk
+            // | Self::MarkSlash
+            // | Self::MarkPercent
+            // | Self::MarkLesser
+            // | Self::MarkGreater
+            // | Self::MarkLesEq
+            // | Self::MarkGrtEq
+            // | Self::MarkEqual
+            // | Self::MarkNotEq
+            // | Self::MarkAssign
+            // | Self::MarkNot
         }
     }
 }

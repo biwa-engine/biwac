@@ -1,7 +1,7 @@
 use biwac_ast::{DefTyp, PrimTyp, TypRepr, TypReprVal};
 
 use crate::{
-    NovelParseError, NovelSourceStream,
+    NCodeTokenOption, NovelParseError, NovelSourceStream,
     token::{NCodeTkKind, NCodeTkKindName},
 };
 
@@ -12,9 +12,9 @@ impl<'src> NovelSourceStream<'src> {
         let t = self
             .peek_token()?
             .cloned()
-            .ok_or(NovelParseError::InvalidLineEnd {
+            .ok_or_else(|begin_idx| NovelParseError::InvalidLineEnd {
                 expecteds: vec![NCodeTkKindName::MarkColon],
-                span: self.current_span(1),
+                span: self.span_from(begin_idx, 1),
             })?
             .to_owned();
 
@@ -28,66 +28,67 @@ impl<'src> NovelSourceStream<'src> {
     }
 
     pub(crate) fn consume_type_representaion(&mut self) -> Result<TypRepr, NovelParseError> {
-        if let Some(t) = self.peek_token()? {
-            if let NCodeTkKind::KwUint = t.kind {
-                let span = t.span.clone();
-                self.next_token()?;
-                Ok(TypRepr {
-                    val: TypReprVal::Primitive(PrimTyp::Uint),
-                    span,
-                })
-            } else if let NCodeTkKind::KwInt = t.kind {
-                let span = t.span.clone();
-                self.next_token()?;
-                Ok(TypRepr {
-                    val: TypReprVal::Primitive(PrimTyp::Int),
-                    span,
-                })
-            } else if let NCodeTkKind::KwFloat = t.kind {
-                let span = t.span.clone();
-                self.next_token()?;
-                Ok(TypRepr {
-                    val: TypReprVal::Primitive(PrimTyp::Float),
-                    span,
-                })
-            } else if let NCodeTkKind::KwBool = t.kind {
-                let span = t.span.clone();
-                self.next_token()?;
-                Ok(TypRepr {
-                    val: TypReprVal::Primitive(PrimTyp::Bool),
-                    span,
-                })
-            } else if let NCodeTkKind::Ident(_) = t.kind {
-                // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
-                let path = self.consume_qualified_identifier()?;
-                let genargs = self.opt_consume_generic_args()?;
+        match self.peek_token()? {
+            NCodeTokenOption::Some(t) => {
+                if let NCodeTkKind::KwUint = t.kind {
+                    let span = t.span.clone();
+                    self.next_token()?;
+                    Ok(TypRepr {
+                        val: TypReprVal::Primitive(PrimTyp::Uint),
+                        span,
+                    })
+                } else if let NCodeTkKind::KwInt = t.kind {
+                    let span = t.span.clone();
+                    self.next_token()?;
+                    Ok(TypRepr {
+                        val: TypReprVal::Primitive(PrimTyp::Int),
+                        span,
+                    })
+                } else if let NCodeTkKind::KwFloat = t.kind {
+                    let span = t.span.clone();
+                    self.next_token()?;
+                    Ok(TypRepr {
+                        val: TypReprVal::Primitive(PrimTyp::Float),
+                        span,
+                    })
+                } else if let NCodeTkKind::KwBool = t.kind {
+                    let span = t.span.clone();
+                    self.next_token()?;
+                    Ok(TypRepr {
+                        val: TypReprVal::Primitive(PrimTyp::Bool),
+                        span,
+                    })
+                } else if let NCodeTkKind::Ident(_) = t.kind {
+                    // NOTE: idのみ得られた場合、ジェネリクス型(`T`)である可能性がある
+                    let path = self.consume_qualified_identifier()?;
+                    let genargs = self.opt_consume_generic_args()?;
 
-                Ok(TypRepr {
-                    span: path.span(),
-                    val: TypReprVal::Defined(DefTyp { path, genargs }),
-                })
-            } else if let NCodeTkKind::KwPackage = t.kind {
-                let path = self.consume_qualified_identifier()?;
-                let genargs = self.opt_consume_generic_args()?;
+                    Ok(TypRepr {
+                        span: path.span(),
+                        val: TypReprVal::Defined(DefTyp { path, genargs }),
+                    })
+                } else if let NCodeTkKind::KwPackage = t.kind {
+                    let path = self.consume_qualified_identifier()?;
+                    let genargs = self.opt_consume_generic_args()?;
 
-                Ok(TypRepr {
-                    span: path.span(),
-                    val: TypReprVal::Defined(DefTyp { path, genargs }),
-                })
-            } else {
-                Err(NovelParseError::InvalidToken {
-                    expecteds: vec![
-                        NCodeTkKindName::KwUint,
-                        NCodeTkKindName::KwInt,
-                        NCodeTkKindName::KwBool,
-                        NCodeTkKindName::Ident,
-                    ],
+                    Ok(TypRepr {
+                        span: path.span(),
+                        val: TypReprVal::Defined(DefTyp { path, genargs }),
+                    })
+                } else {
+                    Err(NovelParseError::InvalidToken {
+                        expecteds: vec![
+                            NCodeTkKindName::KwUint,
+                            NCodeTkKindName::KwInt,
+                            NCodeTkKindName::KwBool,
+                            NCodeTkKindName::Ident,
+                        ],
 
-                    found: Box::new(t.to_owned().clone()),
-                })
+                        found: Box::new(t.to_owned().clone()),
+                    })
+                }
             }
-        } else {
-            Err(NovelParseError::InvalidLineEnd {
+            NCodeTokenOption::None { idx } => Err(NovelParseError::InvalidLineEnd {
                 expecteds: vec![
                     NCodeTkKindName::KwUint,
                     NCodeTkKindName::KwInt,
@@ -95,8 +96,8 @@ impl<'src> NovelSourceStream<'src> {
                     NCodeTkKindName::Ident,
                     NCodeTkKindName::KwPackage,
                 ],
-                span: self.current_span(1),
-            })
+                span: self.span_from(idx, 1),
+            }),
         }
     }
 
@@ -109,7 +110,7 @@ impl<'src> NovelSourceStream<'src> {
     pub(crate) fn opt_consume_generic_args(
         &mut self,
     ) -> Result<Option<Vec<TypRepr>>, NovelParseError> {
-        if let Some(t) = self.peek_token()?
+        if let NCodeTokenOption::Some(t) = self.peek_token()?
             && matches!(t.kind, NCodeTkKind::MarkLBracket)
         {
             self.next_token()?;
@@ -119,7 +120,7 @@ impl<'src> NovelSourceStream<'src> {
 
         let mut genargs = vec![];
         loop {
-            if let Some(t) = self.peek_token()?
+            if let NCodeTokenOption::Some(t) = self.peek_token()?
                 && let NCodeTkKind::MarkRBracket = t.kind
             {
                 self.next_token()?;
@@ -128,25 +129,31 @@ impl<'src> NovelSourceStream<'src> {
             } else {
                 genargs.push(self.consume_type_representaion()?);
 
-                if let Some(t) = self.next_token()? {
-                    if let NCodeTkKind::MarkRBracket = t.kind {
-                        return Ok(Some(genargs));
-                    } else if let NCodeTkKind::MarkComma = t.kind {
-                        continue;
-                    } else {
-                        return Err(NovelParseError::InvalidToken {
+                match self.next_token()? {
+                    NCodeTokenOption::Some(t) => {
+                        if let NCodeTkKind::MarkRBracket = t.kind {
+                            return Ok(Some(genargs));
+                        } else if let NCodeTkKind::MarkComma = t.kind {
+                            continue;
+                        } else {
+                            return Err(NovelParseError::InvalidToken {
+                                expecteds: vec![
+                                    NCodeTkKindName::MarkRBracket,
+                                    NCodeTkKindName::MarkComma,
+                                ],
+                                found: Box::new(t.clone()),
+                            });
+                        }
+                    }
+                    NCodeTokenOption::None { idx } => {
+                        return Err(NovelParseError::InvalidLineEnd {
                             expecteds: vec![
                                 NCodeTkKindName::MarkRBracket,
                                 NCodeTkKindName::MarkComma,
                             ],
-                            found: Box::new(t.clone()),
+                            span: self.span_from(idx, 1),
                         });
                     }
-                } else {
-                    return Err(NovelParseError::InvalidLineEnd {
-                        expecteds: vec![NCodeTkKindName::MarkRBracket, NCodeTkKindName::MarkComma],
-                        span: self.current_span(1),
-                    });
                 }
             }
         }

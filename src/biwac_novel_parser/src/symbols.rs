@@ -1,6 +1,8 @@
 use biwac_ast::NovelStmt;
 
-use crate::{NovelLineKind, NovelParseError, NovelSourceStream};
+use crate::{
+    NovelLineKind, NovelParseError, NovelSourceStream, symbols::statements::ParsedNovelStmt,
+};
 
 pub(crate) mod expressions;
 pub(crate) mod statements;
@@ -9,32 +11,22 @@ impl<'src> NovelSourceStream<'src> {
     pub fn parse(&mut self) -> Result<Vec<NovelStmt>, NovelParseError> {
         let mut stmts = Vec::new();
         loop {
-            let ss = self.consume_statements()?;
+            let parsed = self.consume_statements()?;
 
-            if ss.is_empty() {
-                // 正常に最終行までパースできる場合
-                //  ```biwa
-                //      Hello!
-                //  }}            // span.end() == span.begin() + self.idx
-                //  ```
-                //
-                // } が残っていて、パースしようとしても空が返る場合
-                //  ```biwa
-                //      Hello!
-                //      }         // span.begin() + idx
-                //  }}            // span.end()
-                //  ```
-                if self.span.end() == self.span.begin() + self.idx {
-                    return Ok(stmts);
-                } else {
-                    assert_eq!(self.line_kind(), Some(NovelLineKind::BlockClose));
+            match parsed {
+                ParsedNovelStmt::Stmts { stmts: ss } => {
+                    stmts.extend(ss);
+                }
+                ParsedNovelStmt::ExitBlock { line_handler } => {
+                    assert_eq!(line_handler.kind(), &NovelLineKind::BlockClose);
 
                     return Err(NovelParseError::InvalidCloseLine {
-                        span: self.current_span(1),
+                        span: self.line_span(&line_handler),
                     });
                 }
-            } else {
-                stmts.extend(ss);
+                ParsedNovelStmt::EndOfRange { .. } => {
+                    return Ok(stmts);
+                }
             }
         }
     }
