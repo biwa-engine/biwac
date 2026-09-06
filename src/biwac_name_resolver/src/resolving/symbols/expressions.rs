@@ -19,6 +19,7 @@ impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Primary {
             biwac_ast::Primary::MemberAccess(member_access) => member_access.resolve(ctx),
             biwac_ast::Primary::MethodCall(method_call) => method_call.resolve(ctx),
             biwac_ast::Primary::IfExpr(if_expr) => if_expr.resolve(ctx),
+            biwac_ast::Primary::Match(m) => m.resolve(ctx),
             biwac_ast::Primary::Block(block) => block.resolve(ctx),
         }
     }
@@ -31,6 +32,36 @@ impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::IfExpr {
         self.cond.resolve(ctx).handle(&mut errors);
         self.then.resolve(ctx).handle(&mut errors);
         self.els.resolve(ctx).handle(&mut errors);
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::MatchExpr {
+    fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
+        let mut errors = Vec::new();
+
+        self.scrutinee.resolve(ctx).handle(&mut errors);
+
+        for arm in &self.arms {
+            // パターンが束縛する変数はそのアームの中でだけ見える。
+            ctx.inner_scope(|ctx: &mut C| {
+                let mut arm_errors = Vec::new();
+                arm.pattern.resolve(ctx).handle(&mut arm_errors);
+                arm.body.resolve(ctx).handle(&mut arm_errors);
+
+                if arm_errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(arm_errors)
+                }
+            })
+            .handle(&mut errors);
+        }
 
         if errors.is_empty() {
             Ok(())

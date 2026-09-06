@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use biwac_base::{IdentInterner, InternedIdent, PackageId, SourceHolder};
 use biwac_dependency_metadata::DepMetadata;
-use biwac_hir::{Hir, Ty, ValDefKind};
+use biwac_hir::{ExprId, Hir, Ty, ValDefKind};
 use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_span::{TyDefId, ValDefId, VarId};
 
@@ -92,14 +92,29 @@ impl<'a> AstBuildCtx<'a> {
 
 pub(super) struct FnAstBuildCtx<'a> {
     pub(super) var_tys: &'a HashMap<VarId, Ty>,
+    /// 式の型。`match` の対象を受ける一時変数に注釈を付けるのに要る。
+    pub(super) expr_tys: &'a HashMap<ExprId, Ty>,
     pub(super) stmts: Vec<oxc_ast::ast::Statement<'a>>,
+    /// 一時変数の連番。`match` を式として使うときに要る。
+    next_temp: usize,
 }
 
 impl<'a> FnAstBuildCtx<'a> {
-    pub(super) fn new(var_tys: &'a HashMap<VarId, Ty>) -> Self {
+    pub(super) fn new(var_tys: &'a HashMap<VarId, Ty>, expr_tys: &'a HashMap<ExprId, Ty>) -> Self {
         Self {
             var_tys,
+            expr_tys,
             stmts: Vec::new(),
+            next_temp: 0,
         }
+    }
+
+    /// 生成コード用の一時変数名。
+    ///
+    /// biwa の変数はマングルされて `_ZN..` になるので、この形と衝突しない。
+    pub(super) fn alloc_temp(&mut self) -> String {
+        let name = format!("__biwa_tmp{}", self.next_temp);
+        self.next_temp += 1;
+        name
     }
 }

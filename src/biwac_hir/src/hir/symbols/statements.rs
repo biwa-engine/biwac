@@ -1,6 +1,6 @@
 use biwac_span::{Span, VarId};
 
-use crate::{Expr, Ident, Primary, Ty};
+use crate::{Expr, Ident, Pattern, Primary, Ty};
 
 #[derive(Debug, Clone)]
 pub struct DecledVar {
@@ -19,6 +19,21 @@ pub struct IfStmt {
     pub cond: Expr,
     pub then: BlockStmt,
     pub els: Option<BlockStmt>,
+}
+
+/// `match` の文形。アームの本体はブロック文である。
+#[derive(Debug, Clone)]
+pub struct MatchStmt {
+    pub scrutinee: Expr,
+    pub arms: Vec<MatchStmtArm>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchStmtArm {
+    pub pattern: Pattern,
+    pub body: BlockStmt,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +86,7 @@ pub enum Stmt {
     Expr(ExprStmt),
     Return(ReturnStmt),
     If(IfStmt),
+    Match(MatchStmt),
     While(WhileStmt),
     VarDecl(VarDecl),
     Assign(AssignStmt),

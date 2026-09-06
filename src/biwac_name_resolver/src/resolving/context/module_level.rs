@@ -452,6 +452,7 @@ fn resolve_path_in_ty(
             // TODO: segment に genargs: Option<Vec<TypRepr>> を持たせて解決
             let def_id_kind = match assoc_tree.find_matched(None, segment) {
                 Ok(AssocNameTreeItemKind::Val(def_id)) => DefIdKind::Val(*def_id),
+                Ok(AssocNameTreeItemKind::Variant(def_id)) => DefIdKind::Variant(*def_id),
                 Err(e) => {
                     segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
                     return Err(e);
@@ -552,7 +553,9 @@ fn resolve_path_in_ext_pkg(
                         pkg_id,
                         interner,
                     ),
-                    ExternalChildKind::Val => {
+                    // 値とバリアントはどちらもここで終端である。
+                    // その先にセグメントがあれば解決できない。
+                    ExternalChildKind::Val | ExternalChildKind::Variant => {
                         path.segments[depth + 1]
                             .resolved_id
                             .set(PathSegmentResolution::Err)
@@ -614,6 +617,7 @@ fn ext_child_ref_to_def_id_kind(child_ref: &ExternalChildRef, pkg_id: PackageId)
     match child_ref.kind {
         ExternalChildKind::Ty => DefIdKind::Ty(child_ref.as_ty_def_id(pkg_id)),
         ExternalChildKind::Val => DefIdKind::Val(child_ref.as_val_def_id(pkg_id)),
+        ExternalChildKind::Variant => DefIdKind::Variant(child_ref.as_variant_def_id(pkg_id)),
         ExternalChildKind::Mod => DefIdKind::Mod(ModId::new_ext(pkg_id.value(), child_ref.sym_idx)),
     }
 }

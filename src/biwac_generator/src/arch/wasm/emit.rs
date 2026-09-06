@@ -28,9 +28,9 @@ use std::fmt::Write;
 use biwac_base::InternedIdent;
 use biwac_hir::{Ty, TyKind};
 use biwac_mir::{
-    BasicBlock, BinOp, Body, Callee, Const, InstanceKey, Local, MirItem, MonoMir, MonoTyDefKind,
-    NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind, TyInstanceKey,
-    UnOp,
+    AggregateKind, BasicBlock, BinOp, Body, Callee, Const, InstanceKey, Local, MirItem, MonoMir,
+    MonoTyDefKind, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind, TerminatorKind,
+    TyInstanceKey, UnOp,
 };
 use biwac_span::TyDefId;
 
@@ -91,13 +91,20 @@ struct Emitter<'a> {
     mangler: &'a Mangler<'a>,
     /// 実体 → wasm の関数名。
     fn_names: HashMap<InstanceKey, String>,
-    /// 具体型 → wasm の型名 (struct のみ)。
+    /// 具体型 → wasm の型名 (struct と enum の親型)。
     ty_names: HashMap<TyInstanceKey, String>,
+    /// (enum の実体, バリアント番号) → 子型の名前。
+    variant_ty_names: HashMap<(TyInstanceKey, u32), String>,
     /// 具体型 → native 本体に書かれた wasm 型 (native type alias のみ)。
     native_tys: HashMap<TyInstanceKey, String>,
     /// 文字列リテラルの (線形メモリ上の先頭, バイト長)。
     strings: Vec<(u32, u32)>,
 }
+
+/// enum のタグを入れるフィールドの名前。
+///
+/// biwa の識別子は `$` で始まらないので、利用者のフィールドと衝突しない。
+const ENUM_TAG_FIELD: &str = "$__tag";
 
 impl<'a> Emitter<'a> {
     fn new(mono: &'a MonoMir, mangler: &'a Mangler<'a>) -> Self {
@@ -115,11 +122,23 @@ impl<'a> Emitter<'a> {
 
         let mut ty_names = HashMap::new();
         let mut native_tys = HashMap::new();
+        // enum のバリアントごとの子型の名前。(実体, バリアント番号) で引く。
+        let mut variant_ty_names: HashMap<(TyInstanceKey, u32), String> = HashMap::new();
         for (i, def) in mono.types.iter().enumerate() {
             match &def.kind {
                 MonoTyDefKind::Struct { .. } => {
                     let base = mangler.get_type_mangled(&def.key.def_id);
                     ty_names.insert(def.key.clone(), format!("{base}.t{i}"));
+                }
+                MonoTyDefKind::Enum { variants } => {
+                    // 親型はタグだけを持つ。値はバリアントごとの子型が持つ。
+                    let base = mangler.get_type_mangled(&def.key.def_id);
+                    let parent = format!("{base}.t{i}");
+                    for (n, _) in variants.iter().enumerate() {
+                        variant_ty_names
+                            .insert((def.key.clone(), n as u32), format!("{parent}.v{n}"));
+                    }
+                    ty_names.insert(def.key.clone(), parent);
                 }
                 MonoTyDefKind::Native { code } => {
                     native_tys.insert(def.key.clone(), code.trim().to_string());
@@ -141,6 +160,7 @@ impl<'a> Emitter<'a> {
             mangler,
             fn_names,
             ty_names,
+            variant_ty_names,
             native_tys,
             strings,
         }
@@ -183,26 +203,56 @@ impl<'a> Emitter<'a> {
         // --- 型 ---
         //
         // 相互に参照しうるので 1 つの再帰グループにまとめる。
-        let structs: Vec<_> = self
+        let defs: Vec<_> = self
             .mono
             .types
             .iter()
-            .filter(|d| matches!(d.kind, MonoTyDefKind::Struct { .. }))
+            .filter(|d| {
+                matches!(
+                    d.kind,
+                    MonoTyDefKind::Struct { .. } | MonoTyDefKind::Enum { .. }
+                )
+            })
             .collect();
-        if !structs.is_empty() {
+        if !defs.is_empty() {
             out.push_str("  (rec\n");
-            for def in &structs {
-                let MonoTyDefKind::Struct { members } = &def.kind else {
-                    unreachable!()
-                };
+            for def in &defs {
                 let name = &self.ty_names[&def.key];
-                let mut fields = String::new();
-                for (member, ty) in members {
-                    let wty = self.wasm_ty(ty)?;
-                    let field = self.field_name(*member);
-                    let _ = write!(fields, " (field {field} (mut {wty}))");
+                match &def.kind {
+                    MonoTyDefKind::Struct { members } => {
+                        let mut fields = String::new();
+                        for (member, ty) in members {
+                            let wty = self.wasm_ty(ty)?;
+                            let field = self.field_name(*member);
+                            let _ = write!(fields, " (field {field} (mut {wty}))");
+                        }
+                        let _ = writeln!(out, "    (type ${name} (struct{fields}))");
+                    }
+                    // enum は WasmGC の部分型で表す。
+                    //
+                    // 親型はタグだけを持ち、バリアントごとの子型が payload を足す。
+                    // 判別は親型経由で `struct.get` すればよく、
+                    // 取り出しは `ref.cast` で子型に落としてから読む。
+                    // payload を anyref に詰めないので Int や Float を箱に入れずに済む。
+                    MonoTyDefKind::Enum { variants } => {
+                        let _ = writeln!(
+                            out,
+                            "    (type ${name} (sub (struct (field {ENUM_TAG_FIELD} (mut i32)))))"
+                        );
+                        for (n, variant) in variants.iter().enumerate() {
+                            let child = &self.variant_ty_names[&(def.key.clone(), n as u32)];
+                            let mut fields = format!(" (field {ENUM_TAG_FIELD} (mut i32))");
+                            for (field, ty) in &variant.fields {
+                                let wty = self.wasm_ty(ty)?;
+                                let field = self.field_name(*field);
+                                let _ = write!(fields, " (field {field} (mut {wty}))");
+                            }
+                            let _ =
+                                writeln!(out, "    (type ${child} (sub ${name} (struct{fields})))");
+                        }
+                    }
+                    MonoTyDefKind::Native { .. } => unreachable!(),
                 }
-                let _ = writeln!(out, "    (type ${name} (struct{fields}))");
             }
             out.push_str("  )\n\n");
         }
@@ -426,10 +476,19 @@ impl<'a> Emitter<'a> {
             Structured::Simple(bb) => self.emit_block_stmts(out, *bb, body, depth)?,
             Structured::If { bb, then, els } => {
                 // 条件は bb の終端子が持っている。文は Simple 側で既に出ている。
-                let TerminatorKind::SwitchInt { discr, .. } = &body.block(*bb).term.kind else {
+                let TerminatorKind::SwitchInt { discr, targets } = &body.block(*bb).term.kind
+                else {
                     unreachable!("compiler bug: If must come from a SwitchInt")
                 };
+                // 2 分岐なので、値は 1 つしかない。
+                // それと一致したら then、しなければ els である。
+                let (value, _) = targets
+                    .iter()
+                    .next()
+                    .expect("compiler bug: a switch without a value");
                 self.emit_operand(out, discr, body, depth)?;
+                let _ = writeln!(out, "{pad}i32.const {value}");
+                let _ = writeln!(out, "{pad}i32.eq");
                 let _ = writeln!(out, "{pad}if");
                 for i in then {
                     self.emit_structured(out, i, body, depth + 1)?;
@@ -565,7 +624,9 @@ impl<'a> Emitter<'a> {
         }
 
         self.emit_place_base(out, place, body, depth)?;
-        self.emit_rvalue(out, rvalue, body, depth)?;
+        // 代入先の型は、集約がどの実体を作るかを決めるのに使う。
+        let dest_ty = Self::place_ty(place, body);
+        self.emit_rvalue(out, rvalue, dest_ty.as_ref(), body, depth)?;
         let _ = pad;
         self.emit_store(out, place, body, depth)
     }
@@ -591,11 +652,23 @@ impl<'a> Emitter<'a> {
 
         // 最後の 1 段を除いて読み進める。最後は書き込みになる。
         let mut current = body.local_decl(place.local).ty.clone();
+        let mut downcast: Option<String> = None;
         for elem in &place.projection[..place.projection.len() - 1] {
-            let PlaceElem::Field(name, ty) = elem;
-            let owner = self.struct_name_of(&current)?;
-            let _ = writeln!(out, "{pad}struct.get ${owner} {}", self.field_name(*name));
-            current = ty.clone();
+            match elem {
+                PlaceElem::Downcast(index) => {
+                    let child = self.variant_child_name(&current, *index)?;
+                    let _ = writeln!(out, "{pad}ref.cast (ref ${child})");
+                    downcast = Some(child);
+                }
+                PlaceElem::Field(name, ty) => {
+                    let owner = match downcast.take() {
+                        Some(child) => child,
+                        None => self.struct_name_of(&current)?,
+                    };
+                    let _ = writeln!(out, "{pad}struct.get ${owner} {}", self.field_name(*name));
+                    current = ty.clone();
+                }
+            }
         }
         Ok(())
     }
@@ -620,18 +693,57 @@ impl<'a> Emitter<'a> {
                 let owner = self.owner_ty_of(place, body)?;
                 let _ = writeln!(out, "{pad}struct.set ${owner} {}", self.field_name(*name));
             }
+            // 検査で弾いてあるので、末尾が downcast になることはない。
+            Some(PlaceElem::Downcast(_)) => {
+                return Err(WasmError::UnsupportedType {
+                    ty: "a place ending with a downcast".to_string(),
+                });
+            }
         }
         Ok(())
     }
 
-    /// 射影の最後の 1 段が属する struct の型名。
+    /// 射影の最後の 1 段が属する型名。
+    ///
+    /// 直前が downcast ならバリアントの子型、そうでなければ struct 本体。
     fn owner_ty_of(&self, place: &Place, body: &Body) -> Result<String, WasmError> {
+        let head = &place.projection[..place.projection.len() - 1];
+        if let Some(PlaceElem::Downcast(index)) = head.last() {
+            let mut current = body.local_decl(place.local).ty.clone();
+            for elem in &head[..head.len() - 1] {
+                if let PlaceElem::Field(_, ty) = elem {
+                    current = ty.clone();
+                }
+            }
+            return self.variant_child_name(&current, *index);
+        }
+
         let mut current = body.local_decl(place.local).ty.clone();
-        for elem in &place.projection[..place.projection.len() - 1] {
-            let PlaceElem::Field(_, ty) = elem;
-            current = ty.clone();
+        for elem in head {
+            if let PlaceElem::Field(_, ty) = elem {
+                current = ty.clone();
+            }
         }
         self.struct_name_of(&current)
+    }
+
+    /// enum の型とバリアント番号から、子型の名前を引く。
+    fn variant_child_name(&self, ty: &Ty, index: u32) -> Result<String, WasmError> {
+        let TyKind::Defined(dt) = &ty.kind else {
+            return Err(WasmError::UnsupportedType {
+                ty: format!("{:?}", ty.kind),
+            });
+        };
+        let key = TyInstanceKey {
+            def_id: dt.def_id,
+            args: dt.genargs.clone(),
+        };
+        self.variant_ty_names
+            .get(&(key, index))
+            .cloned()
+            .ok_or_else(|| WasmError::UnsupportedType {
+                ty: format!("ty#{}/v{index}", dt.def_id.value()),
+            })
     }
 
     fn struct_name_of(&self, ty: &Ty) -> Result<String, WasmError> {
@@ -652,10 +764,20 @@ impl<'a> Emitter<'a> {
             })
     }
 
+    /// 射影の先の型。分からなければ `None`。
+    fn place_ty(place: &Place, body: &Body) -> Option<Ty> {
+        match place.projection.last() {
+            None => Some(body.local_decl(place.local).ty.clone()),
+            Some(PlaceElem::Field(_, ty)) => Some(ty.clone()),
+            Some(PlaceElem::Downcast(_)) => None,
+        }
+    }
+
     fn emit_rvalue(
         &self,
         out: &mut String,
         rvalue: &Rvalue,
+        dest_ty: Option<&Ty>,
         body: &Body,
         depth: usize,
     ) -> Result<(), WasmError> {
@@ -682,35 +804,64 @@ impl<'a> Emitter<'a> {
                 self.emit_operand(out, r, body, depth)?;
                 let _ = writeln!(out, "{pad}{}", bin_op(*op, is_float));
             }
-            Rvalue::Aggregate(def_id, members) => {
+            Rvalue::Aggregate(kind, members) => {
                 // struct.new はフィールドの宣言順に積む。
                 // MIR の並びは書いた順だが、要素はすべて local か定数で
                 // 副作用が無いので、並べ替えてよい。
-                let key = self.aggregate_key(def_id, members, body)?;
-                let name = self
-                    .ty_names
-                    .get(&key)
-                    .ok_or_else(|| WasmError::UnsupportedType {
-                        ty: format!("ty#{}", def_id.value()),
-                    })?;
+                let key = self.aggregate_key(kind, members, dest_ty, body)?;
                 let def = self
                     .mono
                     .types
                     .iter()
                     .find(|d| d.key == key)
                     .expect("compiler bug: the type name exists but the definition does not");
-                let MonoTyDefKind::Struct { members: fields } = &def.kind else {
-                    unreachable!()
-                };
-                for (field, _) in fields {
-                    let op = members
-                        .iter()
-                        .find(|(n, _)| n == field)
-                        .map(|(_, op)| op)
-                        .expect("compiler bug: a struct literal is missing a member");
-                    self.emit_operand(out, op, body, depth)?;
+
+                match (kind, &def.kind) {
+                    (AggregateKind::Struct(_), MonoTyDefKind::Struct { members: fields }) => {
+                        for (field, _) in fields {
+                            let op = members
+                                .iter()
+                                .find(|(n, _)| n == field)
+                                .map(|(_, op)| op)
+                                .expect("compiler bug: a struct literal is missing a member");
+                            self.emit_operand(out, op, body, depth)?;
+                        }
+                        let _ = writeln!(out, "{pad}struct.new ${}", self.ty_names[&key]);
+                    }
+                    (AggregateKind::Enum(_, index), MonoTyDefKind::Enum { variants }) => {
+                        let variant = variants.get(*index as usize).ok_or_else(|| {
+                            WasmError::UnsupportedType {
+                                ty: format!("ty#{}/v{index}", kind.def_id().value()),
+                            }
+                        })?;
+
+                        // タグを先に積む。子型のフィールドはタグ + payload の順である。
+                        let _ = writeln!(out, "{pad}i32.const {index}");
+                        for (field, _) in &variant.fields {
+                            let op = members
+                                .iter()
+                                .find(|(n, _)| n == field)
+                                .map(|(_, op)| op)
+                                .expect("compiler bug: a variant is missing a field");
+                            self.emit_operand(out, op, body, depth)?;
+                        }
+
+                        let child = &self.variant_ty_names[&(key.clone(), *index)];
+                        let _ = writeln!(out, "{pad}struct.new ${child}");
+                    }
+                    _ => {
+                        return Err(WasmError::UnsupportedType {
+                            ty: format!("ty#{}", kind.def_id().value()),
+                        });
+                    }
                 }
-                let _ = writeln!(out, "{pad}struct.new ${name}");
+            }
+
+            // タグは親型のフィールドなので、キャストせずに読める。
+            Rvalue::Discriminant(place) => {
+                self.emit_operand(out, &Operand::Place(place.clone()), body, depth)?;
+                let owner = self.struct_name_of(&body.local_decl(place.local).ty)?;
+                let _ = writeln!(out, "{pad}struct.get ${owner} {ENUM_TAG_FIELD}");
             }
         }
         Ok(())
@@ -722,25 +873,52 @@ impl<'a> Emitter<'a> {
     /// メンバの型から実体を絞る。
     fn aggregate_key(
         &self,
-        def_id: &TyDefId,
+        kind: &AggregateKind,
         members: &[(InternedIdent, Operand)],
+        dest_ty: Option<&Ty>,
         body: &Body,
     ) -> Result<TyInstanceKey, WasmError> {
+        let def_id = kind.def_id();
+
+        // 代入先の型が分かっていればそれが答えである。
+        //
+        // フィールドの型から絞る下の経路は、フィールドを持たないもの
+        // (enum の unit バリアントなど) では実体を選べない。
+        if let Some(Ty {
+            kind: TyKind::Defined(dt),
+            ..
+        }) = dest_ty
+            && dt.def_id == def_id
+        {
+            return Ok(TyInstanceKey {
+                def_id,
+                args: dt.genargs.clone(),
+            });
+        }
+
         let candidates: Vec<_> = self
             .mono
             .types
             .iter()
-            .filter(|d| d.key.def_id == *def_id)
+            .filter(|d| d.key.def_id == def_id)
             .collect();
         if let [only] = candidates.as_slice() {
             return Ok(only.key.clone());
         }
 
-        // 複数あるならメンバの型で見分ける。
+        // 複数あるならフィールドの型で見分ける。
         for cand in &candidates {
-            let MonoTyDefKind::Struct { members: fields } = &cand.kind else {
-                continue;
+            let fields: &[(InternedIdent, Ty)] = match (kind, &cand.kind) {
+                (AggregateKind::Struct(_), MonoTyDefKind::Struct { members }) => members.as_slice(),
+                (AggregateKind::Enum(_, index), MonoTyDefKind::Enum { variants }) => {
+                    match variants.get(*index as usize) {
+                        Some(v) => v.fields.as_slice(),
+                        None => continue,
+                    }
+                }
+                _ => continue,
             };
+
             let matched = fields.iter().all(|(name, ty)| {
                 members
                     .iter()
@@ -763,6 +941,8 @@ impl<'a> Emitter<'a> {
             Operand::Place(p) => Some(match p.projection.last() {
                 None => body.local_decl(p.local).ty.clone(),
                 Some(PlaceElem::Field(_, ty)) => ty.clone(),
+                // 検査で弾いてあるので、末尾が downcast になることはない。
+                Some(PlaceElem::Downcast(_)) => return None,
             }),
             Operand::Const(Const::Int(_)) => Some(Ty::new(TyKind::Int, biwac_span::Span::dummy())),
             Operand::Const(Const::Float(_)) => {
@@ -787,11 +967,29 @@ impl<'a> Emitter<'a> {
             Operand::Place(p) => {
                 let _ = writeln!(out, "{pad}local.get {}", Self::wasm_local(p.local, body));
                 let mut current = body.local_decl(p.local).ty.clone();
+                // downcast の直後は必ずフィールドの射影なので、
+                // キャストしてからその子型で読む。
+                let mut downcast: Option<String> = None;
                 for elem in &p.projection {
-                    let PlaceElem::Field(name, ty) = elem;
-                    let owner = self.struct_name_of(&current)?;
-                    let _ = writeln!(out, "{pad}struct.get ${owner} {}", self.field_name(*name));
-                    current = ty.clone();
+                    match elem {
+                        PlaceElem::Downcast(index) => {
+                            let child = self.variant_child_name(&current, *index)?;
+                            let _ = writeln!(out, "{pad}ref.cast (ref ${child})");
+                            downcast = Some(child);
+                        }
+                        PlaceElem::Field(name, ty) => {
+                            let owner = match downcast.take() {
+                                Some(child) => child,
+                                None => self.struct_name_of(&current)?,
+                            };
+                            let _ = writeln!(
+                                out,
+                                "{pad}struct.get ${owner} {}",
+                                self.field_name(*name)
+                            );
+                            current = ty.clone();
+                        }
+                    }
                 }
             }
             Operand::Const(c) => match c {

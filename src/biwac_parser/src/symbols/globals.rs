@@ -4,9 +4,9 @@ use biwac_lexer::{TkKindName, token::TkKind};
 use biwac_span::Span;
 
 use biwac_ast::{
-    ArgDecl, ArgDeclList, Attrs, FnDef, Globals, Ident, ImplBlock, ImportDecl, MethodArgDeclList,
-    MethodDef, NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias, NovelScene, RetTypRepr,
-    StructDef, TypeAlias, TypeDef,
+    ArgDecl, ArgDeclList, Attrs, EnumDef, FnDef, Globals, Ident, ImplBlock, ImportDecl,
+    MethodArgDeclList, MethodDef, NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias,
+    NovelScene, RetTypRepr, StructDef, TypRepr, TypeAlias, TypeDef, VariantDecl, VariantFieldsDecl,
 };
 
 use crate::{ExprOrStmt, ParseError, TokenStream};
@@ -314,6 +314,23 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         }
                     }
                 }
+                TkKind::KwEnum => {
+                    // "enum" <identifier> ( <generic-argument-declaration> )?
+                    //     "{" ( <variant> "," )* "}"
+                    self.next();
+
+                    let id = self.consume_identifier()?;
+                    let genargs = self.opt_consume_generic_argument_declaration()?;
+                    let variants = self.consume_variant_declarations()?;
+
+                    Ok(Some(Globals::TypeDef(TypeDef::Enum(EnumDef {
+                        id,
+                        def_id: OnceCell::new(),
+                        variants,
+                        genargs,
+                        attrs,
+                    }))))
+                }
                 TkKind::KwType => {
                     if self.has_native_attr(&attrs) {
                         // "type" <identifier> ( <generic-argument-declaration> )?
@@ -495,6 +512,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     expecteds: vec![
                         TkKindName::KwFn,
                         TkKindName::KwStruct,
+                        TkKindName::KwEnum,
                         TkKindName::KwType,
                         TkKindName::KwImport,
                         TkKindName::KwImpl,
@@ -505,6 +523,134 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             }
         } else {
             Ok(None)
+        }
+    }
+
+    /// `{ Red, Rgb(Int, Int), Named { x: Int }, }`
+    ///
+    /// 宣言順がそのままタグの値になるので、並べ替えずに返す。
+    fn consume_variant_declarations(&mut self) -> Result<Vec<VariantDecl>, ParseError<'src>> {
+        let mod_id = self.mod_id;
+        let _ = self.must_consume_next(vec![TkKindName::MarkLBrace])?;
+
+        let mut variants = Vec::new();
+
+        loop {
+            let t = self.peek().ok_or(ParseError::InvalidEOF {
+                mod_id,
+                expecteds: vec![TkKindName::Ident, TkKindName::MarkRBrace],
+            })?;
+
+            if let TkKind::MarkRBrace = t.kind {
+                self.next();
+                return Ok(variants);
+            }
+
+            let id = self.consume_identifier()?;
+            let begin = id.span.clone();
+
+            let (fields, end) = match self.peek().map(|t| &t.kind) {
+                // タプル形式。中身は型の並び。
+                Some(TkKind::MarkLPare) => {
+                    let (typs, span) = self.consume_variant_tuple_fields()?;
+                    (VariantFieldsDecl::Tuple(typs), span)
+                }
+                // 構造体形式。メンバ宣言と同じ書き方をする。
+                Some(TkKind::MarkLBrace) => {
+                    let (members, span) = self.consume_variant_struct_fields()?;
+                    (VariantFieldsDecl::Struct(members), span)
+                }
+                _ => (VariantFieldsDecl::Unit, begin.clone()),
+            };
+
+            variants.push(VariantDecl {
+                id,
+                def_id: OnceCell::new(),
+                fields,
+                span: Span::merge(&begin, &end),
+            });
+
+            let t = self.must_consume_next(vec![TkKindName::MarkComma, TkKindName::MarkRBrace])?;
+            if let TkKind::MarkRBrace = t.kind {
+                return Ok(variants);
+            }
+        }
+    }
+
+    fn consume_variant_tuple_fields(
+        &mut self,
+    ) -> Result<(Vec<(Ident, TypRepr)>, Span), ParseError<'src>> {
+        let mod_id = self.mod_id;
+        let begin = self
+            .must_consume_next(vec![TkKindName::MarkLPare])?
+            .span
+            .clone();
+
+        let mut typs = Vec::new();
+
+        loop {
+            let t = self.peek().ok_or(ParseError::InvalidEOF {
+                mod_id,
+                expecteds: vec![TkKindName::MarkRPare],
+            })?;
+
+            if let TkKind::MarkRPare = t.kind {
+                let end = t.span.clone();
+                self.next();
+                return Ok((typs, Span::merge(&begin, &end)));
+            }
+
+            let typ = self.consume_type_representaion()?;
+            let name = self.interner.get_or_insert(&format!("_{}", typs.len()));
+            typs.push((
+                Ident {
+                    id: name,
+                    // 名前はソースに書かれていないので、型の位置を借りる。
+                    span: typ.span.clone(),
+                },
+                typ,
+            ));
+
+            let t = self.must_consume_next(vec![TkKindName::MarkComma, TkKindName::MarkRPare])?;
+            if let TkKind::MarkRPare = t.kind {
+                let end = t.span.clone();
+                return Ok((typs, Span::merge(&begin, &end)));
+            }
+        }
+    }
+
+    fn consume_variant_struct_fields(
+        &mut self,
+    ) -> Result<(Vec<(Ident, TypRepr)>, Span), ParseError<'src>> {
+        let mod_id = self.mod_id;
+        let begin = self
+            .must_consume_next(vec![TkKindName::MarkLBrace])?
+            .span
+            .clone();
+
+        let mut members = Vec::new();
+
+        loop {
+            let t = self.peek().ok_or(ParseError::InvalidEOF {
+                mod_id,
+                expecteds: vec![TkKindName::Ident, TkKindName::MarkRBrace],
+            })?;
+
+            if let TkKind::MarkRBrace = t.kind {
+                let end = t.span.clone();
+                self.next();
+                return Ok((members, Span::merge(&begin, &end)));
+            }
+
+            let id = self.consume_identifier()?;
+            let typ = self.must_consume_type_annotation()?;
+            members.push((id, typ));
+
+            let t = self.must_consume_next(vec![TkKindName::MarkComma, TkKindName::MarkRBrace])?;
+            if let TkKind::MarkRBrace = t.kind {
+                let end = t.span.clone();
+                return Ok((members, Span::merge(&begin, &end)));
+            }
         }
     }
 

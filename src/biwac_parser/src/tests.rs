@@ -231,3 +231,167 @@ fn foo(flag: Bool) {
         );
     }
 }
+
+/// enum 宣言と match のパース。
+mod enum_and_match {
+    use biwac_ast::{
+        EnumDef, Globals, MatchExprArm, Pattern, PatternFields, Primary, Stmt, TypeDef,
+        VariantFieldsDecl,
+    };
+    use biwac_base::{IdentInterner, ModId, ModPath};
+
+    fn parse(src: &str) -> (Vec<Globals>, IdentInterner) {
+        let mod_id = ModId::new_in_self(0);
+        let mut interner = IdentInterner::new();
+
+        let tokens = biwac_lexer::lex(&mut interner, mod_id, src).unwrap();
+        let module = crate::Parser::new(mod_id, ModPath::Main, tokens, &mut interner)
+            .try_parse()
+            .unwrap_or_else(|e| panic!("parse failed: {e:#?}"));
+
+        (module.globals, interner)
+    }
+
+    fn enum_def(globals: Vec<Globals>) -> EnumDef {
+        match globals.into_iter().next().unwrap() {
+            Globals::TypeDef(TypeDef::Enum(e)) => e,
+            g => panic!("not an enum: {g:#?}"),
+        }
+    }
+
+    #[test]
+    fn three_shapes_of_variant() {
+        let (globals, interner) = parse(
+            r#"
+enum Color {
+    Red,
+    Rgb(Int, Int, Int),
+    Named { name: Int, alpha: Int },
+}
+"#,
+        );
+
+        let e = enum_def(globals);
+        assert_eq!("Color", interner.get_str(&e.id.id).unwrap());
+        assert_eq!(3, e.variants.len());
+
+        assert!(matches!(e.variants[0].fields, VariantFieldsDecl::Unit));
+        match &e.variants[1].fields {
+            VariantFieldsDecl::Tuple(typs) => assert_eq!(3, typs.len()),
+            other => panic!("not a tuple variant: {other:#?}"),
+        }
+        match &e.variants[2].fields {
+            VariantFieldsDecl::Struct(members) => assert_eq!(2, members.len()),
+            other => panic!("not a struct variant: {other:#?}"),
+        }
+    }
+
+    #[test]
+    fn generic_enum() {
+        let (globals, _) = parse("enum Option[T] { None, Some(T), }");
+
+        let e = enum_def(globals);
+        assert_eq!(1, e.genargs.as_ref().unwrap().genargs.len());
+        assert_eq!(2, e.variants.len());
+    }
+
+    /// アームが値を返すなら match は式になる。
+    #[test]
+    fn match_as_expression() {
+        let (globals, _) = parse(
+            r#"
+fn f(o: Int) -> Int {
+    let n = match o {
+        Option::None => 0,
+        Option::Some(x) => x,
+    };
+    n
+}
+"#,
+        );
+
+        let Globals::FnDef(f) = globals.into_iter().next().unwrap() else {
+            panic!("not a function");
+        };
+        let Stmt::VarDecl(decl) = f.stmts.first().unwrap() else {
+            panic!("not a let: {:#?}", f.stmts);
+        };
+        let biwac_ast::Exprs::Primary(Primary::Match(m)) = &decl.init else {
+            panic!("not a match expression: {:#?}", decl.init);
+        };
+
+        assert_eq!(2, m.arms.len());
+        assert_variant_pattern(&m.arms[0], PatternShape::Unit);
+        assert_variant_pattern(&m.arms[1], PatternShape::Tuple(1));
+    }
+
+    /// アームがブロック文なら match は文になる。
+    #[test]
+    fn match_as_statement() {
+        let (globals, _) = parse(
+            r#"
+fn f(c: Int) {
+    match c {
+        Color::Red => { let x = 0; }
+        Color::Named { name = n, alpha } => { let y = 0; }
+        _ => { let z = 0; }
+    }
+}
+"#,
+        );
+
+        let Globals::FnDef(f) = globals.into_iter().next().unwrap() else {
+            panic!("not a function");
+        };
+        let Stmt::Match(m) = f.stmts.first().unwrap() else {
+            panic!("not a match statement: {:#?}", f.stmts);
+        };
+
+        assert_eq!(3, m.arms.len());
+
+        match &m.arms[1].pattern {
+            Pattern::Variant(v) => match &v.fields {
+                // 省略形の `alpha` も同名への束縛として入っている。
+                PatternFields::Struct(fields) => {
+                    assert_eq!(2, fields.len());
+                    assert!(matches!(fields[1].1, Pattern::Ident(_)));
+                }
+                other => panic!("not a struct pattern: {other:#?}"),
+            },
+            other => panic!("not a variant pattern: {other:#?}"),
+        }
+
+        assert!(matches!(m.arms[2].pattern, Pattern::Wildcard(_)));
+    }
+
+    /// 単独の識別子は束縛としてパースされる。
+    /// バリアントかどうかは名前解決が決める。
+    #[test]
+    fn bare_identifier_is_a_binding() {
+        let (globals, _) = parse("fn f(c: Int) { match c { x => { let y = 0; } } }");
+
+        let Globals::FnDef(f) = globals.into_iter().next().unwrap() else {
+            panic!("not a function");
+        };
+        let Stmt::Match(m) = f.stmts.first().unwrap() else {
+            panic!("not a match statement");
+        };
+        assert!(matches!(m.arms[0].pattern, Pattern::Ident(_)));
+    }
+
+    enum PatternShape {
+        Unit,
+        Tuple(usize),
+    }
+
+    fn assert_variant_pattern(arm: &MatchExprArm, shape: PatternShape) {
+        let Pattern::Variant(v) = &arm.pattern else {
+            panic!("not a variant pattern: {:#?}", arm.pattern);
+        };
+        match (&v.fields, shape) {
+            (PatternFields::Unit, PatternShape::Unit) => {}
+            (PatternFields::Tuple(pats), PatternShape::Tuple(n)) => assert_eq!(n, pats.len()),
+            (other, _) => panic!("unexpected pattern fields: {other:#?}"),
+        }
+    }
+}

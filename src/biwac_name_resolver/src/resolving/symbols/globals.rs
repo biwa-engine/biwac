@@ -151,6 +151,60 @@ impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::StructDef {
     }
 }
 
+impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::EnumDef {
+    fn resolve(
+        &self,
+        ctx: &ModuleResolveCtx<'_>,
+        def_collector: &mut DefCollector,
+    ) -> Result<(), Vec<ResolveError>> {
+        let ctx = TyDefResolveCtx::new(
+            ctx,
+            &self.genargs,
+            def_collector,
+            *self.def_id.get().unwrap(),
+        )?;
+        let mut errors = Vec::new();
+
+        // バリアント名同士の重複は名前ツリーへの登録が検出する。
+        // ここではフィールドの型と、構造体形式のフィールド名の重複を見る。
+        for variant in &self.variants {
+            match &variant.fields {
+                biwac_ast::VariantFieldsDecl::Unit => {}
+                biwac_ast::VariantFieldsDecl::Tuple(fields) => {
+                    for (_, typ) in fields {
+                        ctx.resolve_typ(typ).handle(&mut errors);
+                    }
+                }
+                biwac_ast::VariantFieldsDecl::Struct(fields) => {
+                    let mut seen = HashMap::new();
+                    for (ident, typ) in fields {
+                        match seen.entry(ident.id) {
+                            Entry::Vacant(e) => {
+                                e.insert(&ident.span);
+                            }
+                            Entry::Occupied(e) => {
+                                errors.push(ResolveError::DuplicatedStructMember {
+                                    name: ident.id,
+                                    span1: e.get().to_owned().clone(),
+                                    span2: ident.span.clone(),
+                                });
+                            }
+                        }
+
+                        ctx.resolve_typ(typ).handle(&mut errors);
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
 impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::TypeAlias {
     fn resolve(
         &self,

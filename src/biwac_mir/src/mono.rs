@@ -94,10 +94,20 @@ pub enum MonoTyDefKind {
     /// HIR 側の表が `HashMap` なので、ここで順序を正準化している。
     Struct { members: Vec<(InternedIdent, Ty)> },
 
+    /// バリアントは **宣言順**。添字がそのままタグの値になる。
+    Enum { variants: Vec<MonoVariant> },
+
     /// `[[native(arch = "...")]] type Vec[T] = {{ ... }}`
     ///
     /// 中身は不透明な文字列のまま。どの arch 向けかは HIR がまだ持っていない。
     Native { code: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonoVariant {
+    pub name: InternedIdent,
+    /// 宣言順。タプル形式は `_0`, `_1` の名前を持つ。
+    pub fields: Vec<(InternedIdent, Ty)>,
 }
 
 impl MonoMir {

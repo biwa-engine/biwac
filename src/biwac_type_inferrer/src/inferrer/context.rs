@@ -5,11 +5,11 @@ use std::sync::Arc;
 use biwac_base::{IdentInterner, InternedIdent, PackageId};
 use biwac_dependency_metadata::DepMetadata;
 use biwac_hir::{
-    AssocValDefKind, DefinedTyImpl, ExprId, FnSignature, Hir, Ident, InferTy, Ty, TyDefKind,
-    TyKind, TyVar, ValDefKind,
+    AssocValDefKind, DefinedTyImpl, EnumDef, ExprId, FnSignature, Hir, Ident, InferTy, Ty,
+    TyDefKind, TyKind, TyVar, ValDefKind, VariantDef, VariantOwner,
 };
 use biwac_lang_item::{LangItem, LangItemKind, LangItemTable};
-use biwac_span::{LocalGenDefId, TyDefId, ValDefId, VarId};
+use biwac_span::{LocalGenDefId, TyDefId, ValDefId, VarId, VariantDefId};
 
 use crate::{TyError, TyErrorReport, TyNames, TyResult};
 
@@ -89,6 +89,7 @@ impl<'a> TyCtx<'a> {
 
         let ident = match content {
             TyDefKind::Struct(struct_def) => &struct_def.name,
+            TyDefKind::Enum(enum_def) => &enum_def.name,
             TyDefKind::NativeTypeAlias(alias_def) => &alias_def.name,
         };
 
@@ -250,6 +251,45 @@ impl<'a> TyCtx<'a> {
     pub(super) fn get_type_definition(&self, def_id: &TyDefId) -> Option<&TyDefKind> {
         self.get_ty_impl(def_id)
             .and_then(|di| di.ty_content.as_ref())
+    }
+
+    /// バリアントから親の enum と宣言を引く。
+    ///
+    /// 自パッケージ分は `Hir::variant_owners` にある。
+    /// 外部パッケージ分は `.biwameta` から遅延で引く。
+    pub(super) fn get_variant(&self, def_id: &VariantDefId) -> Option<(VariantOwner, VariantDef)> {
+        let owner = match self.hir.variant_owners.get(def_id) {
+            Some(owner) => *owner,
+            None => {
+                // 外部パッケージ。バリアントもシンボルとして載っているので、
+                // その本体から親 enum のシンボル番号と宣言順の添字を引く。
+                let pkg_id = def_id.pkg();
+                let dep = self.find_ext_dep(pkg_id)?;
+                let (enum_sym_idx, index) = dep.variant_owner(def_id.local_idx())?;
+
+                VariantOwner {
+                    enum_def_id: TyDefId::new(biwac_span::DefId::new(
+                        pkg_id,
+                        biwac_span::PackageLocalDefId::new(enum_sym_idx),
+                    )),
+                    index,
+                }
+            }
+        };
+
+        let TyDefKind::Enum(enum_def) = self.get_type_definition(&owner.enum_def_id)? else {
+            return None;
+        };
+
+        Some((owner, enum_def.variants.get(owner.index as usize)?.clone()))
+    }
+
+    /// enum の定義を引く。
+    pub(super) fn get_enum_definition(&self, def_id: &TyDefId) -> Option<&EnumDef> {
+        match self.get_type_definition(def_id)? {
+            TyDefKind::Enum(enum_def) => Some(enum_def),
+            _ => None,
+        }
     }
 
     pub(super) fn get_value_ty(&self, def_id: &ValDefId) -> Option<Ty> {

@@ -2,6 +2,7 @@ mod alias_expansion;
 mod expressions;
 mod globals;
 mod novel;
+pub(crate) mod patterns;
 mod statements;
 
 use std::collections::HashMap;
@@ -239,6 +240,10 @@ pub(crate) fn ty_def_id_kind_from_path(path: &Path) -> Result<TyDefIdKind, Resol
         DefIdKind::Mod(mod_id) => Err(ResolveError::TypeNotFoundModuleFound {
             path: Box::new(path.clone()),
             mod_id,
+        }),
+        // バリアントは値であって型ではない。
+        DefIdKind::Variant(_) => Err(ResolveError::VariantExpected {
+            path: Box::new(path.clone()),
         }),
         DefIdKind::Val(def_id) => Err(ResolveError::TypeNotFoundValueFound {
             path: Box::new(path.clone()),

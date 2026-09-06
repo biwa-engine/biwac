@@ -29,8 +29,8 @@ use biwac_dependency_metadata::DepMetadata;
 use biwac_hir::{DefinedTy, FnTy, Hir, Ty, TyDefKind, TyKind};
 use biwac_mir::{
     Body, Callee, Const, GenArgs, InstanceKey, Mir, MirItem, MonoInstance, MonoMir, MonoTyDef,
-    MonoTyDefKind, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind, StringPool,
-    TerminatorKind, TyInstanceKey,
+    MonoTyDefKind, MonoVariant, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind,
+    StringPool, TerminatorKind, TyInstanceKey,
 };
 use biwac_span::{LocalGenDefId, TyDefId, ValDefId};
 
@@ -463,9 +463,10 @@ impl<'a> Collector<'a> {
             projection: place
                 .projection
                 .iter()
-                .map(|elem| {
-                    let PlaceElem::Field(name, ty) = elem;
-                    PlaceElem::Field(*name, self.subst_ty(ty, subst))
+                .map(|elem| match elem {
+                    PlaceElem::Field(name, ty) => PlaceElem::Field(*name, self.subst_ty(ty, subst)),
+                    // downcast は型を持たないので置き換えるものがない。
+                    PlaceElem::Downcast(index) => PlaceElem::Downcast(*index),
                 })
                 .collect(),
         }
@@ -485,13 +486,15 @@ impl<'a> Collector<'a> {
                 self.subst_operand(l, subst, owner),
                 self.subst_operand(r, subst, owner),
             ),
-            Rvalue::Aggregate(def_id, members) => Rvalue::Aggregate(
-                *def_id,
+            Rvalue::Aggregate(kind, members) => Rvalue::Aggregate(
+                kind.clone(),
                 members
                     .iter()
                     .map(|(name, op)| (*name, self.subst_operand(op, subst, owner)))
                     .collect(),
             ),
+            // 射影の中の型は `subst_place` が置き換える。
+            Rvalue::Discriminant(place) => Rvalue::Discriminant(self.subst_place(place, subst)),
         }
     }
 
@@ -587,6 +590,31 @@ impl<'a> Collector<'a> {
                     .collect();
 
                 MonoTyDefKind::Struct { members }
+            }
+            TyDefKind::Enum(e) => {
+                let gen_subst: HashMap<biwac_span::GenDefId, Ty> = e
+                    .genargs
+                    .iter()
+                    .zip(key.args.iter())
+                    .map(|(g, ty)| (*g, ty.clone()))
+                    .collect();
+
+                // バリアントもフィールドも **宣言順のまま**。
+                // 添字がタグの値で、フィールドは位置で対応するので並べ替えられない。
+                let variants = e
+                    .variants
+                    .iter()
+                    .map(|v| MonoVariant {
+                        name: v.name.id,
+                        fields: v
+                            .fields
+                            .iter()
+                            .map(|(name, ty)| (name.id, self.subst_ty_gen(ty, &gen_subst)))
+                            .collect(),
+                    })
+                    .collect();
+
+                MonoTyDefKind::Enum { variants }
             }
             TyDefKind::NativeTypeAlias(a) => MonoTyDefKind::Native {
                 code: a.native.clone(),

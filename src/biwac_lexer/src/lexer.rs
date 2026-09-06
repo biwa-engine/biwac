@@ -209,6 +209,7 @@ pub(crate) fn pre_lex<'src>(
                             ('=', '=') => Some(TkKind::MarkEqual),
                             ('!', '=') => Some(TkKind::MarkNotEq),
                             ('-', '>') => Some(TkKind::MarkArrow),
+                            ('=', '>') => Some(TkKind::MarkFatArrow),
                             (':', ':') => Some(TkKind::MarkDoubleColon),
                             _ => None,
                         }

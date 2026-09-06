@@ -43,6 +43,10 @@ pub fn lex<'src>(
                     "Float" => TkKind::KwFloat,
                     "Bool" => TkKind::KwBool,
                     "struct" => TkKind::KwStruct,
+                    "enum" => TkKind::KwEnum,
+                    "match" => TkKind::KwMatch,
+                    // `_` 単体だけがワイルドカードである。`_foo` は識別子のまま。
+                    "_" => TkKind::KwUnderscore,
                     "impl" => TkKind::KwImpl,
                     "Self" => TkKind::KwSelfTyp,
                     "self" => TkKind::KwSelfVar,

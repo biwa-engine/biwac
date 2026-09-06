@@ -1,6 +1,6 @@
 use std::cell::OnceCell;
 
-use biwac_span::{GenDefId, ImplId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
+use biwac_span::{GenDefId, ImplId, LocalGenDefId, Span, TyDefId, ValDefId, VarId, VariantDefId};
 
 use crate::{Attrs, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
@@ -23,6 +23,77 @@ pub struct StructDef {
     pub members: Vec<(Ident, TypRepr)>,
     pub genargs: Option<GenArgsDecl<GenDefId>>,
     pub attrs: Attrs,
+}
+
+//  enum
+//  ```
+//  enum Color {
+//    Red,
+//    Rgb(Int, Int, Int),
+//    Named { name: String, alpha: Int },
+//  }
+//  ```
+#[derive(Debug, Clone)]
+pub struct EnumDef {
+    pub id: Ident,
+    pub def_id: OnceCell<TyDefId>,
+    /// 宣言順。添字がそのままタグの値になるので、並べ替えてはならない。
+    pub variants: Vec<VariantDecl>,
+    pub genargs: Option<GenArgsDecl<GenDefId>>,
+    pub attrs: Attrs,
+}
+
+#[derive(Debug, Clone)]
+pub struct VariantDecl {
+    pub id: Ident,
+    pub def_id: OnceCell<VariantDefId>,
+    pub fields: VariantFieldsDecl,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum VariantFieldsDecl {
+    /// `Red`
+    Unit,
+    /// `Rgb(Int, Int, Int)`
+    ///
+    /// 名前は `_0`, `_1` に正規化してある。
+    /// 名前を持つ形に揃えておけば、MIR も backend も struct と同じ経路を通れる。
+    /// interner を持っているのはパーサだけなので、そこで付ける。
+    Tuple(Vec<(Ident, TypRepr)>),
+    /// `Named { name: String }`
+    Struct(Vec<(Ident, TypRepr)>),
+}
+
+impl VariantFieldsDecl {
+    pub fn shape(&self) -> VariantShape {
+        match self {
+            Self::Unit => VariantShape::Unit,
+            Self::Tuple(_) => VariantShape::Tuple,
+            Self::Struct(_) => VariantShape::Struct,
+        }
+    }
+}
+
+/// バリアントの書き方。
+///
+/// 宣言と、構築・パターンの書き方が一致しているかの検査にだけ使う。
+/// 型としての意味は持たない (フィールドはどの形でも名前を持つ形に正規化される)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariantShape {
+    Unit,
+    Tuple,
+    Struct,
+}
+
+impl std::fmt::Display for VariantShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Unit => "unit",
+            Self::Tuple => "tuple",
+            Self::Struct => "struct",
+        })
+    }
 }
 
 //  type alias
@@ -162,7 +233,7 @@ pub struct ImplBlock {
 #[derive(Debug, Clone)]
 pub enum TypeDef {
     Struct(StructDef),
-    // Enum(EnumType),
+    Enum(EnumDef),
     TypeAlias(TypeAlias),
     NativeTypeAlias(NativeTypeAlias),
 }

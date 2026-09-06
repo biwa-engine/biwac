@@ -10,8 +10,8 @@
 use std::fmt;
 
 use crate::{
-    BasicBlock, Body, Callee, Local, Mir, MirItem, Operand, Place, Rvalue, StatementKind,
-    TerminatorKind,
+    BasicBlock, Body, Callee, Local, Mir, MirItem, Operand, Place, PlaceElem, Rvalue,
+    StatementKind, TerminatorKind,
 };
 use biwac_hir::TyKind;
 use biwac_span::ValDefId;
@@ -48,6 +48,12 @@ pub enum ValidationErrorKind {
     /// 本来起こらない。WASM への構造化変換がこの前提に乗るので、
     /// 崩れていないことをここで確かめる。
     IrreducibleCfg(BasicBlock),
+
+    /// `Downcast` の直後がフィールドの射影になっていない。
+    ///
+    /// downcast は「この値をこのバリアントとして見る」という印でしかなく、
+    /// 単体では値にならない。
+    DanglingDowncast(Place),
 }
 
 impl fmt::Display for ValidationError {
@@ -70,6 +76,11 @@ impl fmt::Display for ValidationError {
                 f,
                 "control flow graph is irreducible: bb{} is entered from outside its loop",
                 b.value()
+            ),
+            ValidationErrorKind::DanglingDowncast(p) => write!(
+                f,
+                "downcast on _{} is not followed by a field projection",
+                p.local.value()
             ),
         }
     }
@@ -152,6 +163,16 @@ fn check_place(place: &Place, local_count: usize, push: &mut impl FnMut(Validati
     if place.local.index() >= local_count {
         push(ValidationErrorKind::UndefinedLocal(place.local));
     }
+
+    // downcast はバリアントのフィールドを見るためだけのものなので、
+    // 直後に必ずフィールドの射影が続く。
+    for (i, elem) in place.projection.iter().enumerate() {
+        if matches!(elem, PlaceElem::Downcast(_))
+            && !matches!(place.projection.get(i + 1), Some(PlaceElem::Field(_, _)))
+        {
+            push(ValidationErrorKind::DanglingDowncast(place.clone()));
+        }
+    }
 }
 
 fn check_operand(
@@ -177,6 +198,7 @@ fn check_rvalue(rvalue: &Rvalue, local_count: usize, push: &mut impl FnMut(Valid
                 check_operand(op, local_count, push);
             }
         }
+        Rvalue::Discriminant(place) => check_place(place, local_count, push),
     }
 }
 

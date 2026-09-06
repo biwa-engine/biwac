@@ -134,6 +134,7 @@ attribute_table!(
         AttrShape::Value(AttrValueKind::String),
         &[
             Target::Struct,
+            Target::Enum,
             Target::TypeAlias,
             Target::NativeTypeAlias,
             Target::Fn,

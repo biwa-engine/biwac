@@ -1,17 +1,19 @@
 use std::{cell::OnceCell, collections::HashMap};
 
-use biwac_ast::PathSegmentResolution;
+use biwac_ast::{PathSegmentResolution, VariantShape};
 use biwac_span::{DefIdKind, VarId};
 
 use biwac_hir::{
     BinaryExpr, BlockExpr, Callee, DecledVar, DefinedTy, Expr, ExprId, ExprVal, FnCall, Ident,
-    IfExpr, Literal, MemberAccess, MethodCall, Primary, Stmt, StructLiteral, Ty, TyKind, UnaryExpr,
-    VarIdKind, Variable,
+    IfExpr, Literal, MatchExpr, MatchExprArm, MemberAccess, MethodCall, Primary, Stmt,
+    StructLiteral, Ty, TyKind, UnaryExpr, VarIdKind, Variable, VariantCtor, VariantCtorFields,
 };
 
 use crate::ResolveError;
 
-use super::{TyDefIdKind, def_id_kind_from_path, ty_def_id_kind_from_path};
+use super::{
+    TyDefIdKind, def_id_kind_from_path, patterns::lower_pattern, ty_def_id_kind_from_path,
+};
 
 pub(crate) struct ExprLowerCtx {
     // self_ty: Option<TyKind>,
@@ -86,6 +88,32 @@ pub(crate) fn lower_primary(
     errors: &mut Vec<ResolveError>,
 ) -> Option<Primary> {
     match prim {
+        // `Color::Named { name = x }` は構文の上では構造体リテラルだが、
+        // パスがバリアントに解決されていれば構造体形式のバリアント構築である。
+        biwac_ast::Primary::Literal(biwac_ast::Literal::Struct(s))
+            if matches!(def_id_kind_from_path(&s.path), Ok(DefIdKind::Variant(_))) =>
+        {
+            let Ok(DefIdKind::Variant(variant)) = def_id_kind_from_path(&s.path) else {
+                unreachable!()
+            };
+
+            let fields = s
+                .members
+                .iter()
+                .filter_map(|(ident, expr)| {
+                    Some((Ident::from(ident.clone()), lower_expr(ctx, expr, errors)?))
+                })
+                .collect();
+
+            Some(Primary::VariantCtor(VariantCtor {
+                variant,
+                fields: VariantCtorFields::Named(fields),
+                shape: VariantShape::Struct,
+                span: s.span.clone(),
+                resolved: OnceCell::new(),
+            }))
+        }
+
         biwac_ast::Primary::Literal(lit) => {
             Some(Primary::Literal(lower_literal(ctx, lit, errors)?))
         }
@@ -101,6 +129,15 @@ pub(crate) fn lower_primary(
                     Ok(DefIdKind::Val(vid)) => Some(Primary::Variable(Variable {
                         id: VarIdKind::Global(vid),
                         span,
+                    })),
+                    // `Color::Red` や、import した `Red`。
+                    // 構文の上では変数参照だが、意味は unit バリアントの構築である。
+                    Ok(DefIdKind::Variant(variant)) => Some(Primary::VariantCtor(VariantCtor {
+                        variant,
+                        fields: VariantCtorFields::Unit,
+                        shape: VariantShape::Unit,
+                        span,
+                        resolved: OnceCell::new(),
                     })),
                     // 値の位置にモジュールやパッケージ、ジェネリック引数が来た場合。
                     // 名前は解決できているが値ではないので、
@@ -129,6 +166,24 @@ pub(crate) fn lower_primary(
         },
 
         biwac_ast::Primary::FnCall(fn_call) => {
+            // `Color::Rgb(1, 2, 3)` は構文の上では関数呼び出しだが、
+            // パスがバリアントに解決されていればタプル形式の構築である。
+            if let Ok(DefIdKind::Variant(variant)) = def_id_kind_from_path(&fn_call.path) {
+                let args = fn_call
+                    .args
+                    .iter()
+                    .filter_map(|a| lower_expr(ctx, a, errors))
+                    .collect();
+
+                return Some(Primary::VariantCtor(VariantCtor {
+                    variant,
+                    fields: VariantCtorFields::Positional(args),
+                    shape: VariantShape::Tuple,
+                    span: fn_call.span.clone(),
+                    resolved: OnceCell::new(),
+                }));
+            }
+
             let callee = lower_callee(&fn_call.path, errors)?;
             let args = fn_call
                 .args
@@ -177,6 +232,27 @@ pub(crate) fn lower_primary(
                 then,
                 els,
                 span: if_expr.span.clone(),
+            }))
+        }
+
+        biwac_ast::Primary::Match(m) => {
+            let scrutinee = Box::new(lower_expr(ctx, &m.scrutinee, errors)?);
+            let arms = m
+                .arms
+                .iter()
+                .filter_map(|arm| {
+                    Some(MatchExprArm {
+                        pattern: lower_pattern(&arm.pattern, errors)?,
+                        body: lower_block_expr(ctx, &arm.body, errors)?,
+                        span: arm.span.clone(),
+                    })
+                })
+                .collect();
+
+            Some(Primary::Match(MatchExpr {
+                scrutinee,
+                arms,
+                span: m.span.clone(),
             }))
         }
 
@@ -275,6 +351,9 @@ fn lower_literal(
         biwac_ast::Literal::String(s) => Some(Literal::String(s.clone())),
         biwac_ast::Literal::Bool(b) => Some(Literal::Bool(b.clone())),
         biwac_ast::Literal::Struct(s) => {
+            // `Color::Named { name = x }` は構文の上では構造体リテラルだが、
+            // パスがバリアントに解決されていれば構造体形式の構築である。
+            // ここは `Literal` を返す関数なので、呼び出し側が先に見ている。
             let tid = match ty_def_id_kind_from_path(&s.path) {
                 Ok(TyDefIdKind::Ty(tid)) => tid,
                 Ok(_) => {

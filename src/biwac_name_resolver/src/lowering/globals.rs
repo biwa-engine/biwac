@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef};
+use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef, VariantFieldsDecl};
 use biwac_base::InternedIdent;
 use biwac_hir::{
-    AssocValDefKind, DefinedTy, DefinedTyImpl, FnArgDecl, FnBody, FnDef, FnSignature, Ident,
-    NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
-    TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
+    AssocValDefKind, DefinedTy, DefinedTyImpl, EnumDef, FnArgDecl, FnBody, FnDef, FnSignature,
+    Ident, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
+    TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind, VariantDef,
 };
 use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
 
@@ -272,6 +272,9 @@ pub(crate) fn lower_type_def(
         TypeDef::Struct(s) => {
             tys.push(lower_struct_def(s, errors));
         }
+        TypeDef::Enum(e) => {
+            tys.push(lower_enum_def(e, errors));
+        }
         TypeDef::NativeTypeAlias(n) => {
             tys.push(lower_native_type_alias(n));
         }
@@ -322,6 +325,76 @@ fn lower_struct_def(
         ty_def_id,
         DefinedTyImpl {
             ty_content: Some(ty_content.clone()),
+            vals: HashMap::new(),
+        },
+    )
+}
+
+/// enum を lower する。
+///
+/// タプル形式のフィールドは `_0`, `_1` に正規化する。
+/// 名前を持つ形に揃えておけば、MIR も backend も struct と同じ経路を通れる。
+fn lower_enum_def(
+    enum_def: &biwac_ast::EnumDef,
+    _errors: &mut Vec<ResolveError>,
+) -> (TyDefId, DefinedTyImpl) {
+    let ty_def_id = *enum_def
+        .def_id
+        .get()
+        .expect("compiler bug: def_id not assigned before lowering");
+
+    let genargs: Vec<GenDefId> = enum_def
+        .genargs
+        .as_ref()
+        .map(|gd| {
+            gd.genargs
+                .iter()
+                .map(|item| {
+                    *item
+                        .def_id
+                        .get()
+                        .expect("compiler bug: enum genarg def_id not set")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 宣言順のまま。添字がそのままタグの値になる。
+    let variants = enum_def
+        .variants
+        .iter()
+        .map(|variant| {
+            let fields = match &variant.fields {
+                VariantFieldsDecl::Unit => Vec::new(),
+                // タプル形式も `_0`, `_1` の名前を持つ形にパーサが揃えてある。
+                VariantFieldsDecl::Tuple(fields) | VariantFieldsDecl::Struct(fields) => fields
+                    .iter()
+                    .map(|(ident, typ)| (ident.clone().into(), ty_from_typ_repr(typ, None)))
+                    .collect(),
+            };
+
+            VariantDef {
+                name: variant.id.clone().into(),
+                def_id: *variant
+                    .def_id
+                    .get()
+                    .expect("compiler bug: variant def_id not assigned before lowering"),
+                shape: variant.fields.shape(),
+                fields,
+            }
+        })
+        .collect();
+
+    let ty_content = TyDefKind::Enum(Box::new(EnumDef {
+        name: enum_def.id.clone().into(),
+        variants,
+        genargs,
+    }));
+
+    (
+        ty_def_id,
+        DefinedTyImpl {
+            ty_content: Some(ty_content),
             vals: HashMap::new(),
         },
     )

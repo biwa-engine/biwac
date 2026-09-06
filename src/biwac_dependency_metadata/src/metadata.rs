@@ -70,10 +70,11 @@ impl DepMetadata {
 
         use biwac_base::ModPath;
         use biwac_hir::{AssocValDefKind, TyDefKind, ValDefKind};
-        use biwac_span::{GenDefId, LocalGenDefId, TyDefId, ValDefId};
+        use biwac_span::{GenDefId, LocalGenDefId, TyDefId, ValDefId, VariantDefId};
         use codec::DiskVec;
         use format::{
-            DiskGenArg, DiskModData, DiskNativeTypeAliasData, DiskStructData, DiskStructMember,
+            DiskEnumData, DiskGenArg, DiskModData, DiskNativeTypeAliasData, DiskStructData,
+            DiskStructMember, DiskVariantData,
         };
 
         // ====================================================
@@ -156,6 +157,28 @@ impl DepMetadata {
             .collect();
         alias_items.sort_by_key(|i| i.def_id.value());
 
+        // --- enum ---
+        struct EnumItem<'h> {
+            def_id: TyDefId,
+            def: &'h biwac_hir::EnumDef,
+        }
+        let mut enum_items: Vec<EnumItem> = hir
+            .tys
+            .iter()
+            .filter(|(def_id, _)| def_id.pkg().is_self())
+            .filter_map(|(def_id, def_impl)| {
+                if let Some(TyDefKind::Enum(e)) = &def_impl.ty_content {
+                    Some(EnumItem {
+                        def_id: *def_id,
+                        def: e.as_ref(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        enum_items.sort_by_key(|i| i.def_id.value());
+
         let mut ty_to_sym: HashMap<TyDefId, DiskSymbolIndex> = HashMap::new();
         let mut next_idx = 0u32;
         for item in &struct_items {
@@ -167,6 +190,24 @@ impl DepMetadata {
             ty_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
             symbol_index.insert_ty(item.def_id, next_idx);
             next_idx += 1;
+        }
+        for item in &enum_items {
+            ty_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
+            symbol_index.insert_ty(item.def_id, next_idx);
+            next_idx += 1;
+        }
+
+        // --- variant ---
+        //
+        // バリアント単体を import できるように、独立したシンボルにする。
+        // 宣言順で採番する。添字がそのままタグの値になるので順序を崩せない。
+        let mut variant_to_sym: HashMap<VariantDefId, DiskSymbolIndex> = HashMap::new();
+        for item in &enum_items {
+            for variant in &item.def.variants {
+                variant_to_sym.insert(variant.def_id, DiskSymbolIndex(next_idx));
+                symbol_index.insert_variant(variant.def_id, next_idx);
+                next_idx += 1;
+            }
         }
 
         // --- assoc fn (struct の impl に紐づく関数) ---
@@ -303,6 +344,18 @@ impl DepMetadata {
 
         // native type alias を所属モジュールに登録
         for item in &alias_items {
+            let mod_id = item.def.name.span.module();
+            if let Some(ms) = source_holder.mods.get(&mod_id)
+                && let Some(&sym) = ty_to_sym.get(&item.def_id)
+            {
+                mod_children.entry(ms.modu.clone()).or_default().push(sym);
+            }
+        }
+
+        // enum を所属モジュールに登録
+        //
+        // バリアントは enum の子なので、モジュールの直下には載せない。
+        for item in &enum_items {
             let mod_id = item.def.name.span.module();
             if let Some(ms) = source_holder.mods.get(&mod_id)
                 && let Some(&sym) = ty_to_sym.get(&item.def_id)
@@ -515,6 +568,139 @@ impl DepMetadata {
                 DiskSymbolKind::NativeTypeAlias,
                 body,
             );
+        }
+
+        // --- enum ボディ ---
+        for item in &enum_items {
+            let gen_ord: HashMap<GenDefId, u32> = item
+                .def
+                .genargs
+                .iter()
+                .enumerate()
+                .map(|(i, gid)| (*gid, i as u32))
+                .collect();
+            let enum_sym = ty_to_sym.get(&item.def_id).map(|s| s.0).unwrap_or(0);
+            for (gid, ord) in &gen_ord {
+                symbol_index.insert_ty_genarg(*gid, enum_sym, *ord);
+            }
+
+            let name_str = interner.get_str(&item.def.name.id).unwrap_or("");
+            let disk_name = strings.push(name_str);
+            let name_span = impl_to_disk_span(&item.def.name.span, &mod_to_file_idx);
+
+            let raw_code_text = source_holder
+                .mods
+                .get(&item.def.name.span.module())
+                .map(|ms| &ms.src[item.def.name.span.begin()..item.def.name.span.end()])
+                .unwrap_or("");
+            let def_raw_code = strings.push(raw_code_text);
+
+            let empty_name = strings.push("");
+            let disk_genargs = DiskVec(
+                item.def
+                    .genargs
+                    .iter()
+                    .map(|_| DiskGenArg {
+                        name: empty_name,
+                        name_span: DiskSpan {
+                            file: DiskFileIndex(0),
+                            begin: 0,
+                            end: 0,
+                        },
+                    })
+                    .collect(),
+            );
+
+            // バリアントは **宣言順のまま**。添字がそのままタグの値になる。
+            let variant_syms: Vec<DiskSymbolIndex> = item
+                .def
+                .variants
+                .iter()
+                .filter_map(|v| variant_to_sym.get(&v.def_id).copied())
+                .collect();
+
+            let assoc_syms: Vec<DiskSymbolIndex> = assoc_fn_items
+                .iter()
+                .filter(|af| af.parent_ty_def_id == item.def_id)
+                .filter_map(|af| val_to_sym.get(&af.val_def_id).copied())
+                .collect();
+
+            let body = SymbolBody::Enum(DiskEnumData {
+                name: disk_name,
+                name_span,
+                def_raw_code,
+                def_span: name_span,
+                genargs: disk_genargs,
+                variant_symbols: DiskVec(variant_syms),
+                assoc_symbols: DiskVec(assoc_syms),
+            });
+            push_body(
+                &mut body_builder,
+                &mut sym_hdrs,
+                &mut cache,
+                DiskSymbolKind::Enum,
+                body,
+            );
+        }
+
+        // --- variant ボディ ---
+        for item in &enum_items {
+            let gen_ord: HashMap<GenDefId, u32> = item
+                .def
+                .genargs
+                .iter()
+                .enumerate()
+                .map(|(i, gid)| (*gid, i as u32))
+                .collect();
+            let empty_loc_gen: HashMap<LocalGenDefId, u32> = HashMap::new();
+            let owner_sym = ty_to_sym
+                .get(&item.def_id)
+                .copied()
+                .unwrap_or(DiskSymbolIndex(0));
+
+            for (index, variant) in item.def.variants.iter().enumerate() {
+                let name_str = interner.get_str(&variant.name.id).unwrap_or("");
+                let disk_name = strings.push(name_str);
+                let name_span = impl_to_disk_span(&variant.name.span, &mod_to_file_idx);
+
+                // フィールドは **宣言順のまま**。
+                // タプル形式は位置で対応するので並べ替えられない。
+                let fields: Vec<DiskStructMember> = variant
+                    .fields
+                    .iter()
+                    .map(|(ident, ty)| {
+                        let field_name = strings.push(interner.get_str(&ident.id).unwrap_or(""));
+                        DiskStructMember {
+                            name: field_name,
+                            name_span: impl_to_disk_span(&ident.span, &mod_to_file_idx),
+                            ty: impl_encode_ty(
+                                ty,
+                                &ty_to_sym,
+                                &gen_ord,
+                                &empty_loc_gen,
+                                &mod_to_file_idx,
+                                &mut ext_syms,
+                            ),
+                        }
+                    })
+                    .collect();
+
+                let body = SymbolBody::Variant(DiskVariantData {
+                    name: disk_name,
+                    name_span,
+                    owner: owner_sym,
+                    index: index as u32,
+                    shape: variant_shape_to_disk(variant.shape),
+                    fields: DiskVec(fields),
+                });
+                push_body(
+                    &mut body_builder,
+                    &mut sym_hdrs,
+                    &mut cache,
+                    DiskSymbolKind::Variant,
+                    body,
+                );
+            }
         }
 
         // --- assoc fn ボディ ---
@@ -946,6 +1132,39 @@ impl DepMetadata {
                         h.write_u32(a.0);
                     }
                 }
+                SymbolBody::Enum(d) => {
+                    h.write_str("enum");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    self.svh_genargs(&mut h, &d.genargs.0);
+
+                    // バリアントは **順序が意味を持つ**。
+                    // 宣言順の添字がそのままタグの値になるので、
+                    // 並べ替えると生成物の意味が変わる。
+                    // struct のメンバを名前順に正準化しているのと逆である。
+                    h.write_usize(d.variant_symbols.0.len());
+                    for v in &d.variant_symbols.0 {
+                        h.write_u32(v.0);
+                    }
+
+                    h.write_usize(d.assoc_symbols.0.len());
+                    for a in &d.assoc_symbols.0 {
+                        h.write_u32(a.0);
+                    }
+                }
+                SymbolBody::Variant(d) => {
+                    h.write_str("variant");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    h.write_u32(d.owner.0);
+                    h.write_u32(d.index);
+                    h.write_u32(d.shape);
+
+                    // フィールドも宣言順のまま。
+                    h.write_usize(d.fields.0.len());
+                    for f in &d.fields.0 {
+                        h.write_str(self.get_str(f.name).unwrap_or(""));
+                        self.svh_ty(&mut h, &f.ty);
+                    }
+                }
                 SymbolBody::NativeTypeAlias(d) => {
                     h.write_str("native-type-alias");
                     self.svh_name(&mut h, d.name, &d.name_span);
@@ -1064,6 +1283,8 @@ impl DepMetadata {
             SymbolBody::Fn(d) => (d.name, d.name_span),
             SymbolBody::NativeTypeAlias(d) => (d.name, d.name_span),
             SymbolBody::Mod(d) => (d.name, d.name_span),
+            SymbolBody::Enum(d) => (d.name, d.name_span),
+            SymbolBody::Variant(d) => (d.name, d.name_span),
         };
 
         let name = self.get_str(name).ok()?;
@@ -1247,6 +1468,7 @@ impl DepMetadata {
     ) -> Option<biwac_hir::DefinedTyImpl> {
         match self.get_symbol_body(ty_sym_idx as usize).ok()? {
             SymbolBody::Struct(_) => self.impl_get_ext_struct_ty_impl(ty_sym_idx, pkg_id, interner),
+            SymbolBody::Enum(_) => self.impl_get_ext_enum_ty_impl(ty_sym_idx, pkg_id, interner),
             SymbolBody::NativeTypeAlias(_) => {
                 self.impl_get_ext_native_alias_ty_impl(ty_sym_idx, pkg_id, interner)
             }
@@ -1349,6 +1571,100 @@ impl DepMetadata {
             ty_content: Some(TyDefKind::Struct(Box::new(struct_def))),
             vals,
         })
+    }
+
+    /// 外部パッケージの enum を `DefinedTyImpl` に復元する。
+    fn impl_get_ext_enum_ty_impl(
+        &self,
+        enum_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::DefinedTyImpl> {
+        use biwac_hir::{DefinedTyImpl, EnumDef, Ident, TyDefKind, VariantDef};
+        use biwac_span::{DefId, GenDefId, PackageLocalDefId, Span, VariantDefId};
+
+        let body = self.get_symbol_body(enum_sym_idx as usize).ok()?;
+        let SymbolBody::Enum(enum_data) = body else {
+            return None;
+        };
+
+        let genargs: Vec<GenDefId> = (0..enum_data.genargs.0.len())
+            .map(|i| {
+                GenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_gen_id(enum_sym_idx, i as u32)),
+                ))
+            })
+            .collect();
+
+        // バリアントは宣言順のまま読む。並びがタグの値である。
+        let mut variants = Vec::with_capacity(enum_data.variant_symbols.0.len());
+        for variant_sym in &enum_data.variant_symbols.0 {
+            let variant_body = self.get_symbol_body(variant_sym.0 as usize).ok()?;
+            let SymbolBody::Variant(variant_data) = variant_body else {
+                continue;
+            };
+
+            let fields = variant_data
+                .fields
+                .0
+                .iter()
+                .map(|f| {
+                    let name_id = interner.get_or_insert(self.get_str(f.name).unwrap_or(""));
+                    (
+                        Ident {
+                            id: name_id,
+                            span: Span::dummy(),
+                        },
+                        // ジェネリック引数は enum のものを引くので、
+                        // 所属シンボルは enum のほうを渡す。
+                        self.impl_disk_ty_to_ty(&f.ty, pkg_id, Some(enum_sym_idx), None),
+                    )
+                })
+                .collect();
+
+            let name_id = interner.get_or_insert(self.get_str(variant_data.name).unwrap_or(""));
+            variants.push(VariantDef {
+                name: Ident {
+                    id: name_id,
+                    span: Span::dummy(),
+                },
+                def_id: VariantDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(variant_sym.0),
+                )),
+                shape: variant_shape_from_disk(variant_data.shape),
+                fields,
+            });
+        }
+
+        let enum_name_id = interner.get_or_insert(self.get_str(enum_data.name).unwrap_or(""));
+        let enum_def = EnumDef {
+            name: Ident {
+                id: enum_name_id,
+                span: Span::dummy(),
+            },
+            variants,
+            genargs,
+        };
+
+        let vals = self.impl_load_ext_assoc_vals(&enum_data.assoc_symbols.0, pkg_id, interner);
+
+        Some(DefinedTyImpl {
+            ty_content: Some(TyDefKind::Enum(Box::new(enum_def))),
+            vals,
+        })
+    }
+
+    /// バリアントのシンボルから (親 enum のシンボル番号, 宣言順の添字) を引く。
+    ///
+    /// `VariantDefId` は親も添字も持たないので、この表引きが要る。
+    pub fn variant_owner(&self, variant_sym_idx: u32) -> Option<(u32, u32)> {
+        let body = self.get_symbol_body(variant_sym_idx as usize).ok()?;
+        let SymbolBody::Variant(variant_data) = body else {
+            return None;
+        };
+        Some((variant_data.owner.0, variant_data.index))
     }
 
     /// DiskFnData → FnSignature 変換。fn_sym_idx を LocGenDefId の名前空間として使用する。
@@ -1840,6 +2156,24 @@ fn reserved_prim_disk_kind(def_id: biwac_span::TyDefId) -> Option<DiskTyKind> {
 ///
 /// 予約済みの [`TyDefId`] (Int/Float/Bool/Void) はプリミティブなので、
 /// 対応する [`TyKind`] にそのまま戻す。
+/// [`biwac_hir::VariantShape`] をディスク上の数値に落とす。
+fn variant_shape_to_disk(shape: biwac_hir::VariantShape) -> u32 {
+    match shape {
+        biwac_hir::VariantShape::Unit => 0,
+        biwac_hir::VariantShape::Tuple => 1,
+        biwac_hir::VariantShape::Struct => 2,
+    }
+}
+
+/// 逆変換。未知の値は unit として扱う (前方互換のため落とさない)。
+fn variant_shape_from_disk(shape: u32) -> biwac_hir::VariantShape {
+    match shape {
+        1 => biwac_hir::VariantShape::Tuple,
+        2 => biwac_hir::VariantShape::Struct,
+        _ => biwac_hir::VariantShape::Unit,
+    }
+}
+
 fn impl_self_ty_of(
     parent_ty_def_id: biwac_span::TyDefId,
     impl_genargs: &[biwac_hir::Ty],

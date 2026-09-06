@@ -6,8 +6,9 @@ use biwac_ast::{BinOperator, UnOperator};
 use biwac_base::InternedIdent;
 use biwac_hir::{
     AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprId, ExprVal, FnBody,
-    FnSignature, FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Primary, Stmt, StructLiteral,
-    Ty, TyDefKind, TyKind, TyVar, ValDefKind, VarIdKind,
+    FnSignature, FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Pattern, PatternFields, Primary,
+    ResolvedVariant, Stmt, StructLiteral, Ty, TyDefKind, TyKind, TyVar, ValDefKind, VarIdKind,
+    VariantCtor, VariantCtorFields,
 };
 use biwac_lang_item::LangItem;
 use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, VarId};
@@ -724,6 +725,25 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     })
                 }
             }
+            // enum 自体を構造体のようには初期化できない。
+            // バリアントを指す `Color::Named { .. }` は lowering で
+            // `VariantCtor` になっており、ここには来ない。
+            TyDefKind::Enum(enum_def) => Err(TyError::InvalidStructLiteralOnAliasType {
+                ty: Box::new(Ty::new(
+                    TyKind::Defined(DefinedTy {
+                        def_id: *def_id,
+                        genargs: vec![
+                            Ty::new(
+                                TyKind::Infer(InferTy::Unknown),
+                                struct_literal.span.clone()
+                            );
+                            enum_def.genargs.len()
+                        ],
+                    }),
+                    struct_literal.span.clone(),
+                )),
+                sliteral: Box::new(struct_literal.clone()),
+            }),
             TyDefKind::NativeTypeAlias(alias) => {
                 // native type alias を構造体のように初期化することは出来ない
                 Err(TyError::InvalidStructLiteralOnAliasType {
@@ -743,6 +763,333 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     sliteral: Box::new(struct_literal.clone()),
                 })
             }
+        }
+    }
+
+    // ---- enum ----
+
+    /// バリアントの構築を推論する。
+    ///
+    /// 宣言されたフィールドの型と実引数を順に単一化して、
+    /// enum のジェネリック引数を決める。構造体リテラルと同じ考え方である。
+    fn infer_variant_ctor(&mut self, ctor: &VariantCtor) -> TyResult<Ty> {
+        let (owner, variant) = self
+            .tctx
+            .get_variant(&ctor.variant)
+            .expect("compiler bug: variant not found for a resolved VariantDefId");
+
+        if variant.shape != ctor.shape {
+            return Err(TyError::VariantShapeMismatched {
+                declared: variant.shape,
+                found: ctor.shape,
+                span: ctor.span.clone(),
+            });
+        }
+
+        // codegen が enum の型注釈を出すので、外部パッケージなら import が要る。
+        self.tctx
+            .hir
+            .deps_recorder
+            .borrow_mut()
+            .depends_on_ty(&Ty::new(
+                TyKind::Defined(DefinedTy {
+                    def_id: owner.enum_def_id,
+                    genargs: Vec::new(),
+                }),
+                ctor.span.clone(),
+            ));
+
+        // 宣言順に (宣言された型, 実引数) を並べる。
+        let pairs: Vec<(&Ty, &Expr)> = match &ctor.fields {
+            VariantCtorFields::Unit => Vec::new(),
+            VariantCtorFields::Positional(args) => {
+                if args.len() != variant.fields.len() {
+                    return Err(TyError::VariantFieldCountMismatched {
+                        expected: variant.fields.len(),
+                        found: args.len(),
+                        span: ctor.span.clone(),
+                    });
+                }
+                variant
+                    .fields
+                    .iter()
+                    .zip(args)
+                    .map(|((_, ty), arg)| (ty, arg))
+                    .collect()
+            }
+            VariantCtorFields::Named(args) => {
+                let mut given: HashMap<InternedIdent, &Expr> = HashMap::new();
+                for (ident, expr) in args {
+                    if !variant.fields.iter().any(|(f, _)| f.id == ident.id) {
+                        return Err(TyError::VariantFieldNotFound {
+                            field: Box::new(ident.clone()),
+                        });
+                    }
+                    if given.insert(ident.id, expr).is_some() {
+                        return Err(TyError::StructLiteralMemberConfliced {
+                            member1: Box::new(ident.clone()),
+                            member2: Box::new(ident.clone()),
+                        });
+                    }
+                }
+
+                let missing: Vec<InternedIdent> = variant
+                    .fields
+                    .iter()
+                    .filter(|(f, _)| !given.contains_key(&f.id))
+                    .map(|(f, _)| f.id)
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(TyError::VariantFieldInsufficient {
+                        missing,
+                        span: ctor.span.clone(),
+                    });
+                }
+
+                variant
+                    .fields
+                    .iter()
+                    .map(|(f, ty)| (ty, given[&f.id]))
+                    .collect()
+            }
+        };
+
+        let enum_def = self
+            .tctx
+            .get_enum_definition(&owner.enum_def_id)
+            .expect("compiler bug: enum definition not found")
+            .clone();
+
+        let mut dtctx = DefinedTyCtx::default();
+        for (declared, arg) in pairs {
+            let user_ty = self.infer_expr(arg)?;
+            self.defined_ty_unify(
+                Ty::new(declared.kind.clone(), arg.span()),
+                user_ty,
+                &mut dtctx,
+            )?;
+        }
+
+        // 引数に現れないジェネリック引数は、この時点では決まらない。
+        // 型変数を割り当てて、外側の文脈で解かれた結果を最後に拾う
+        // (`Option::None` の `T` がこれにあたる)。
+        let genargs = enum_def
+            .genargs
+            .iter()
+            .map(|gid| match dtctx.gen_assigns.get(gid) {
+                Some(ty) => ty.clone(),
+                None => Ty::new(self.fresh(), ctor.span.clone()),
+            })
+            .collect();
+
+        ctor.resolved
+            .set(ResolvedVariant {
+                enum_def_id: owner.enum_def_id,
+                index: owner.index,
+                field_names: variant.fields.iter().map(|(f, _)| f.id).collect(),
+            })
+            .ok();
+
+        Ok(Ty::new(
+            TyKind::Defined(DefinedTy {
+                def_id: owner.enum_def_id,
+                genargs,
+            }),
+            ctor.span.clone(),
+        ))
+    }
+
+    /// アームのパターンを検査し、束縛する変数に型を付ける。
+    ///
+    /// `scrutinee` は既に `apply_ty` 済みの、対象の enum の型である。
+    fn check_pattern(&mut self, pattern: &Pattern, scrutinee: &Ty) -> TyResult<()> {
+        let Pattern::Variant(vp) = pattern else {
+            // `_` は何も束縛しない。裸の識別子は対象の型そのものを束縛する。
+            if let Pattern::Binding(var_id, _) = pattern {
+                self.vars.insert(*var_id, scrutinee.clone());
+            }
+            return Ok(());
+        };
+
+        let TyKind::Defined(defined) = &scrutinee.kind else {
+            return Err(TyError::MatchOnNonEnum {
+                ty: Box::new(scrutinee.clone()),
+                span: vp.span.clone(),
+            });
+        };
+
+        let (owner, variant) = self
+            .tctx
+            .get_variant(&vp.variant)
+            .expect("compiler bug: variant not found for a resolved VariantDefId");
+
+        if owner.enum_def_id != defined.def_id {
+            return Err(TyError::VariantOfAnotherEnum {
+                ty: Box::new(scrutinee.clone()),
+                span: vp.span.clone(),
+            });
+        }
+
+        if variant.shape != vp.shape {
+            return Err(TyError::VariantShapeMismatched {
+                declared: variant.shape,
+                found: vp.shape,
+                span: vp.span.clone(),
+            });
+        }
+
+        // フィールドの型に現れるジェネリック型を、対象の型引数で置き換える。
+        let enum_def = self
+            .tctx
+            .get_enum_definition(&owner.enum_def_id)
+            .expect("compiler bug: enum definition not found")
+            .clone();
+        let assigns: HashMap<GenDefId, TyKind> = enum_def
+            .genargs
+            .iter()
+            .copied()
+            .zip(defined.genargs.iter().map(|t| t.kind.clone()))
+            .collect();
+
+        // 宣言順に (フィールド名, 束縛) を並べる。
+        let bindings: Vec<(InternedIdent, Option<VarId>)> = match &vp.fields {
+            PatternFields::Unit => Vec::new(),
+            PatternFields::Positional(binds) => {
+                if binds.len() != variant.fields.len() {
+                    return Err(TyError::VariantFieldCountMismatched {
+                        expected: variant.fields.len(),
+                        found: binds.len(),
+                        span: vp.span.clone(),
+                    });
+                }
+                variant
+                    .fields
+                    .iter()
+                    .zip(binds)
+                    .map(|((f, _), b)| (f.id, b.var_id()))
+                    .collect()
+            }
+            PatternFields::Named(fields) => {
+                let mut given: HashMap<InternedIdent, Option<VarId>> = HashMap::new();
+                for (ident, bind) in fields {
+                    if !variant.fields.iter().any(|(f, _)| f.id == ident.id) {
+                        return Err(TyError::VariantFieldNotFound {
+                            field: Box::new(ident.clone()),
+                        });
+                    }
+                    given.insert(ident.id, bind.var_id());
+                }
+
+                // `..` は入れていないので、すべてのフィールドを書く必要がある。
+                let missing: Vec<InternedIdent> = variant
+                    .fields
+                    .iter()
+                    .filter(|(f, _)| !given.contains_key(&f.id))
+                    .map(|(f, _)| f.id)
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(TyError::VariantFieldInsufficient {
+                        missing,
+                        span: vp.span.clone(),
+                    });
+                }
+
+                variant
+                    .fields
+                    .iter()
+                    .map(|(f, _)| (f.id, given[&f.id]))
+                    .collect()
+            }
+        };
+
+        for ((_, var_id), (_, declared)) in bindings.iter().zip(variant.fields.iter()) {
+            if let Some(var_id) = var_id {
+                let ty = declared.clone().embody_by_gen_ty_id(&assigns);
+                self.vars.insert(*var_id, ty);
+            }
+        }
+
+        vp.resolved
+            .set(ResolvedVariant {
+                enum_def_id: owner.enum_def_id,
+                index: owner.index,
+                field_names: variant.fields.iter().map(|(f, _)| f.id).collect(),
+            })
+            .ok();
+
+        Ok(())
+    }
+
+    /// `match` のアーム全体を検査する。
+    ///
+    /// 網羅性はネストが無いので集合の被覆判定で済む。
+    fn check_match_arms(
+        &mut self,
+        scrutinee: &Ty,
+        patterns: &[&Pattern],
+        span: &Span,
+    ) -> TyResult<()> {
+        let mut covered: HashSet<u32> = HashSet::new();
+        let mut has_catch_all = false;
+
+        for pattern in patterns {
+            if has_catch_all {
+                return Err(TyError::UnreachableMatchArm {
+                    span: pattern.span(),
+                });
+            }
+
+            self.check_pattern(pattern, scrutinee)?;
+
+            match pattern {
+                Pattern::Wildcard(_) | Pattern::Binding(_, _) => has_catch_all = true,
+                Pattern::Variant(vp) => {
+                    let index = vp
+                        .resolved
+                        .get()
+                        .expect("compiler bug: pattern was not resolved")
+                        .index;
+                    if !covered.insert(index) {
+                        return Err(TyError::UnreachableMatchArm {
+                            span: pattern.span(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if has_catch_all {
+            return Ok(());
+        }
+
+        let TyKind::Defined(defined) = &scrutinee.kind else {
+            return Err(TyError::MatchOnNonEnum {
+                ty: Box::new(scrutinee.clone()),
+                span: span.clone(),
+            });
+        };
+        let Some(enum_def) = self.tctx.get_enum_definition(&defined.def_id) else {
+            return Err(TyError::MatchOnNonEnum {
+                ty: Box::new(scrutinee.clone()),
+                span: span.clone(),
+            });
+        };
+
+        let missing: Vec<InternedIdent> = enum_def
+            .variants
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !covered.contains(&(*i as u32)))
+            .map(|(_, v)| v.name.id)
+            .collect();
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(TyError::NonExhaustiveMatch {
+                missing,
+                span: span.clone(),
+            })
         }
     }
 
@@ -934,6 +1281,31 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                 self.infer_member_access(left, m)
             }
+            Primary::VariantCtor(ctor) => self.infer_variant_ctor(ctor),
+
+            Primary::Match(m) => {
+                let scrutinee = self.infer_expr(&m.scrutinee)?;
+                let scrutinee = self.apply_ty(scrutinee);
+
+                let patterns: Vec<&Pattern> = m.arms.iter().map(|a| &a.pattern).collect();
+                self.check_match_arms(&scrutinee, &patterns, &m.span)?;
+
+                // すべてのアームは同じ型を返さなければならない。
+                let mut result: Option<Ty> = None;
+                for arm in &m.arms {
+                    let arm_ty = self.infer_block_expr(&arm.body)?;
+                    result = Some(match result {
+                        None => arm_ty,
+                        Some(prev) => {
+                            let span = arm_ty.span.clone();
+                            Ty::new(self.unify(prev, arm_ty)?, span)
+                        }
+                    });
+                }
+
+                Ok(result.expect("compiler bug: match expression with no arm"))
+            }
+
             Primary::IfExpr(if_expr) => {
                 let cond = self.infer_expr(&if_expr.cond)?;
                 // 期待している `Bool` はソースに書かれていないので、
@@ -1148,6 +1520,15 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                             &defined_ty.genargs,
                         ))
                     }
+                    // enum のフィールドは `match` でしか取り出せない。
+                    // どのバリアントか分からないままメンバを引くことはできない。
+                    TyDefKind::Enum(_) => Err(TyError::ExprNotHasMember {
+                        ty: Box::new(Ty::new(
+                            TyKind::Defined(defined_ty.clone()),
+                            left_ty.span.clone(),
+                        )),
+                        access: Box::new(member_access.clone()),
+                    }),
                     TyDefKind::NativeTypeAlias(_) => {
                         // native type alias にはメンバアクセスできない
                         Err(TyError::ExprNotHasMember {
@@ -1244,6 +1625,20 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                 Ok(None)
             }
+            Stmt::Match(m) => {
+                let scrutinee = self.infer_expr(&m.scrutinee)?;
+                let scrutinee = self.apply_ty(scrutinee);
+
+                let patterns: Vec<&Pattern> = m.arms.iter().map(|a| &a.pattern).collect();
+                self.check_match_arms(&scrutinee, &patterns, &m.span)?;
+
+                for arm in &m.arms {
+                    self.infer_block_stmt(&arm.body)?;
+                }
+
+                Ok(None)
+            }
+
             Stmt::While(while_stmt) => {
                 let cond = self.infer_expr(&while_stmt.cond)?;
                 let bool_ty = Ty::new(TyKind::Bool, cond.span.clone());
@@ -1550,10 +1945,22 @@ impl<'a> TyCtx<'a> {
         {
             let mut deps = self.hir.deps_recorder.borrow_mut();
             for ty_impl in self.hir.tys.values() {
-                if let Some(TyDefKind::Struct(struct_def)) = &ty_impl.ty_content {
-                    for member_ty in struct_def.members.values() {
-                        deps.depends_on_ty(member_ty);
+                match &ty_impl.ty_content {
+                    Some(TyDefKind::Struct(struct_def)) => {
+                        for member_ty in struct_def.members.values() {
+                            deps.depends_on_ty(member_ty);
+                        }
                     }
+                    // enum も同じ。バリアントのフィールドの型が
+                    // 生成コードの型注釈に出るので import が要る。
+                    Some(TyDefKind::Enum(enum_def)) => {
+                        for variant in &enum_def.variants {
+                            for (_, ty) in &variant.fields {
+                                deps.depends_on_ty(ty);
+                            }
+                        }
+                    }
+                    Some(TyDefKind::NativeTypeAlias(_)) | None => {}
                 }
             }
         }

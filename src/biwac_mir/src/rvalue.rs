@@ -14,10 +14,33 @@ pub enum Rvalue {
 
     UnaryOp(UnOp, Operand),
 
-    /// struct literal。
+    /// struct literal と enum のバリアント構築。
     ///
-    /// メンバは名前と値の組で、宣言順ではなくメンバ名の順に正規化して持つ。
-    Aggregate(TyDefId, Vec<(InternedIdent, Operand)>),
+    /// フィールドは名前と値の組で持つ。
+    /// struct はメンバ名の順、enum のバリアントは**宣言順**に正規化する
+    /// (バリアントのフィールドは位置で対応するので並べ替えられない)。
+    Aggregate(AggregateKind, Vec<(InternedIdent, Operand)>),
+
+    /// enum のタグを読む。
+    ///
+    /// `match` はこれを `SwitchInt` の判別値に使う。
+    Discriminant(Place),
+}
+
+/// 何を組み立てるか。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AggregateKind {
+    Struct(TyDefId),
+    /// (enum の型, 宣言順の添字)。添字がそのままタグの値になる。
+    Enum(TyDefId, u32),
+}
+
+impl AggregateKind {
+    pub fn def_id(&self) -> TyDefId {
+        match self {
+            Self::Struct(def_id) | Self::Enum(def_id, _) => *def_id,
+        }
+    }
 }
 
 /// 計算の入力。

@@ -2,7 +2,7 @@ use std::cell::OnceCell;
 
 use biwac_span::{Span, VarId};
 
-use crate::{Exprs, Ident, Primary, TypDecl};
+use crate::{Exprs, Ident, Pattern, Primary, TypDecl};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
@@ -10,6 +10,7 @@ pub enum Stmt {
     Expr(ExprStmt),
     Return(ReturnStmt),
     If(IfStmt),
+    Match(MatchStmt),
     While(WhileStmt),
     VarDecl(VarDecl),
     Assign(AssignStmt),
@@ -37,6 +38,21 @@ pub struct AssignStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockStmt {
     pub stmts: Vec<Stmt>,
+    pub span: Span,
+}
+
+/// `match` の文形。アームの本体はブロック文である。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchStmt {
+    pub scrutinee: Exprs,
+    pub arms: Vec<MatchStmtArm>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchStmtArm {
+    pub pattern: Pattern,
+    pub body: BlockStmt,
     pub span: Span,
 }
 

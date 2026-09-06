@@ -1,6 +1,8 @@
-use biwac_span::Span;
+use std::cell::OnceCell;
 
-use crate::{Ident, Path, Stmt};
+use biwac_span::{Span, VarId};
+
+use crate::{Ident, Path, Stmt, VariantShape};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primary {
@@ -9,6 +11,7 @@ pub enum Primary {
     FnCall(FnCall),
     MemberAccess(MemberAccess),
     IfExpr(IfExpr),
+    Match(MatchExpr),
     Block(BlockExpr),
     MethodCall(MethodCall),
 }
@@ -21,6 +24,7 @@ impl Primary {
             Self::FnCall(f) => f.span.clone(),
             Self::MemberAccess(m) => m.span(),
             Self::IfExpr(i) => i.span.clone(),
+            Self::Match(m) => m.span.clone(),
             Self::Block(b) => b.span.clone(),
             Self::MethodCall(m) => m.span.clone(),
         }
@@ -214,4 +218,87 @@ pub struct IfExpr {
     // pub else_ifs: Vec<(Exprs, BlockExpr)>,
     pub els: BlockExpr,
     pub span: Span,
+}
+
+/// `match` の式形。すべてのアームが値を返す。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchExpr {
+    pub scrutinee: Box<Exprs>,
+    pub arms: Vec<MatchExprArm>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchExprArm {
+    pub pattern: Pattern,
+    pub body: BlockExpr,
+    pub span: Span,
+}
+
+/// パターン。
+///
+/// 今回はネストを入れない。バリアントのフィールドに書けるのは
+/// 束縛かワイルドカードだけである。
+/// これにより照合が「タグの一致 + 1 段の束縛」に閉じ、
+/// 決定木を組まずに `SwitchInt` 1 つへ落とせる。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pattern {
+    /// `_`
+    Wildcard(Span),
+    /// 単独の識別子。
+    ///
+    /// 束縛なのか unit バリアントなのかは構文からは決まらない。
+    /// 名前解決が「その名前がバリアントに解決されるか」を見て振り分ける。
+    /// rustc と同じ扱いである。
+    Ident(IdentPattern),
+    /// `Color::Red` / `Color::Rgb(r, g, b)` / `Color::Named { name = n, alpha }`
+    Variant(VariantPattern),
+}
+
+impl Pattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Wildcard(span) => span.clone(),
+            Self::Ident(b) => b.path.span(),
+            Self::Variant(v) => v.span.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentPattern {
+    /// セグメントが 1 つだけのパス。
+    /// バリアントに解決された場合は `resolved_id` に入る。
+    pub path: Path,
+    /// 束縛だった場合に名前解決が入れる。
+    pub var_id: OnceCell<VarId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantPattern {
+    pub path: Path,
+    pub fields: PatternFields,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternFields {
+    /// `Color::Red`
+    Unit,
+    /// `Color::Rgb(r, g, _)`
+    Tuple(Vec<Pattern>),
+    /// `Color::Named { name = n, alpha }`
+    ///
+    /// 省略形 (`alpha`) は同名への束縛に展開済みで持つ。
+    Struct(Vec<(Ident, Pattern)>),
+}
+
+impl PatternFields {
+    pub fn shape(&self) -> VariantShape {
+        match self {
+            Self::Unit => VariantShape::Unit,
+            Self::Tuple(_) => VariantShape::Tuple,
+            Self::Struct(_) => VariantShape::Struct,
+        }
+    }
 }

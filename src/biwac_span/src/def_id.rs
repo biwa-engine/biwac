@@ -119,7 +119,14 @@ impl VarId {
 pub enum DefIdKind {
     Package(PackageId),
     Mod(ModId),
+    /// struct / enum / type alias / native type alias。
+    ///
+    /// enum に専用の腕は作らない。名前解決の段で enum を他の型と
+    /// 区別する必要が無く、種別が要る場面はすべて HIR が出来た後なので
+    /// `TyDefId` から `TyDefKind` を引けば分かるためである。
     Ty(TyDefId),
+    /// enum のバリアント。
+    Variant(VariantDefId),
     Val(ValDefId),
     Gen(GenDefId),
     LocalGen(LocalGenDefId),
@@ -191,6 +198,16 @@ impl TyDefId {
     pub const BOOL_TY_DEF_ID: Self = Self(DefId::BOOL_DEF_ID);
 }
 impl_typed_def_id!(ValDefId);
+
+// enum のバリアントに割り当てられる id。
+//
+// バリアントに独立した DefId を振るのは、
+// `import package::color::Color::Red;` のように
+// バリアント単体を import できるようにするためである。
+//
+// 親の enum が何番目のバリアントかは DefId からは分からない。
+// `Hir::variant_owners` (外部パッケージなら `.biwameta`) から引く。
+impl_typed_def_id!(VariantDefId);
 
 // 型定義側で
 // 宣言されるジェネリクス型に割り当てられるid

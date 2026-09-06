@@ -114,6 +114,7 @@ impl<'a> Mangler<'a> {
             .unwrap()
         {
             TyDefKind::Struct(struct_def) => &struct_def.name,
+            TyDefKind::Enum(enum_def) => &enum_def.name,
             TyDefKind::NativeTypeAlias(alias_def) => &alias_def.name,
         }
     }

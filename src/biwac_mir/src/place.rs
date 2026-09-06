@@ -51,4 +51,12 @@ pub enum PlaceElem {
     ///
     /// 型を添えてあるのは、射影した先の型を引くのに定義表を辿らずに済ませるため。
     Field(InternedIdent, Ty),
+
+    /// enum の値を、特定のバリアントとして見る。
+    ///
+    /// 必ず [`PlaceElem::Field`] の直前に来る
+    /// (`[Downcast(1), Field("_0", T)]`)。
+    /// 値のタグが本当にそのバリアントであることは、
+    /// `match` の lowering が保証する。
+    Downcast(u32),
 }

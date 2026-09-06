@@ -17,7 +17,7 @@ use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 5;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 6;
 
 // --- インデックス / オフセット型 ---
 
@@ -51,6 +51,13 @@ pub enum DiskSymbolKind {
     Struct = 1,
     Fn = 2,
     NativeTypeAlias = 3,
+    Enum = 4,
+    /// enum のバリアント。
+    ///
+    /// バリアント単体を `import` できるように、独立したシンボルにする。
+    /// `ExternalChildRef::sym_idx` がそのまま `PackageLocalDefId` になるので、
+    /// シンボル番号が無いと `VariantDefId` を組み立てられない。
+    Variant = 5,
 }
 
 impl TryFrom<u32> for DiskSymbolKind {
@@ -61,6 +68,8 @@ impl TryFrom<u32> for DiskSymbolKind {
             1 => Ok(Self::Struct),
             2 => Ok(Self::Fn),
             3 => Ok(Self::NativeTypeAlias),
+            4 => Ok(Self::Enum),
+            5 => Ok(Self::Variant),
             _ => Err(DepMetadataError::UnknownSymbolKind(v)),
         }
     }
@@ -549,6 +558,125 @@ impl DiskEncode for DiskStructData {
         self.genargs.encode(buf);
         self.members.encode(buf);
         self.assoc_symbols.encode(buf);
+    }
+}
+
+// --- DiskEnumData ---
+//
+// バリアントの並びは宣言順で、その添字がそのままタグの値になる。
+// 並べ替えてはならない (struct のメンバを名前順に正準化しているのと逆)。
+
+#[derive(Debug)]
+pub struct DiskEnumData {
+    pub name: DiskStringOffset,
+    pub name_span: DiskSpan,
+    pub def_raw_code: DiskStringOffset,
+    pub def_span: DiskSpan,
+    pub genargs: DiskVec<DiskGenArg>,
+    /// バリアントのシンボルインデックス。宣言順。
+    pub variant_symbols: DiskVec<DiskSymbolIndex>,
+    /// 関連関数・メソッドのシンボルインデックス
+    pub assoc_symbols: DiskVec<DiskSymbolIndex>,
+}
+
+impl DiskDecode for DiskEnumData {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (name, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (name_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (def_raw_code, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (def_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (genargs, n) = DiskVec::<DiskGenArg>::decode(&bytes[pos..])?;
+        pos += n;
+        let (variant_symbols, n) = DiskVec::<DiskSymbolIndex>::decode(&bytes[pos..])?;
+        pos += n;
+        let (assoc_symbols, n) = DiskVec::<DiskSymbolIndex>::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                name,
+                name_span,
+                def_raw_code,
+                def_span,
+                genargs,
+                variant_symbols,
+                assoc_symbols,
+            },
+            pos,
+        ))
+    }
+}
+
+impl DiskEncode for DiskEnumData {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.name.encode(buf);
+        self.name_span.encode(buf);
+        self.def_raw_code.encode(buf);
+        self.def_span.encode(buf);
+        self.genargs.encode(buf);
+        self.variant_symbols.encode(buf);
+        self.assoc_symbols.encode(buf);
+    }
+}
+
+// --- DiskVariantData ---
+
+#[derive(Debug)]
+pub struct DiskVariantData {
+    pub name: DiskStringOffset,
+    pub name_span: DiskSpan,
+    /// 親 enum のシンボルインデックス。
+    pub owner: DiskSymbolIndex,
+    /// 親 enum の中での宣言順の添字。そのままタグの値になる。
+    pub index: u32,
+    /// 書き方 (0 = unit, 1 = tuple, 2 = struct)。
+    /// 宣言と構築・パターンの書き方が一致しているかの検査に使う。
+    pub shape: u32,
+    /// フィールド。宣言順。タプル形式は `_0`, `_1` の名前を持つ。
+    pub fields: DiskVec<DiskStructMember>,
+}
+
+impl DiskDecode for DiskVariantData {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (name, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (name_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (owner, n) = DiskSymbolIndex::decode(&bytes[pos..])?;
+        pos += n;
+        let (index, n) = u32::decode(&bytes[pos..])?;
+        pos += n;
+        let (shape, n) = u32::decode(&bytes[pos..])?;
+        pos += n;
+        let (fields, n) = DiskVec::<DiskStructMember>::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                name,
+                name_span,
+                owner,
+                index,
+                shape,
+                fields,
+            },
+            pos,
+        ))
+    }
+}
+
+impl DiskEncode for DiskVariantData {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.name.encode(buf);
+        self.name_span.encode(buf);
+        self.owner.encode(buf);
+        self.index.encode(buf);
+        self.shape.encode(buf);
+        self.fields.encode(buf);
     }
 }
 

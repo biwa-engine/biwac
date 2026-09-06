@@ -230,6 +230,8 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                         _ => call,
                     }
                 }
+                Primary::VariantCtor(ctor) => ctor.as_oxc_local(ctx, fctx),
+                Primary::Match(m) => super::enums::match_expr_as_oxc(m, self.id, ctx, fctx),
                 Primary::IfExpr(if_expr) => {
                     if if_expr.then.stmts.is_empty() && if_expr.els.stmts.is_empty() {
                         // then と else のブロック式が文を全く含まない場合、

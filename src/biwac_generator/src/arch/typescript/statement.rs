@@ -92,6 +92,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                             scope_id: Cell::new(None),
                         },ctx.allocator))),
                 },ctx.allocator)),
+            Stmt::Match(m) => m.as_oxc_local(ctx, fctx),
             Stmt::Block(_) => todo!(),
             Stmt::While(_) => todo!(),
             Stmt::Assign(assign) => {

@@ -2,7 +2,7 @@ use biwac_ast::{Path, PathSegment, PathSegmentResolution};
 use biwac_base::{BiwacError, DiagSpan, ErrorContext, InternedIdent, ModId, PackageId};
 use biwac_span::{DefIdKind, GenDefId, Span, TyDefId, ValDefId, VarId};
 
-use crate::AssocNameTreeItem;
+use crate::{AssocNameTreeItem, name_tree::AssocNameTreeItemKind};
 
 #[derive(Debug)]
 pub enum ResolveError {
@@ -40,6 +40,7 @@ pub enum ResolveError {
     },
 
     DuplicatedAssociatedItemForGenArgs {
+        name: InternedIdent,
         assoc1: AssocNameTreeItem,
         assoc2: AssocNameTreeItem,
     },
@@ -104,6 +105,19 @@ pub enum ResolveError {
         detected_position: Box<Span>,
     },
 
+    /// パターンの位置に、バリアントではないものが書かれた。
+    VariantExpected {
+        path: Box<Path>,
+    },
+
+    /// バリアントのフィールドに入れ子のパターンが書かれた。
+    ///
+    /// 今回はネストを入れていない。
+    /// 照合を「タグの一致 + 1 段の束縛」に閉じるためである。
+    NestedPatternUnsupported {
+        span: Span,
+    },
+
     AssocItemNotFoundForGenArgs {
         segment: PathSegment,
     },
@@ -138,11 +152,19 @@ fn ident_str<'a>(ctx: &'a ErrorContext, id: &InternedIdent) -> &'a str {
     ctx.interner.get_str(id).unwrap_or("<unknown>")
 }
 
+fn assoc_kind_name(kind: &AssocNameTreeItemKind) -> &'static str {
+    match kind {
+        AssocNameTreeItemKind::Val(_) => "an associated function",
+        AssocNameTreeItemKind::Variant(_) => "an enum variant",
+    }
+}
+
 fn def_id_kind_name(kind: &DefIdKind) -> &'static str {
     match kind {
         DefIdKind::Package(_) => "a package",
         DefIdKind::Mod(_) => "a module",
         DefIdKind::Ty(_) => "a type",
+        DefIdKind::Variant(_) => "an enum variant",
         DefIdKind::Val(_) => "a value",
         DefIdKind::Gen(_) | DefIdKind::LocalGen(_) => "a generic parameter",
         DefIdKind::Var(_) => "a variable",
@@ -213,17 +235,23 @@ impl BiwacError for ResolveError {
                     .print();
             }
 
-            Self::DuplicatedAssociatedItemForGenArgs { assoc1, assoc2 } => {
-                // 関連アイテムは名前ツリーの側に span を持たないので、
-                // どのジェネリック引数列で衝突したかだけを伝える。
-                ctx.diagnostic(
-                    "Two associated items are implemented for the same generic arguments.",
-                )
-                .note(format!(
-                    "conflicting impls: {:?} and {:?}",
-                    assoc1.kind, assoc2.kind
-                ))
-                .print();
+            Self::DuplicatedAssociatedItemForGenArgs {
+                name,
+                assoc1,
+                assoc2,
+            } => {
+                let name = ident_str(ctx, name);
+
+                // 名前ツリーの側は span を持たないので、位置は示せない。
+                // 種別だけでも書いておくと、
+                // バリアントと関連関数の衝突がすぐ分かる。
+                ctx.diagnostic(format!("`{name}` is defined twice on this type."))
+                    .note(format!(
+                        "conflicting definitions: {} and {}",
+                        assoc_kind_name(&assoc1.kind),
+                        assoc_kind_name(&assoc2.kind)
+                    ))
+                    .print();
             }
 
             Self::UnexpectedSelfType { span } => {
@@ -345,6 +373,25 @@ impl BiwacError for ResolveError {
                         at(detected_position),
                         "expanding this alias never terminates",
                     )
+                    .print();
+            }
+
+            Self::VariantExpected { path } => {
+                let segment = last_segment(path);
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic("Enum variant expected in this pattern.")
+                    .label(
+                        at(&segment.ident.span),
+                        format!("`{name}` is not an enum variant"),
+                    )
+                    .print();
+            }
+
+            Self::NestedPatternUnsupported { span } => {
+                ctx.diagnostic("Nested patterns are not supported yet.")
+                    .label(at(span), "only a binding or `_` can appear here")
+                    .note("bind the value first, then match on it again")
                     .print();
             }
 

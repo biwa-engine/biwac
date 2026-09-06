@@ -4,7 +4,7 @@ use biwac_ast::PathSegment;
 use biwac_base::{InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{DepMetadata, PackageModuleView};
 use biwac_hir::Ty;
-use biwac_span::{TyDefId, ValDefId};
+use biwac_span::{TyDefId, ValDefId, VariantDefId};
 
 use crate::ResolveError;
 
@@ -80,6 +80,11 @@ pub enum AssocNameTreeItemKind {
     // TODO:
     // Ty(AssocNameTreeTyItem),
     Val(ValDefId),
+    /// enum のバリアント。
+    ///
+    /// 関連関数と同じ children に載る。名前空間が型と値で分かれていないので、
+    /// `Color::Red` も `Color::from_hex` も同じ表から一意に引ける。
+    Variant(VariantDefId),
 }
 
 impl AssocNameTree {
@@ -120,18 +125,27 @@ impl AssocNameTree {
 
     pub(crate) fn register_assoc(
         &mut self,
+        name: InternedIdent,
         genargs: Vec<Ty>,
         assoc: AssocNameTreeItemKind,
     ) -> Result<(), ResolveError> {
         for item in &self.assocs {
-            if item.genargs.len() == genargs.len()
-                && item
-                    .genargs
-                    .iter()
-                    .zip(&genargs)
-                    .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+            // バリアントは impl のジェネリック引数で分かれない。
+            // 同じ名前に何かが既にあれば、それだけで衝突である
+            // (`enum Foo { Bar }` と `impl Foo { fn Bar() }` など)。
+            let variant_involved = matches!(item.kind, AssocNameTreeItemKind::Variant(_))
+                || matches!(assoc, AssocNameTreeItemKind::Variant(_));
+
+            if variant_involved
+                || (item.genargs.len() == genargs.len()
+                    && item
+                        .genargs
+                        .iter()
+                        .zip(&genargs)
+                        .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind)))
             {
                 return Err(ResolveError::DuplicatedAssociatedItemForGenArgs {
+                    name,
                     assoc1: item.clone(),
                     assoc2: AssocNameTreeItem {
                         genargs,

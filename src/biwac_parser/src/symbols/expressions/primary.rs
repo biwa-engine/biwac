@@ -157,6 +157,11 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     self_span,
                 ))))
             }
+            // `let n = match o { .. };` のように、値が要る場所に書ける。
+            // ここでは必ず式形として読む。
+            TkKind::KwMatch => Ok(Exprs::Primary(Primary::Match(
+                self.consume_match_expression()?,
+            ))),
             TkKind::MarkLPare => {
                 self.next();
                 let expr = self.consume_delimited_expression()?;

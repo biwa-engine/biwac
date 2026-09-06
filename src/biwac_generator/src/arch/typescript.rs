@@ -1,4 +1,5 @@
 mod context;
+mod enums;
 mod expression;
 mod globals;
 mod statement;
@@ -178,6 +179,13 @@ pub fn generate(
                         Some(struct_.as_oxc_global(ctx.get_type_mangled(def_id), &ctx))
                     } else {
                         // 外部パッケージの型定義は生成しないガード
+                        None
+                    }
+                }
+                Some(TyDefKind::Enum(enum_)) => {
+                    if def_id.pkg().is_self() {
+                        Some(enum_.as_oxc_global(ctx.get_type_mangled(def_id), &ctx))
+                    } else {
                         None
                     }
                 }

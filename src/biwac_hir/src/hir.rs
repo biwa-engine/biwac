@@ -7,10 +7,11 @@ pub(crate) mod symbols;
 pub(crate) mod types;
 
 use biwac_base::{InternedIdent, PackageId, PackageName};
-use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId};
+use biwac_span::{LocalGenDefId, Span, TyDefId, ValDefId, VariantDefId};
 
 use crate::{
     AssocValDefKind, DefinedTy, NativeCode, Ty, TyDefKind, TyKind, TypeAliasDef, ValDefKind,
+    VariantOwner,
 };
 
 ///  Hir は
@@ -44,6 +45,17 @@ pub struct Hir {
     pub tys: HashMap<TyDefId, DefinedTyImpl>,
 
     pub ty_aliases: HashMap<TyDefId, TypeAliasDef>,
+
+    /// バリアントから親の enum への逆引き。
+    ///
+    /// `VariantDefId` だけでは親も添字も分からない。
+    /// `Color::Red` ならパスから親を辿れるが、
+    /// `import ..::Color::Red;` して `Red` と書いた形では辿れないので、
+    /// 経路を 1 本にするために常にこの表を使う。
+    ///
+    /// 外部パッケージ分は `.biwameta` から遅延で引く
+    /// (`biwac_type_inferrer::TyCtx`)。
+    pub variant_owners: HashMap<VariantDefId, VariantOwner>,
 
     pub module_global_natives: Vec<NativeCode>,
 
@@ -107,6 +119,23 @@ impl Hir {
             }
         }
 
+        // バリアントの逆引きは型定義から導けるので、外から渡さずここで作る。
+        let mut variant_owners = HashMap::new();
+        for (ty_def_id, ty_impl) in &tys {
+            let Some(TyDefKind::Enum(enum_def)) = &ty_impl.ty_content else {
+                continue;
+            };
+            for (index, variant) in enum_def.variants.iter().enumerate() {
+                variant_owners.insert(
+                    variant.def_id,
+                    VariantOwner {
+                        enum_def_id: *ty_def_id,
+                        index: index as u32,
+                    },
+                );
+            }
+        }
+
         Self {
             deps_recorder: RefCell::new(DepsRecorder::new()),
             pkg_name,
@@ -114,6 +143,7 @@ impl Hir {
             vals,
             tys,
             ty_aliases,
+            variant_owners,
             assoc_val_map,
             module_global_natives: native_codes,
         }

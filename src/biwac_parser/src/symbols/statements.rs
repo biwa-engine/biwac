@@ -1,5 +1,6 @@
 pub mod block;
 pub mod if_stmt;
+pub mod match_stmt;
 pub mod vardecl;
 pub mod while_stmt;
 
@@ -19,8 +20,6 @@ pub(crate) enum ExprOrStmt<E, S> {
 }
 
 impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
-    // TODO: 将来的にはconsume_statement_or_expression
-    // にして、呼び出す側でstatement/expressionそれぞれの場合のハンドリングをさせるべき
     pub(crate) fn consume_expression_or_statement(
         &mut self,
     ) -> Result<ExprOrStmt<Exprs, Stmt>, ParseError<'src>> {
@@ -31,6 +30,10 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::IfExpr(if_expr))))
                     }
                     ExprOrStmt::Stmt(if_stmt) => Ok(ExprOrStmt::Stmt(Stmt::If(if_stmt))),
+                },
+                TkKind::KwMatch => match self.consume_match_expression_or_statement()? {
+                    ExprOrStmt::Expr(m) => Ok(ExprOrStmt::Expr(Exprs::Primary(Primary::Match(m)))),
+                    ExprOrStmt::Stmt(m) => Ok(ExprOrStmt::Stmt(Stmt::Match(m))),
                 },
                 TkKind::KwWhile => Ok(ExprOrStmt::Stmt(Stmt::While(
                     self.consume_while_statement()?,

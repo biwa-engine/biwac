@@ -1,12 +1,13 @@
 use biwac_hir::{
-    AssignStmt, BlockStmt, DecledVar, ExprStmt, Ident, IfStmt, ReturnStmt, Stmt, Ty, TyKind,
-    VarDecl, WhileStmt,
+    AssignStmt, BlockStmt, DecledVar, ExprStmt, Ident, IfStmt, MatchStmt, MatchStmtArm, ReturnStmt,
+    Stmt, Ty, TyKind, VarDecl, WhileStmt,
 };
 
 use crate::ResolveError;
 
 use super::{
     expressions::{ExprLowerCtx, lower_expr, lower_primary},
+    patterns::lower_pattern,
     ty_from_typ_repr,
 };
 
@@ -52,6 +53,27 @@ pub(crate) fn lower_stmt(
                 .as_ref()
                 .map(|e| lower_block_stmt(ctx, e, errors));
             Some(Stmt::If(IfStmt { cond, then, els }))
+        }
+
+        biwac_ast::Stmt::Match(m) => {
+            let scrutinee = lower_expr(ctx, &m.scrutinee, errors)?;
+            let arms = m
+                .arms
+                .iter()
+                .filter_map(|arm| {
+                    Some(MatchStmtArm {
+                        pattern: lower_pattern(&arm.pattern, errors)?,
+                        body: lower_block_stmt(ctx, &arm.body, errors),
+                        span: arm.span.clone(),
+                    })
+                })
+                .collect();
+
+            Some(Stmt::Match(MatchStmt {
+                scrutinee,
+                arms,
+                span: m.span.clone(),
+            }))
         }
 
         biwac_ast::Stmt::While(while_stmt) => {

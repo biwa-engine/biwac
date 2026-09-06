@@ -27,6 +27,7 @@ pub fn check_mod_ast(ast: &ModAst, interner: &IdentInterner, errors: &mut Vec<At
             Globals::NovelScene(s) => check(&s.attrs, Target::Scene, &s.id.span, interner, errors),
             Globals::TypeDef(t) => match t {
                 TypeDef::Struct(s) => check(&s.attrs, Target::Struct, &s.id.span, interner, errors),
+                TypeDef::Enum(e) => check(&e.attrs, Target::Enum, &e.id.span, interner, errors),
                 TypeDef::TypeAlias(a) => {
                     check(&a.attrs, Target::TypeAlias, &a.ident.span, interner, errors)
                 }

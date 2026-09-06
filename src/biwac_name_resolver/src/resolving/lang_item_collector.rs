@@ -110,6 +110,15 @@ fn collect_in_mod_ast(
                         ))
                     });
                 }
+                TypeDef::Enum(e) => {
+                    register(table, &e.attrs, interner, errors, || {
+                        Some((
+                            e.def_id.get()?.def_id(),
+                            LangItemKind::Ty,
+                            genarg_count(e.genargs.as_ref().map(|g| g.genargs.len())),
+                        ))
+                    });
+                }
                 TypeDef::TypeAlias(a) => {
                     register(table, &a.attrs, interner, errors, || {
                         Some((

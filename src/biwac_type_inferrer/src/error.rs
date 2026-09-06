@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use biwac_ast::{BinOperator, UnOperator};
+use biwac_ast::{BinOperator, UnOperator, VariantShape};
 use biwac_base::{BiwacError, DiagSpan, InternedIdent};
 use biwac_hir::{AssignStmt, Expr, FnTy, Ident, MemberAccess, StructLiteral, Ty, TyKind, TyVar};
 use biwac_span::{Span, TyDefId};
@@ -65,6 +65,55 @@ pub enum TyError {
     MethodNotFound {
         ty: Box<Ty>,
         method: Box<Ident>,
+    },
+
+    /// バリアントの書き方が宣言と食い違う
+    /// (`Rgb(Int)` を `Rgb { .. }` で作るなど)。
+    VariantShapeMismatched {
+        declared: VariantShape,
+        found: VariantShape,
+        span: Span,
+    },
+
+    /// タプル形式のバリアントに渡した値の個数が合わない。
+    VariantFieldCountMismatched {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    /// 宣言に無いフィールドが書かれた。
+    VariantFieldNotFound {
+        field: Box<Ident>,
+    },
+
+    /// 書かれていないフィールドがある。
+    VariantFieldInsufficient {
+        missing: Vec<InternedIdent>,
+        span: Span,
+    },
+
+    /// `match` の対象が enum ではない。
+    MatchOnNonEnum {
+        ty: Box<Ty>,
+        span: Span,
+    },
+
+    /// アームのパターンが、対象の enum のバリアントではない。
+    VariantOfAnotherEnum {
+        ty: Box<Ty>,
+        span: Span,
+    },
+
+    /// 網羅していないバリアントがある。
+    NonExhaustiveMatch {
+        missing: Vec<InternedIdent>,
+        span: Span,
+    },
+
+    /// 前のアームで既に当たるので、このアームには到達しない。
+    UnreachableMatchArm {
+        span: Span,
     },
 
     /// コンパイラが必要とする lang item が定義されていない。
@@ -357,6 +406,85 @@ impl BiwacError for TyErrorReport {
                     .print();
             }
 
+            TyError::VariantShapeMismatched {
+                declared,
+                found,
+                span,
+            } => {
+                ctx.diagnostic(format!(
+                    "This variant is declared in {declared} form, but written in {found} form."
+                ))
+                .label(at(span), format!("write it in {declared} form"))
+                .print();
+            }
+
+            TyError::VariantFieldCountMismatched {
+                expected,
+                found,
+                span,
+            } => {
+                ctx.diagnostic(format!(
+                    "This variant takes {expected} field(s), but {found} were given."
+                ))
+                .label(at(span), "here")
+                .print();
+            }
+
+            TyError::VariantFieldNotFound { field } => {
+                let name = ident_str(&field.id);
+
+                ctx.diagnostic(format!("This variant has no field `{name}`."))
+                    .label(at(&field.span), format!("no field `{name}`"))
+                    .print();
+            }
+
+            TyError::VariantFieldInsufficient { missing, span } => {
+                let missing = missing
+                    .iter()
+                    .map(|m| format!("`{}`", ident_str(m)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                ctx.diagnostic("Variant is missing fields.")
+                    .label(at(span), format!("{missing} not given"))
+                    .print();
+            }
+
+            TyError::MatchOnNonEnum { ty, span } => {
+                let ty = names.render(&ty.kind);
+
+                ctx.diagnostic(format!("`match` needs an enum, but this is `{ty}`."))
+                    .label(at(span), format!("this is `{ty}`"))
+                    .print();
+            }
+
+            TyError::VariantOfAnotherEnum { ty, span } => {
+                let ty = names.render(&ty.kind);
+
+                ctx.diagnostic(format!("This pattern is not a variant of `{ty}`."))
+                    .label(at(span), format!("`{ty}` is being matched here"))
+                    .print();
+            }
+
+            TyError::NonExhaustiveMatch { missing, span } => {
+                let missing = missing
+                    .iter()
+                    .map(|m| format!("`{}`", ident_str(m)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                ctx.diagnostic("This `match` is not exhaustive.")
+                    .label(at(span), format!("{missing} not covered"))
+                    .note("add the missing arms, or a `_` arm")
+                    .print();
+            }
+
+            TyError::UnreachableMatchArm { span } => {
+                ctx.diagnostic("This arm is never reached.")
+                    .label(at(span), "an earlier arm already covers it")
+                    .print();
+            }
+
             TyError::MissingLangItem { item } => {
                 ctx.diagnostic(format!(
                     "The lang item `{}` is not provided by any package in the dependency graph.",
@@ -380,6 +508,7 @@ pub(crate) fn error_tys(error: &TyError) -> Vec<&Ty> {
         | TyError::OccursCheckFailed { ty, .. } => vec![ty],
 
         TyError::TypeConfliced { t1, t2 } => vec![t1, t2],
+        TyError::MatchOnNonEnum { ty, .. } | TyError::VariantOfAnotherEnum { ty, .. } => vec![ty],
         TyError::ReturnTypeRequired { rty } => vec![rty],
 
         TyError::FnArgLenMismatched(f1, f2) | TyError::FnGenArgLenMismatched(f1, f2) => f1
@@ -390,7 +519,13 @@ pub(crate) fn error_tys(error: &TyError) -> Vec<&Ty> {
             .chain(std::iter::once(f2.rty.as_ref()))
             .collect(),
 
-        TyError::StructLiteralMemberConfliced { .. }
+        TyError::VariantShapeMismatched { .. }
+        | TyError::VariantFieldCountMismatched { .. }
+        | TyError::VariantFieldNotFound { .. }
+        | TyError::VariantFieldInsufficient { .. }
+        | TyError::NonExhaustiveMatch { .. }
+        | TyError::UnreachableMatchArm { .. }
+        | TyError::StructLiteralMemberConfliced { .. }
         | TyError::StructLiteralAssignToInexsistentMember { .. }
         | TyError::StructLiteralMemberInsufficient { .. }
         | TyError::StructNotHasMember { .. }

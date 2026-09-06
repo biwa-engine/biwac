@@ -51,9 +51,11 @@ pub use codec::{
     BIWAC_MIR_FORMAT_VERSION, DecodedMir, EncodeCtx, MIR_FILE_EXTENSION, MirDecodeError, decode,
     encode,
 };
-pub use mono::{InstanceKey, MonoInstance, MonoMir, MonoTyDef, MonoTyDefKind, TyInstanceKey};
+pub use mono::{
+    InstanceKey, MonoInstance, MonoMir, MonoTyDef, MonoTyDefKind, MonoVariant, TyInstanceKey,
+};
 pub use place::{Place, PlaceElem};
-pub use rvalue::{BinOp, Const, Operand, Rvalue, StrId, StringPool, UnOp};
+pub use rvalue::{AggregateKind, BinOp, Const, Operand, Rvalue, StrId, StringPool, UnOp};
 pub use validate::{ValidationError, ValidationErrorKind, validate, validate_body};
 
 /// 1 パッケージ分の MIR。

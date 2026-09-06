@@ -11,7 +11,9 @@ use biwac_dependency_metadata::{
 };
 use biwac_hir::TyKind;
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::{DefId, DefIdKind, ImplId, PackageLocalDefId, Span, TyDefId, ValDefId};
+use biwac_span::{
+    DefId, DefIdKind, ImplId, PackageLocalDefId, Span, TyDefId, ValDefId, VariantDefId,
+};
 
 use crate::{
     AssocNameTreeItem, ModuleNameTree, ModuleNameTreeItem, NameTree, PackageNameTree, ResolveError,
@@ -117,6 +119,9 @@ impl DefCollector {
     ) -> Result<ModuleNameTree, Vec<ResolveError>> {
         let mut children = HashMap::<InternedIdent, (ModuleNameTreeItem, Span)>::new();
         let mut errors = Vec::new();
+        // バリアントは enum の名前ツリーの children に載せる。
+        // その木は下の insert で初めて出来るので、名前だけ控えて後で回す。
+        let mut pending_variants = Vec::<InternedIdent>::new();
 
         for g in &module.ast.globals {
             let opt_ident_and_def_id = match g {
@@ -140,6 +145,21 @@ impl DefCollector {
                         let def_id = TyDefId::new(self.alloc_def_id());
                         struct_def.def_id.set(def_id).unwrap();
                         Some((struct_def.id.clone(), TyOrVal::Ty(def_id)))
+                    }
+                    biwac_ast::TypeDef::Enum(enum_def) => {
+                        let def_id = TyDefId::new(self.alloc_def_id());
+                        enum_def.def_id.set(def_id).unwrap();
+
+                        // バリアントにも DefId を振る。
+                        // 単体で import できるようにするためで、rustc と同じ扱いである。
+                        // 採番の順序が `.biwameta` に出るので、宣言順のまま回す。
+                        for variant in &enum_def.variants {
+                            let variant_def_id = VariantDefId::new(self.alloc_def_id());
+                            variant.def_id.set(variant_def_id).unwrap();
+                        }
+
+                        pending_variants.push(enum_def.id.id);
+                        Some((enum_def.id.clone(), TyOrVal::Ty(def_id)))
                     }
                     biwac_ast::TypeDef::TypeAlias(alias_def) => {
                         let def_id = TyDefId::new(self.alloc_def_id());
@@ -186,6 +206,44 @@ impl DefCollector {
                             span2: ident.span.clone(),
                         });
                     }
+                }
+            }
+        }
+
+        // enum のバリアントを、その enum の名前ツリーに登録する。
+        //
+        // 関連関数と同じ children に載るので、
+        // `enum Foo { Bar }` と `impl Foo { fn Bar() }` は衝突する
+        // (`register_assoc` が検出する)。
+        for g in &module.ast.globals {
+            let biwac_ast::Globals::TypeDef(biwac_ast::TypeDef::Enum(enum_def)) = g else {
+                continue;
+            };
+            if !pending_variants.contains(&enum_def.id.id) {
+                // 名前が衝突して木に入らなかった enum。
+                continue;
+            }
+            let Some((ModuleNameTreeItem::Ty(ty_tree), _)) = children.get(&enum_def.id.id) else {
+                continue;
+            };
+
+            let mut ty_children = ty_tree.children.borrow_mut();
+            for variant in &enum_def.variants {
+                let def_id = *variant
+                    .def_id
+                    .get()
+                    .expect("compiler bug: variant def_id not allocated");
+
+                let assoc = ty_children
+                    .entry(variant.id.id)
+                    .or_insert(AssocNameTree { assocs: Vec::new() });
+
+                if let Err(e) = assoc.register_assoc(
+                    variant.id.id,
+                    Vec::new(),
+                    AssocNameTreeItemKind::Variant(def_id),
+                ) {
+                    errors.push(e);
                 }
             }
         }
@@ -484,6 +542,7 @@ impl DefCollector {
                     if let Some(assocs) = ty_tree.children.borrow_mut().get_mut(&f.id.id) {
                         assocs
                             .register_assoc(
+                                f.id.id,
                                 match &self_ty {
                                     TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                     _ => Vec::new(),
@@ -515,6 +574,7 @@ impl DefCollector {
                     if let Some(assocs) = ty_tree.children.borrow_mut().get_mut(&m.id.id) {
                         assocs
                             .register_assoc(
+                                m.id.id,
                                 match &self_ty {
                                     TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                     _ => Vec::new(),
@@ -546,6 +606,7 @@ impl DefCollector {
                     if let Some(assocs) = ty_tree.children.borrow_mut().get_mut(&f.id.id) {
                         assocs
                             .register_assoc(
+                                f.id.id,
                                 match &self_ty {
                                     TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                     _ => Vec::new(),
@@ -577,6 +638,7 @@ impl DefCollector {
                     if let Some(assocs) = ty_tree.children.borrow_mut().get_mut(&m.id.id) {
                         assocs
                             .register_assoc(
+                                m.id.id,
                                 match &self_ty {
                                     TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
                                     _ => Vec::new(),

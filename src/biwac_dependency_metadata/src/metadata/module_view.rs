@@ -4,7 +4,7 @@ use std::{
 };
 
 use biwac_base::{IdentInterner, InternedIdent, PackageId};
-use biwac_span::{DefId, PackageLocalDefId, TyDefId, ValDefId};
+use biwac_span::{DefId, PackageLocalDefId, TyDefId, ValDefId, VariantDefId};
 
 use super::{DepMetadata, body::SymbolBody};
 
@@ -53,6 +53,7 @@ pub enum ExternalChildKind {
     Mod,
     Ty,
     Val,
+    Variant,
 }
 
 impl ExternalChildRef {
@@ -62,6 +63,10 @@ impl ExternalChildRef {
 
     pub fn as_val_def_id(&self, pkg_id: PackageId) -> ValDefId {
         ValDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(self.sym_idx)))
+    }
+
+    pub fn as_variant_def_id(&self, pkg_id: PackageId) -> VariantDefId {
+        VariantDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(self.sym_idx)))
     }
 }
 
@@ -136,6 +141,9 @@ impl DepMetadataModuleView {
                 SymbolBody::Struct(struct_data) => (struct_data.name, ExternalChildKind::Ty),
                 SymbolBody::Mod(mod_data) => (mod_data.name, ExternalChildKind::Mod),
                 SymbolBody::NativeTypeAlias(alias) => (alias.name, ExternalChildKind::Ty),
+                SymbolBody::Enum(enum_data) => (enum_data.name, ExternalChildKind::Ty),
+                // バリアントはモジュールの直下には載らない。enum の子である。
+                SymbolBody::Variant(_) => continue,
             };
             let name_str = match self.dep.strings.get(name_offset) {
                 Ok(s) => s.to_string(),
@@ -179,9 +187,32 @@ impl PackageModuleView for DepMetadataModuleView {
         let body = self.dep.sym_bodies.get(local_ty_idx as usize, hdr).ok()?;
         // native type alias (`type Vec[T] = {{ ... }};`) も assoc fns を持つ。
         // struct だけを見ていると `Vec::new()` が外のパッケージから引けない。
+        // enum はバリアントも子に持つ。関連関数と同じ表から引ける
+        // (名前空間が型と値で分かれていないので `Color::Red` も `Color::from_hex` も同じ)。
+        if let SymbolBody::Enum(ref enum_data) = *body {
+            for &variant_sym_idx in &enum_data.variant_symbols.0 {
+                let variant_hdr = self.dep.sym_hdrs.get(variant_sym_idx.0 as usize)?;
+                let variant_body = self
+                    .dep
+                    .sym_bodies
+                    .get(variant_sym_idx.0 as usize, variant_hdr)
+                    .ok()?;
+                let SymbolBody::Variant(ref variant_data) = *variant_body else {
+                    continue;
+                };
+                if self.dep.strings.get(variant_data.name).unwrap_or("") == name_str {
+                    return Some(ExternalChildRef {
+                        sym_idx: variant_sym_idx.0,
+                        kind: ExternalChildKind::Variant,
+                    });
+                }
+            }
+        }
+
         let assoc_symbols = match *body {
             SymbolBody::Struct(ref struct_data) => &struct_data.assoc_symbols.0,
             SymbolBody::NativeTypeAlias(ref alias_data) => &alias_data.assoc_symbols.0,
+            SymbolBody::Enum(ref enum_data) => &enum_data.assoc_symbols.0,
             _ => return None,
         };
         for &assoc_sym_idx in assoc_symbols {

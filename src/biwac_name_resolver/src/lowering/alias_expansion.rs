@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use biwac_hir::{
     AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnBody, FnDef,
     FnSignature, FnTy, Hir, Literal, NativeFnDef, NovelSceneDef, Primary, Stmt, Ty, TyDefKind,
-    TyKind, TypeAliasDef, ValDefKind,
+    TyKind, TypeAliasDef, ValDefKind, VariantCtorFields,
 };
 use biwac_span::{GenDefId, TyDefId};
 
@@ -199,6 +199,12 @@ fn expand_stmt(stmt: &mut Stmt, aliases: &HashMap<TyDefId, TypeAliasDef>) {
             expand_expr(&mut w.cond, aliases);
             expand_block_stmt(&mut w.stmts, aliases);
         }
+        Stmt::Match(m) => {
+            expand_expr(&mut m.scrutinee, aliases);
+            for arm in &mut m.arms {
+                expand_block_stmt(&mut arm.body, aliases);
+            }
+        }
         Stmt::VarDecl(v) => expand_expr(&mut v.init, aliases),
         Stmt::Assign(a) => {
             expand_primary(&mut a.dst, aliases);
@@ -248,6 +254,26 @@ fn expand_primary(primary: &mut Primary, aliases: &HashMap<TyDefId, TypeAliasDef
                 expand_expr(arg, aliases);
             }
         }
+        Primary::Match(m) => {
+            expand_expr(&mut m.scrutinee, aliases);
+            for arm in &mut m.arms {
+                expand_block_expr(&mut arm.body, aliases);
+            }
+        }
+        // バリアント自体は型ではないので展開の対象にならない。実引数だけ歩く。
+        Primary::VariantCtor(v) => match &mut v.fields {
+            VariantCtorFields::Unit => {}
+            VariantCtorFields::Positional(exprs) => {
+                for expr in exprs {
+                    expand_expr(expr, aliases);
+                }
+            }
+            VariantCtorFields::Named(fields) => {
+                for (_, expr) in fields {
+                    expand_expr(expr, aliases);
+                }
+            }
+        },
         Primary::MemberAccess(m) => expand_expr(&mut m.left, aliases),
         Primary::IfExpr(i) => {
             expand_expr(&mut i.cond, aliases);

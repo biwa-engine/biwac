@@ -10,14 +10,15 @@ use std::collections::HashMap;
 
 use biwac_ast::{BinOperator, UnOperator};
 use biwac_hir::{
-    BlockExpr, Callee as HirCallee, DecledVar, Expr, ExprId, ExprVal, FnBody, FnDef, FnSignature,
-    Literal, NativeFnDef, NovelSceneDef, Primary, Stmt, Ty, TyKind, VarIdKind,
+    BlockExpr, BlockStmt, Callee as HirCallee, DecledVar, Expr, ExprId, ExprVal, FnBody, FnDef,
+    FnSignature, Literal, NativeFnDef, NovelSceneDef, Pattern, PatternFields, Primary, Stmt, Ty,
+    TyKind, VarIdKind, VariantCtorFields,
 };
 use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_mir::{
-    BasicBlock, BasicBlockData, BinOp, Body, Callee, Const, GenArgs, Local, LocalDecl, MirItem,
-    NativeItem, Operand, Place, Rvalue, StatementKind, StringPool, SwitchTargets, TerminatorKind,
-    UnOp,
+    AggregateKind, BasicBlock, BasicBlockData, BinOp, Body, Callee, Const, GenArgs, Local,
+    LocalDecl, MirItem, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind, StringPool,
+    SwitchTargets, TerminatorKind, UnOp,
 };
 use biwac_span::{Span, ValDefId, VarId};
 
@@ -362,6 +363,15 @@ impl<'a> BodyBuilder<'a> {
                 self.new_block()
             }
 
+            Stmt::Match(m) => {
+                let arms: Vec<(&Pattern, &BlockStmt)> =
+                    m.arms.iter().map(|a| (&a.pattern, &a.body)).collect();
+
+                self.lower_match(bb, &m.scrutinee, &arms, m.span.clone(), |this, bb, body| {
+                    this.lower_stmts(bb, &body.stmts)
+                })
+            }
+
             Stmt::If(i) => {
                 let (bb, cond) = self.lower_operand(bb, &i.cond);
 
@@ -645,7 +655,12 @@ impl<'a> BodyBuilder<'a> {
                 // 並べ替えない。ここの順序は評価順であり、
                 // メンバの初期化式に副作用があれば書いた順に効く必要がある。
                 // どのメンバがどこに置かれるかはレイアウトの話で、バックエンドが決める。
-                self.push_assign(bb, dest, Rvalue::Aggregate(sl.tid, members), span);
+                self.push_assign(
+                    bb,
+                    dest,
+                    Rvalue::Aggregate(AggregateKind::Struct(sl.tid), members),
+                    span,
+                );
                 bb
             }
 
@@ -765,7 +780,244 @@ impl<'a> BodyBuilder<'a> {
                 join_bb
             }
 
+            Primary::VariantCtor(ctor) => {
+                let resolved = ctor
+                    .resolved
+                    .get()
+                    .expect("compiler bug: variant ctor was not resolved by inference");
+
+                // 実引数を **宣言順** に並べて評価する。
+                // 名前つきで書かれていても、宣言順が値の並びである。
+                let mut bb = bb;
+                let mut fields = Vec::with_capacity(resolved.field_names.len());
+                match &ctor.fields {
+                    VariantCtorFields::Unit => {}
+                    VariantCtorFields::Positional(args) => {
+                        for (name, arg) in resolved.field_names.iter().zip(args) {
+                            let (next, operand) = self.lower_operand(bb, arg);
+                            bb = next;
+                            fields.push((*name, operand));
+                        }
+                    }
+                    VariantCtorFields::Named(args) => {
+                        for name in &resolved.field_names {
+                            let arg = args
+                                .iter()
+                                .find(|(ident, _)| ident.id == *name)
+                                .map(|(_, expr)| expr)
+                                .expect("compiler bug: a variant field is missing after inference");
+                            let (next, operand) = self.lower_operand(bb, arg);
+                            bb = next;
+                            fields.push((*name, operand));
+                        }
+                    }
+                }
+
+                self.push_assign(
+                    bb,
+                    dest,
+                    Rvalue::Aggregate(
+                        AggregateKind::Enum(resolved.enum_def_id, resolved.index),
+                        fields,
+                    ),
+                    span,
+                );
+                bb
+            }
+
+            Primary::Match(m) => {
+                let arms: Vec<(&Pattern, &BlockExpr)> =
+                    m.arms.iter().map(|a| (&a.pattern, &a.body)).collect();
+
+                self.lower_match(bb, &m.scrutinee, &arms, m.span.clone(), |this, bb, body| {
+                    this.lower_block_expr_into(bb, dest.clone(), body)
+                })
+            }
+
             Primary::Block(b) => self.lower_block_expr_into(bb, dest, b),
+        }
+    }
+
+    /// `match` を `SwitchInt` に落とす。
+    ///
+    /// ネストしたパターンが無いので決定木は要らない。
+    /// タグで 1 回分岐し、各アームの先頭で束縛を積むだけである。
+    ///
+    /// `lower_body` はアームの本体を lowering して終端のブロックを返す。
+    /// 式形と文形で本体の型が違うので、そこだけ呼び出し側に任せている。
+    fn lower_match<B>(
+        &mut self,
+        bb: BasicBlock,
+        scrutinee: &Expr,
+        arms: &[(&Pattern, &B)],
+        span: Span,
+        mut lower_body: impl FnMut(&mut Self, BasicBlock, &B) -> BasicBlock,
+    ) -> BasicBlock {
+        // 対象は 1 度だけ評価して local に置く。
+        // 束縛はここからの射影になる。
+        let scrutinee_ty = self.expr_ty(scrutinee);
+        let scrutinee_local = self.new_local(scrutinee_ty, scrutinee.span());
+        let bb = self.lower_expr_into(bb, Place::from_local(scrutinee_local), scrutinee);
+
+        // タグを読む。
+        let discr_local = self.new_local(Ty::new(TyKind::Int, span.clone()), span.clone());
+        self.push_assign(
+            bb,
+            Place::from_local(discr_local),
+            Rvalue::Discriminant(Place::from_local(scrutinee_local)),
+            span.clone(),
+        );
+
+        let join_bb = self.new_block();
+
+        // 必ず当たるアーム (`_` や裸の識別子) があれば、それが `otherwise` になる。
+        // 無ければ網羅性検査を通っているので、最後のアームを `otherwise` にしてよい。
+        let catch_all = arms.iter().position(|(p, _)| p.is_irrefutable());
+        let otherwise_arm = catch_all.unwrap_or(arms.len() - 1);
+
+        let arm_blocks: Vec<BasicBlock> = arms.iter().map(|_| self.new_block()).collect();
+
+        // タグを 1 つずつ比べる 2 分岐の連鎖にする。
+        //
+        // MIR の `SwitchInt` は多分岐を表せるが、wasm 側の構造化変換が
+        // 2 分岐しか扱えない。分岐表 (`br_table`) を使う形にするのは
+        // バリアントが増えてからでよい。
+        let tested: Vec<(u128, BasicBlock)> = arms
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != otherwise_arm)
+            .filter_map(|(i, (pattern, _))| {
+                let Pattern::Variant(vp) = pattern else {
+                    // 必ず当たるアームは otherwise になっているので、ここには来ない。
+                    return None;
+                };
+                let index = vp
+                    .resolved
+                    .get()
+                    .expect("compiler bug: variant pattern was not resolved by inference")
+                    .index;
+                Some((index as u128, arm_blocks[i]))
+            })
+            .collect();
+
+        let mut test_bb = bb;
+        for (n, (value, target)) in tested.iter().enumerate() {
+            let next = if n + 1 == tested.len() {
+                arm_blocks[otherwise_arm]
+            } else {
+                self.new_block()
+            };
+
+            self.terminate(
+                test_bb,
+                TerminatorKind::SwitchInt {
+                    discr: Operand::from_local(discr_local),
+                    targets: SwitchTargets::new(vec![*value], vec![*target], next),
+                },
+                span.clone(),
+            );
+            test_bb = next;
+        }
+
+        // 比べるものが無い (アームが 1 つで、それが必ず当たる) 場合。
+        if tested.is_empty() {
+            self.terminate(
+                test_bb,
+                TerminatorKind::Goto {
+                    target: arm_blocks[otherwise_arm],
+                },
+                span.clone(),
+            );
+        }
+
+        for (i, (pattern, body)) in arms.iter().enumerate() {
+            let mut arm_bb = arm_blocks[i];
+            arm_bb = self.lower_pattern_bindings(arm_bb, scrutinee_local, pattern);
+            let end = lower_body(self, arm_bb, body);
+            self.terminate(end, TerminatorKind::Goto { target: join_bb }, span.clone());
+        }
+
+        join_bb
+    }
+
+    /// アームの先頭で、パターンが束縛する変数に値を写す。
+    fn lower_pattern_bindings(
+        &mut self,
+        bb: BasicBlock,
+        scrutinee_local: Local,
+        pattern: &Pattern,
+    ) -> BasicBlock {
+        match pattern {
+            Pattern::Wildcard(_) => bb,
+
+            // 対象そのものを束縛する。
+            Pattern::Binding(var_id, span) => {
+                let ty = self.locals[scrutinee_local.index()].ty.clone();
+                let local = self.new_local(ty, span.clone());
+                self.var_map.insert(*var_id, local);
+                self.push_assign(
+                    bb,
+                    Place::from_local(local),
+                    Rvalue::Use(Operand::Place(Place::from_local(scrutinee_local))),
+                    span.clone(),
+                );
+                bb
+            }
+
+            Pattern::Variant(vp) => {
+                let resolved = vp
+                    .resolved
+                    .get()
+                    .expect("compiler bug: variant pattern was not resolved by inference");
+
+                let binds: Vec<(usize, VarId, Span)> = match &vp.fields {
+                    PatternFields::Unit => Vec::new(),
+                    PatternFields::Positional(binds) => binds
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, b)| Some((i, b.var_id()?, b.span())))
+                        .collect(),
+                    PatternFields::Named(fields) => fields
+                        .iter()
+                        .filter_map(|(ident, b)| {
+                            let i = resolved
+                                .field_names
+                                .iter()
+                                .position(|name| *name == ident.id)?;
+                            Some((i, b.var_id()?, b.span()))
+                        })
+                        .collect(),
+                };
+
+                for (i, var_id, span) in binds {
+                    let name = resolved.field_names[i];
+                    let ty = self.var_tys.get(&var_id).cloned().unwrap_or_else(|| {
+                        panic!("compiler bug: pattern binding {var_id:?} has no type")
+                    });
+
+                    let local = self.new_local(ty.clone(), span.clone());
+                    self.var_map.insert(var_id, local);
+
+                    // `_1 = ((_0 as v1)._0)` の形。
+                    // downcast は「この値をこのバリアントとして見る」という印で、
+                    // 直後のフィールド射影と対で意味を持つ。
+                    let place = Place {
+                        local: scrutinee_local,
+                        projection: vec![
+                            PlaceElem::Downcast(resolved.index),
+                            PlaceElem::Field(name, ty),
+                        ],
+                    };
+                    self.push_assign(
+                        bb,
+                        Place::from_local(local),
+                        Rvalue::Use(Operand::Place(place)),
+                        span,
+                    );
+                }
+
+                bb
+            }
         }
     }
 

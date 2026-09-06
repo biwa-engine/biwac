@@ -294,22 +294,24 @@ impl Builder<'_> {
             // 呼び出しは制御を移すが、戻ってくるので分岐と同じ扱いでよい。
             TerminatorKind::Call { target, .. } => out.extend(self.do_branch(bb, target)),
             TerminatorKind::SwitchInt { targets, .. } => {
-                // 今の MIR の switch は必ず 2 分岐である
-                // (`if` と `while` からしか作られない)。
-                // enum が入って多分岐になったら br_table を使う形に足す。
+                // MIR の switch は必ず 2 分岐である。
+                // `if` と `while` の条件だけでなく、`match` も
+                // 「タグと 1 つの値を比べる」形の連鎖に落としてある
+                // (lowering の `lower_match` を参照)。
+                //
+                // 多分岐をそのまま持てるようにするなら、
+                // ここを `br_table` に落とす形へ足すことになる。
                 let arms: Vec<(u128, BasicBlock)> = targets.iter().collect();
                 let otherwise = targets.otherwise();
 
                 if arms.len() == 1 {
-                    // 値 0 (偽) で arms[0]、それ以外で otherwise。
+                    // 値が一致したら arms[0]、しなければ otherwise。
                     self.context.push(Enclosing::If);
-                    let then = self.do_branch(bb, otherwise);
-                    let els = self.do_branch(bb, arms[0].1);
+                    let then = self.do_branch(bb, arms[0].1);
+                    let els = self.do_branch(bb, otherwise);
                     self.context.pop();
                     out.push(Structured::If { bb, then, els });
                 } else {
-                    // 多分岐はまだ作られない。
-                    // 作られるようになったらここで br_table に落とす。
                     panic!(
                         "compiler bug: a switch with {} arms is not supported yet",
                         arms.len()

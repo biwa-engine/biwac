@@ -91,6 +91,7 @@ fn resolve_in_module(
                 biwac_ast::TypeDef::Struct(struct_def) => {
                     Some(struct_def.resolve(&ctx, def_collector))
                 }
+                biwac_ast::TypeDef::Enum(enum_def) => Some(enum_def.resolve(&ctx, def_collector)),
                 biwac_ast::TypeDef::TypeAlias(alias_def) => {
                     Some(alias_def.resolve(&ctx, def_collector))
                 }

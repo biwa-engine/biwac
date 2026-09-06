@@ -7,9 +7,9 @@ use biwac_span::{DefId, GenDefId, LocalGenDefId, PackageLocalDefId, Span, TyDefI
 
 use crate::codec::{BIWAC_MIR_FORMAT_VERSION, DecodedMir, MirDecodeError};
 use crate::{
-    BasicBlock, BasicBlockData, BinOp, Body, Callee, Const, GenArgs, Local, LocalDecl, Mir,
-    MirItem, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind, StringPool,
-    SwitchTargets, TerminatorKind, UnOp,
+    AggregateKind, BasicBlock, BasicBlockData, BinOp, Body, Callee, Const, GenArgs, Local,
+    LocalDecl, Mir, MirItem, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind,
+    StringPool, SwitchTargets, TerminatorKind, UnOp,
 };
 
 /// 組み立て途中の項目。
@@ -514,7 +514,24 @@ impl Decoder<'_> {
             return Ok(Rvalue::UnaryOp(op, o));
         }
         if head == "agg" {
-            let def_id = TyDefId::new(self.parse_sym(toks.get(1))?);
+            // `agg p0:3` は struct、`agg p0:3/v1` は enum のバリアント。
+            let sym_tok = toks.get(1).copied().unwrap_or("");
+            let (sym_tok, variant) = match sym_tok.split_once("/v") {
+                Some((sym, index)) => {
+                    let index = index
+                        .parse()
+                        .map_err(|_| self.error(format!("`{sym_tok}` has a bad variant index")))?;
+                    (sym, Some(index))
+                }
+                None => (sym_tok, None),
+            };
+
+            let def_id = TyDefId::new(self.parse_sym(Some(&sym_tok))?);
+            let kind = match variant {
+                Some(index) => AggregateKind::Enum(def_id, index),
+                None => AggregateKind::Struct(def_id),
+            };
+
             let mut members = Vec::new();
             for t in &toks[2..] {
                 let Some((name, op)) = t.split_once('=') else {
@@ -523,7 +540,11 @@ impl Decoder<'_> {
                 let name = self.intern(name);
                 members.push((name, self.parse_operand(op)?));
             }
-            return Ok(Rvalue::Aggregate(def_id, members));
+            return Ok(Rvalue::Aggregate(kind, members));
+        }
+        if head == "discr" {
+            let place = self.parse_place(toks.get(1).copied().unwrap_or(""))?;
+            return Ok(Rvalue::Discriminant(place));
         }
 
         // 演算子でも集約でもなければ、被演算子そのもの (Use)。
@@ -631,6 +652,17 @@ impl Decoder<'_> {
 
         let mut projection = Vec::new();
         for p in parts {
+            // `.v1` は downcast、`.name@ty` はフィールド。
+            if let Some(index) = p.strip_prefix('v')
+                && !p.contains('@')
+            {
+                let index = index
+                    .parse()
+                    .map_err(|_| self.error(format!("`{p}` is not a downcast")))?;
+                projection.push(PlaceElem::Downcast(index));
+                continue;
+            }
+
             let Some((name, ty)) = p.split_once('@') else {
                 return self.err(format!("`{p}` is not a `field@type` pair"));
             };

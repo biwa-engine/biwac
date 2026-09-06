@@ -36,6 +36,9 @@ pub enum TkKind<'src> {
     KwFloat,                  // Float (reserved word of type)
     KwBool,                   // Bool (reserved word of type)
     KwStruct,                 // struct (reserved word of type)
+    KwEnum,                   // enum (reserved word of type)
+    KwMatch,                  // match
+    KwUnderscore,             // _ (wildcard pattern)
     KwImpl,                   // impl (reserved word of implementation for type)
     KwSelfTyp,                // Self (reserved word of type)
     KwSelfVar,                // self (reserved word of method value)
@@ -62,6 +65,7 @@ pub enum TkKind<'src> {
     MarkComma,                // ,
     MarkDot,                  // .
     MarkArrow,                // ->
+    MarkFatArrow,             // =>
     MarkColon,                // :
     MarkSemiColon,            // ;
     MarkDoubleColon,          // ::
@@ -90,6 +94,9 @@ impl TkKind<'_> {
             Self::KwFloat => "Float".to_string(),
             Self::KwBool => "Bool".to_string(),
             Self::KwStruct => "struct".to_string(),
+            Self::KwEnum => "enum".to_string(),
+            Self::KwMatch => "match".to_string(),
+            Self::KwUnderscore => "_".to_string(),
             Self::KwImpl => "impl".to_string(),
             Self::KwSelfTyp => "Self".to_string(),
             Self::KwSelfVar => "self".to_string(),
@@ -116,6 +123,7 @@ impl TkKind<'_> {
             Self::MarkComma => ",".to_string(),
             Self::MarkDot => ".".to_string(),
             Self::MarkArrow => "->".to_string(),
+            Self::MarkFatArrow => "=>".to_string(),
             Self::MarkColon => ":".to_string(),
             Self::MarkSemiColon => ";".to_string(),
             Self::MarkDoubleColon => "::".to_string(),
@@ -145,6 +153,9 @@ pub enum TkKindName {
     KwFloat,         // Float (reserved word of type)
     KwBool,          // Bool (reserved word of type)
     KwStruct,        // struct (reserved word of type)
+    KwEnum,          // enum (reserved word of type)
+    KwMatch,         // match
+    KwUnderscore,    // _ (wildcard pattern)
     KwImpl,          // impl (reserved word of implementation for type)
     KwSelfTyp,       // Self (reserved word of type)
     KwSelfVar,       // self (reserved word of method value)
@@ -171,6 +182,7 @@ pub enum TkKindName {
     MarkComma,       // ,
     MarkDot,         // .
     MarkArrow,       // ->
+    MarkFatArrow,    // =>
     MarkColon,       // :
     MarkSemiColon,   // ;
     MarkDoubleColon, // ::
@@ -199,6 +211,9 @@ impl TkKind<'_> {
             Self::KwFloat => TkKindName::KwFloat, // Float (reserved word of type)
             Self::KwBool => TkKindName::KwBool,  // Bool (reserved word of type)
             Self::KwStruct => TkKindName::KwStruct, // struct (reserved word of type)
+            Self::KwEnum => TkKindName::KwEnum,  // enum (reserved word of type)
+            Self::KwMatch => TkKindName::KwMatch, // match
+            Self::KwUnderscore => TkKindName::KwUnderscore, // _
             Self::KwImpl => TkKindName::KwImpl,  // impl (reserved word of implementation for type)
             Self::KwSelfTyp => TkKindName::KwSelfTyp, // Self (reserved word of type)
             Self::KwSelfVar => TkKindName::KwSelfVar, // self (reserved word of method value)
@@ -225,6 +240,7 @@ impl TkKind<'_> {
             Self::MarkComma => TkKindName::MarkComma, // ,
             Self::MarkDot => TkKindName::MarkDot, // .
             Self::MarkArrow => TkKindName::MarkArrow, // ->
+            Self::MarkFatArrow => TkKindName::MarkFatArrow, // =>
             Self::MarkColon => TkKindName::MarkColon, // :
             Self::MarkSemiColon => TkKindName::MarkSemiColon, // ;
             Self::MarkDoubleColon => TkKindName::MarkDoubleColon, // ::
@@ -255,6 +271,9 @@ impl TkKindName {
             Self::KwFloat => "Float".to_string(),
             Self::KwBool => "Bool".to_string(),
             Self::KwStruct => "struct".to_string(),
+            Self::KwEnum => "enum".to_string(),
+            Self::KwMatch => "match".to_string(),
+            Self::KwUnderscore => "_".to_string(),
             Self::KwImpl => "impl".to_string(),
             Self::KwSelfTyp => "Self".to_string(),
             Self::KwSelfVar => "self".to_string(),
@@ -281,6 +300,7 @@ impl TkKindName {
             Self::MarkComma => ",".to_string(),
             Self::MarkDot => ".".to_string(),
             Self::MarkArrow => "->".to_string(),
+            Self::MarkFatArrow => "=>".to_string(),
             Self::MarkColon => ":".to_string(),
             Self::MarkSemiColon => ";".to_string(),
             Self::MarkDoubleColon => "::".to_string(),

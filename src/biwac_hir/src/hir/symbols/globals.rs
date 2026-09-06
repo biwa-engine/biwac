@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use biwac_ast::VariantShape;
 use biwac_base::InternedIdent;
-use biwac_span::{GenDefId, LocalGenDefId, Span, VarId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, VarId, VariantDefId};
 
 use crate::{DecledVar, Expr, ExprId, Ident, Stmt, Ty};
 
@@ -140,7 +141,7 @@ pub struct DecledArg {
 #[derive(Debug, Clone)]
 pub enum TyDefKind {
     Struct(Box<StructDef>),
-    // Enum(EnumDefContent),
+    Enum(Box<EnumDef>),
     NativeTypeAlias(Box<NativeTypeAliasDef>),
 }
 
@@ -151,6 +152,48 @@ pub struct StructDef {
     pub members: HashMap<InternedIdent, Ty>,
     pub genargs: Vec<GenDefId>,
     // TODO: その他各種情報
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumDef {
+    pub name: Ident,
+
+    /// 宣言順。添字がそのままタグの値になるので、並べ替えてはならない。
+    pub variants: Vec<VariantDef>,
+    pub genargs: Vec<GenDefId>,
+}
+
+impl EnumDef {
+    pub fn variant_of(&self, def_id: &VariantDefId) -> Option<(u32, &VariantDef)> {
+        self.variants
+            .iter()
+            .enumerate()
+            .find(|(_, v)| v.def_id == *def_id)
+            .map(|(i, v)| (i as u32, v))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VariantDef {
+    pub name: Ident,
+    pub def_id: VariantDefId,
+    pub shape: VariantShape,
+
+    /// 宣言順。タプル形式は `_0`, `_1` に正規化済みである。
+    /// 名前を持つ形に揃えてあるので、MIR も backend も struct と同じ経路を通れる。
+    pub fields: Vec<(Ident, Ty)>,
+}
+
+/// バリアントが `Hir` のどこに属するか。
+///
+/// `VariantDefId` からは親の enum も添字も分からないので、逆引き表を持つ。
+/// `Color::Red` ならパスから親を辿れるが、
+/// `import ..::Color::Red;` して `Red` と書いた形では辿れないためである。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VariantOwner {
+    pub enum_def_id: TyDefId,
+    /// 宣言順の添字。そのままタグの値になる。
+    pub index: u32,
 }
 
 #[derive(Debug, Clone)]

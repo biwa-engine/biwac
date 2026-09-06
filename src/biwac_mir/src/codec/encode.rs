@@ -7,8 +7,8 @@ use biwac_span::{GenDefId, LocalGenDefId, TyDefId, ValDefId};
 
 use crate::codec::{BIWAC_MIR_FORMAT_VERSION, EncodeCtx};
 use crate::{
-    BinOp, Body, Callee, Const, GenArgs, Mir, MirItem, NativeItem, Operand, Place, PlaceElem,
-    Rvalue, StatementKind, TerminatorKind, UnOp,
+    AggregateKind, BinOp, Body, Callee, Const, GenArgs, Mir, MirItem, NativeItem, Operand, Place,
+    PlaceElem, Rvalue, StatementKind, TerminatorKind, UnOp,
 };
 
 /// 型表の 1 行。パッケージ別名を振る前なので、生の [`PackageId`] を持つ。
@@ -263,8 +263,10 @@ fn collect_ty_packages(ty: &Ty, ctx: &EncodeCtx, out: &mut BTreeSet<u32>) {
 
 fn collect_place_packages(place: &Place, ctx: &EncodeCtx, out: &mut BTreeSet<u32>) {
     for elem in &place.projection {
-        let PlaceElem::Field(_, ty) = elem;
-        collect_ty_packages(ty, ctx, out);
+        // downcast は型を持たない。直後の Field が型を持っている。
+        if let PlaceElem::Field(_, ty) = elem {
+            collect_ty_packages(ty, ctx, out);
+        }
     }
 }
 
@@ -286,12 +288,13 @@ fn collect_rvalue_packages(rvalue: &Rvalue, ctx: &EncodeCtx, out: &mut BTreeSet<
             collect_operand_packages(l, ctx, out);
             collect_operand_packages(r, ctx, out);
         }
-        Rvalue::Aggregate(def_id, members) => {
-            out.insert(resolve_pkg(def_id.pkg(), ctx));
+        Rvalue::Aggregate(kind, members) => {
+            out.insert(resolve_pkg(kind.def_id().pkg(), ctx));
             for (_, op) in members {
                 collect_operand_packages(op, ctx, out);
             }
         }
+        Rvalue::Discriminant(place) => collect_place_packages(place, ctx, out),
     }
 }
 
@@ -504,9 +507,16 @@ impl Encoder<'_> {
     fn render_place(&mut self, place: &Place) -> String {
         let mut s = format!("_{}", place.local.value());
         for elem in &place.projection {
-            let PlaceElem::Field(name, ty) = elem;
-            let ty = self.intern_ty(ty);
-            let _ = write!(s, ".{}@{}", self.ident(name), ty);
+            match elem {
+                PlaceElem::Field(name, ty) => {
+                    let ty = self.intern_ty(ty);
+                    let _ = write!(s, ".{}@{}", self.ident(name), ty);
+                }
+                // `.v1` の形。直後に必ず Field が続く。
+                PlaceElem::Downcast(index) => {
+                    let _ = write!(s, ".v{index}");
+                }
+            }
         }
         s
     }
@@ -602,15 +612,23 @@ impl Encoder<'_> {
                 let r = self.render_operand(r);
                 format!("{} {l} {r}", bin_op(*op))
             }
-            Rvalue::Aggregate(def_id, members) => {
-                let (pkg, sym) = self.ty_sym(def_id);
-                let mut s = format!("agg p{pkg}:{sym}");
+            Rvalue::Aggregate(kind, members) => {
+                let def_id = kind.def_id();
+                let (pkg, sym) = self.ty_sym(&def_id);
+                let mut s = match kind {
+                    AggregateKind::Struct(_) => format!("agg p{pkg}:{sym}"),
+                    AggregateKind::Enum(_, index) => format!("agg p{pkg}:{sym}/v{index}"),
+                };
                 for (name, op) in members {
                     let name = self.ident(name);
                     let op = self.render_operand(op);
                     let _ = write!(s, " {name}={op}");
                 }
                 s
+            }
+            Rvalue::Discriminant(place) => {
+                let place = self.render_place(place);
+                format!("discr {place}")
             }
         }
     }

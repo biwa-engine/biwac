@@ -1,6 +1,8 @@
 import math::pos::Pos;
 import math::pos::Pos::new;
 import collections::Pair;
+// バリアント単体を import できる。
+import package::Shade::Dark;
 import collections::Vec;
 
 type PairIntT[T] = Pair[Int, T];
@@ -60,6 +62,52 @@ fn greeting_demo() {
   let red = c.r;
 }
 
+// 自パッケージの enum。
+//
+// バリアントの並びは宣言順で、その添字がタグの値になる。
+enum Shade {
+  Dark,
+  Mid(Int),
+  Tinted { hue: Int, alpha: Int },
+}
+
+impl Shade {
+  fn level(self) -> Int {
+    match self {
+      Shade::Dark => 0,
+      Shade::Mid(n) => n,
+      Shade::Tinted { hue = h, alpha } => h + alpha,
+    }
+  }
+}
+
+fn enum_demo() -> Int {
+  let a = Shade::Mid(3);
+  let b = Shade::Tinted { hue = 10, alpha = 20 };
+
+  // import したバリアントは、パスを書かずに使える。
+  let c = Dark;
+
+  // 文形の match と `_` のアーム。
+  let n = 0;
+  match c {
+    Dark => { n = 1; }
+    _ => { n = 2; }
+  }
+
+  a.level() + b.level() + c.level() + n
+}
+
+// 別パッケージ (std) の enum とそのバリアント。
+fn ext_enum_demo() -> Int {
+  let o = std::types::option::Option::Some(7);
+
+  match o {
+    std::types::option::Option::Some(v) => v,
+    std::types::option::Option::None => 0,
+  }
+}
+
 // 型エイリアス越しに外部パッケージの関連関数を引く。
 //
 // エイリアスの右辺が外部パッケージの型を指すとき、canonical な型は
@@ -114,6 +162,8 @@ scene main(g: MyGame) -> MyGame {{
   #foo()
   #greeting_demo()
   #alias_assoc_demo()
+  #let _shade = enum_demo()
+  #let _opt = ext_enum_demo()
 
   #endscene g
 }}
