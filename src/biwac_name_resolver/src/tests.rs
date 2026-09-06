@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use biwac_base::{BiwacError, ErrorContext};
 use biwac_dependency_metadata::ExternalPackage;
@@ -30,7 +27,7 @@ fn test1() {
     let metadata =
         biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
 
-    let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
+    // let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
 
     // 依存パッケージは <root>/.biwa_build/deps/<name>/ に取得済みである前提。
     // std は依存を持たないので、実際にはここは使われない。

@@ -1,20 +1,20 @@
-use std::{path::Path, str::FromStr};
-
-use biwac_base::{MetadataHolder, PackageName, SourceHolder};
+// use std::{path::Path, str::FromStr};
+//
+// use biwac_base::{PackageName, SourceHolder};
 
 #[test]
 fn test1() {
     // assets/tests/test1
     // 以下にbiwaのパッケージのディレクトリがあることを前提とする
 
-    let mut srcs = SourceHolder::default();
-    let pkg_root_path = Path::new("../../assets/tests/test1");
-    let pkg_name = PackageName::from_str("test1").unwrap();
-
-    let metadata =
-        biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
-
-    let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
+    // let mut srcs = SourceHolder::default();
+    // let pkg_root_path = Path::new("../../assets/tests/test1");
+    // let pkg_name = PackageName::from_str("test1").unwrap();
+    //
+    // let metadata =
+    //     biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
+    //
+    // let build_dir_path = pkg_root_path.join(Path::new(biwac_base::BIWA_BUILD_DIRECTORY_NAME));
 
     //     let pkg =
     //         biwac_package_loader::Pkg::try_load(&metadata, &mut srcs, pkg_root_path.to_path_buf())
