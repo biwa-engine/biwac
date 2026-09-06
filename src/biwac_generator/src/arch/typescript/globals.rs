@@ -99,7 +99,7 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for StructDef {
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
     fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
-        let mut fctx = FnAstBuildCtx::new(&self.expr_tys, &self.var_tys);
+        let mut fctx = FnAstBuildCtx::new(&self.var_tys);
 
         let fn_body = &self.body;
 
@@ -535,7 +535,7 @@ pub(super) fn native_code_as_oxc<'a>(
 
 impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NovelSceneDef {
     fn as_oxc_global(&'a self, id: String, ctx: &'a AstBuildCtx) -> oxc_ast::ast::Statement<'a> {
-        let mut fctx = FnAstBuildCtx::new(&self.expr_tys, &self.var_tys);
+        let mut fctx = FnAstBuildCtx::new(&self.var_tys);
 
         let fn_body = &self.body;
 

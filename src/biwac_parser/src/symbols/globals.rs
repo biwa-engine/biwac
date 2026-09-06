@@ -565,7 +565,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
         }
     }
 
-    pub(crate) fn consume_method_argsdec(
+    fn consume_method_argsdec(
         &mut self,
     ) -> Result<FnOrMethod<ArgDeclList, MethodArgDeclList>, ParseError<'src>> {
         let mod_id = self.mod_id;

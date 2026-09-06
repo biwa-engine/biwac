@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use biwac_base::{IdentInterner, InternedIdent, PackageId, SourceHolder};
 use biwac_dependency_metadata::DepMetadata;
-use biwac_hir::{ExprId, Hir, Ty, ValDefKind};
+use biwac_hir::{Hir, Ty, ValDefKind};
 use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_span::{TyDefId, ValDefId, VarId};
 
@@ -91,15 +91,13 @@ impl<'a> AstBuildCtx<'a> {
 }
 
 pub(super) struct FnAstBuildCtx<'a> {
-    pub(super) expr_tys: &'a HashMap<ExprId, Ty>,
     pub(super) var_tys: &'a HashMap<VarId, Ty>,
     pub(super) stmts: Vec<oxc_ast::ast::Statement<'a>>,
 }
 
 impl<'a> FnAstBuildCtx<'a> {
-    pub(super) fn new(expr_tys: &'a HashMap<ExprId, Ty>, var_tys: &'a HashMap<VarId, Ty>) -> Self {
+    pub(super) fn new(var_tys: &'a HashMap<VarId, Ty>) -> Self {
         Self {
-            expr_tys,
             var_tys,
             stmts: Vec::new(),
         }

@@ -108,7 +108,7 @@ impl Hir {
         }
 
         Self {
-            deps_recorder: RefCell::new(DepsRecorder::new(pkg_name.clone())),
+            deps_recorder: RefCell::new(DepsRecorder::new()),
             pkg_name,
             packages: pkg_names,
             vals,
@@ -122,15 +122,13 @@ impl Hir {
 
 #[derive(Debug, Clone)]
 pub struct DepsRecorder {
-    pkg_name: PackageName,
     depended_tys: HashSet<TyDefId>,
     depended_vals: HashSet<ValDefId>,
 }
 
 impl DepsRecorder {
-    fn new(pkg_name: PackageName) -> Self {
+    fn new() -> Self {
         Self {
-            pkg_name,
             depended_tys: HashSet::new(),
             depended_vals: HashSet::new(),
         }

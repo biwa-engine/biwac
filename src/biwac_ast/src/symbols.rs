@@ -55,7 +55,7 @@ pub struct PathSegment {
     pub resolved_id: OnceCell<PathSegmentResolution>,
 
     /// zst ensures that [`PathSegment`] is created in this module.
-    zst: private::PrivateZeroSizeType,
+    _zst: private::PrivateZeroSizeType,
 }
 
 impl Path {
@@ -114,7 +114,7 @@ impl From<Ident> for PathSegment {
         Self {
             ident: value,
             resolved_id: OnceCell::new(),
-            zst: private::PrivateZeroSizeType,
+            _zst: private::PrivateZeroSizeType,
         }
     }
 }
