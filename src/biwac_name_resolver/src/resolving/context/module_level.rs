@@ -6,7 +6,7 @@ use std::{
 use biwac_ast::{AbsolutePathHeader, Globals, ModAst, Path, PathSegmentResolution};
 use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{
-    DepMetadataModuleView, ExternalChildKind, ExternalChildRef, PackageModuleView,
+    DepMetadata, DepMetadataModuleView, ExternalChildKind, ExternalChildRef, PackageModuleView,
 };
 use biwac_span::{DefIdKind, TyDefId};
 
@@ -85,6 +85,16 @@ impl<'t> ModuleResolveCtx<'t> {
     }
 }
 
+impl ModuleResolveCtx<'_> {
+    fn local_tree_ctx(&self) -> LocalTreeCtx<'_> {
+        LocalTreeCtx {
+            ty_index: self.ty_index,
+            ext_pkg_data: &self.global_tree.ext_pkg_data,
+            interner: self.interner,
+        }
+    }
+}
+
 impl ResolveCtx for ModuleResolveCtx<'_> {
     fn resolve_path(&self, path: &Path) -> Result<(), ResolveError> {
         // If already resolved, fast path.
@@ -111,7 +121,12 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
         match &path.abs_header {
             Some(AbsolutePathHeader::Package(_)) => {
                 let self_package = &self.global_tree.packages.get(&self.self_pkg_name).unwrap();
-                resolve_path_in_module(path, 0, &self_package.root_module_tree, self.ty_index)
+                resolve_path_in_module(
+                    path,
+                    0,
+                    &self_package.root_module_tree,
+                    &self.local_tree_ctx(),
+                )
             }
 
             Some(AbsolutePathHeader::SelfTyp(self_typ)) => Err(ResolveError::UnexpectedSelfType {
@@ -122,7 +137,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                 let first_segment_ident = &path.segments[0].ident;
                 if self.module.children.contains_key(&first_segment_ident.id) {
                     // Relative path found in current module - resolve properly.
-                    resolve_path_in_module(path, 0, self.module, self.ty_index)
+                    resolve_path_in_module(path, 0, self.module, &self.local_tree_ctx())
                 } else {
                     match self.imports.get(&first_segment_ident.id) {
                         Some(import_path) => match self.resolve_path(import_path) {
@@ -146,7 +161,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                                     path,
                                                     1,
                                                     ty_tree,
-                                                    self.ty_index,
+                                                    &self.local_tree_ctx(),
                                                 ),
                                                 None => {
                                                     path.segments[1]
@@ -197,7 +212,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                                     path,
                                                     1,
                                                     mod_tree,
-                                                    self.ty_index,
+                                                    &self.local_tree_ctx(),
                                                 ),
                                                 None => {
                                                     path.segments[1]
@@ -279,7 +294,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                         path,
                                         1,
                                         &package.root_module_tree,
-                                        self.ty_index,
+                                        &self.local_tree_ctx(),
                                     )
                                 }
                             } else if let Some(view) =
@@ -318,13 +333,26 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
     }
 }
 
+/// 自パッケージの名前ツリーを辿るあいだ持ち回る参照。
+///
+/// `ty_index` だけでは足りないのは、型エイリアスの右辺が
+/// 外部パッケージの型を指しうるためである
+/// (`type CharacterBiwa = std::game::Character[P]` のような形)。
+/// その場合 canonical な型はローカルのツリーに居ないので、
+/// 依存メタデータ側に降りて関連アイテムを引く必要がある。
+struct LocalTreeCtx<'t> {
+    ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
+    ext_pkg_data: &'t HashMap<PackageId, Arc<DepMetadata>>,
+    interner: &'t IdentInterner,
+}
+
 /// Resolves path starting at `depth` within a module tree.
 /// Sets `resolved_id` on each path segment and navigates into child modules or type children.
 fn resolve_path_in_module(
     path: &Path,
     depth: usize,
     module: &ModuleNameTree,
-    ty_index: &HashMap<TyDefId, &TyNameTree>,
+    ctx: &LocalTreeCtx<'_>,
 ) -> Result<(), ResolveError> {
     let segment = &path.segments[depth];
     match module.children.get(&segment.ident.id) {
@@ -340,10 +368,10 @@ fn resolve_path_in_module(
             } else {
                 match item {
                     ModuleNameTreeItem::Mod(child_module) => {
-                        resolve_path_in_module(path, depth + 1, child_module, ty_index)
+                        resolve_path_in_module(path, depth + 1, child_module, ctx)
                     }
                     ModuleNameTreeItem::Ty(ty_tree) => {
-                        resolve_path_in_ty(path, depth + 1, ty_tree, ty_index)
+                        resolve_path_in_ty(path, depth + 1, ty_tree, ctx)
                     }
                     ModuleNameTreeItem::Val(_) => {
                         path.segments[depth + 1]
@@ -372,13 +400,48 @@ fn resolve_path_in_ty(
     path: &Path,
     depth: usize,
     ty_tree: &TyNameTree,
-    ty_index: &HashMap<TyDefId, &TyNameTree>,
+    ctx: &LocalTreeCtx<'_>,
 ) -> Result<(), ResolveError> {
     // Follow alias chain to find the canonical type's children.
-    let canonical_tree = if let Some(canonical_id) = *ty_tree.alias_target.borrow() {
-        ty_index.get(&canonical_id).copied().unwrap_or(ty_tree)
-    } else {
-        ty_tree
+    let alias_target = *ty_tree.alias_target.borrow();
+
+    // 右辺が外部パッケージの型を指すエイリアスは、
+    // canonical な型がローカルのツリーに居ない。
+    // `type C = std::game::Character[P]; C::new(..)` を引けるように、
+    // 依存メタデータの view に降りて関連アイテムを解決する。
+    if let Some(canonical_id) = alias_target
+        && !canonical_id.pkg().is_self()
+    {
+        let pkg_id = canonical_id.pkg();
+        let Some(dep_arc) = ctx.ext_pkg_data.get(&pkg_id) else {
+            path.segments[depth]
+                .resolved_id
+                .set(PathSegmentResolution::Err)
+                .unwrap();
+            return Err(ResolveError::PathResolutionFailed {
+                path: Box::new(path.clone()),
+            });
+        };
+
+        let view = DepMetadataModuleView::new_for_sym_idx(
+            Arc::clone(dep_arc),
+            canonical_id.local_idx(),
+            pkg_id,
+        );
+
+        return resolve_path_in_ext_ty(
+            path,
+            depth,
+            canonical_id.local_idx(),
+            &view,
+            pkg_id,
+            ctx.interner,
+        );
+    }
+
+    let canonical_tree = match alias_target {
+        Some(canonical_id) => ctx.ty_index.get(&canonical_id).copied().unwrap_or(ty_tree),
+        None => ty_tree,
     };
 
     let segment = &path.segments[depth];

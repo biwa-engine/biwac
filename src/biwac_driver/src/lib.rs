@@ -1110,7 +1110,52 @@ mod tests {
         f(&mut built)
     }
 
+    /// 依存の取得は未実装なので、フィクスチャの分だけここで用意する。
+    ///
+    /// `<pkg>/.biwa_build/deps/<dep>` に依存パッケージが平らに並んでいることを
+    /// ドライバが前提にしている。フィクスチャは同じ `assets/tests` に居るので、
+    /// symlink を張れば足りる。コピーにしないのは、テストが
+    /// `assets/tests/<dep>/.biwa_build/` に書かれた `.biwamir` を読むためである。
+    ///
+    /// `.biwa_build` は gitignore されているので、新しいチェックアウトでは
+    /// これが無い。テストのたびに作り直す。
+    /// TODO: 依存の取得が実装されたらこれを削除する
+    fn ensure_fixture_deps(pkg: &str) {
+        // (パッケージ, その依存) の表。フィクスチャは数が少ないので直に書く。
+        let deps: &[&str] = match pkg {
+            "test1" => &["std", "color", "greeter"],
+            "greeter" => &["std", "color"],
+            _ => &[],
+        };
+        if deps.is_empty() {
+            return;
+        }
+
+        let deps_dir = Path::new("../../assets/tests")
+            .join(pkg)
+            .join(biwac_base::BIWA_BUILD_DIRECTORY_NAME)
+            .join("deps");
+        std::fs::create_dir_all(&deps_dir).expect("failed to create the fixture deps dir");
+
+        for dep in deps {
+            let link = deps_dir.join(dep);
+            if std::fs::symlink_metadata(&link).is_ok() {
+                continue;
+            }
+            // deps_dir は <pkg>/.biwa_build/deps なので、3 つ上が assets/tests。
+            let target = Path::new("../../..").join(dep);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &link)
+                .unwrap_or_else(|e| panic!("failed to link the fixture dep {dep}: {e}"));
+            #[cfg(not(unix))]
+            std::os::windows::fs::symlink_dir(&target, &link)
+                .unwrap_or_else(|e| panic!("failed to link the fixture dep {dep}: {e}"));
+        }
+    }
+
     fn emit_mir_build(pkg: &str) {
+        ensure_fixture_deps(pkg);
+
         compile(
             Path::new("../../assets/tests").join(pkg),
             BuildOptions {

@@ -57,6 +57,29 @@ fn greeting_demo() {
   let red = c.r;
 }
 
+// 型エイリアス越しに外部パッケージの関連関数を引く。
+//
+// エイリアスの右辺が外部パッケージの型を指すとき、canonical な型は
+// 自パッケージの名前ツリーに居ない。依存メタデータの view まで降りて
+// 関連アイテムを引けているかの検証である。
+type ExtGreeting = greeter::Greeting;      // 非ジェネリックな外部型
+type IntBox = greeter::Box[Int];           // ジェネリックな外部型 (型引数つき)
+type IntBox2 = IntBox;                     // エイリアスの連鎖
+type PairIntInt = Pair[Int, Int];          // 自パッケージの型 (回帰確認)
+
+fn alias_assoc_demo() {
+  let g = ExtGreeting::new(greeter::greet("Hi"));
+  let m = g.message();
+
+  let b = IntBox::new(1);
+  let n = b.get();
+
+  let b2 = IntBox2::new(2);
+  let n2 = b2.get();
+
+  let p = PairIntInt::new(3, 4).add();
+}
+
 // 単相化の根はランタイムが呼ぶ scene (main) だけなので、
 // そこから辿れない関数は成果物に入らない。
 // scene main が foo() と greeting_demo() を呼んでいるのは、
@@ -82,6 +105,7 @@ scene main(g: MyGame) -> MyGame {{
 
   #foo()
   #greeting_demo()
+  #alias_assoc_demo()
 
   #endscene g
 }}

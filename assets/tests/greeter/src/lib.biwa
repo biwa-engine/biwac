@@ -32,3 +32,25 @@ impl Greeting {
 fn theme() -> color::Rgb {
   return color::Rgb::white();
 }
+
+// ジェネリックな型。
+//
+// 使う側は `type IntBox = greeter::Box[Int];` のようにエイリアスを張り、
+// そのエイリアス越しに `IntBox::new(1)` と関連関数を引けなければならない。
+// エイリアスの右辺が外部パッケージの型を指す場合、canonical な型は
+// 使う側の名前ツリーに居ないので、依存メタデータまで降りる必要がある。
+struct Box[T] {
+  value: T,
+}
+
+impl[T] Box[T] {
+  fn new(value: T) -> Self {
+    Self {
+      value = value,
+    }
+  }
+
+  fn get(self) -> T {
+    self.value
+  }
+}
