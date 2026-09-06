@@ -19,7 +19,7 @@ impl<'src> NovelSourceStream<'src> {
             .span
             .clone();
 
-        let cond = self.consume_expression()?;
+        let cond = self.consume_condition_expression()?;
 
         // "{"
         let then_begin = self

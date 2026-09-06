@@ -74,7 +74,9 @@ impl<'src> NovelSourceStream<'src> {
                             args,
                             span: Span::merge(&begin, &span),
                         })))
-                    } else if let NCodeTkKind::MarkLBrace = t2.kind {
+                    } else if let NCodeTkKind::MarkLBrace = t2.kind
+                        && self.struct_literal_allowed()
+                    {
                         let (members, span) = self.consume_struct_members()?;
 
                         Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
@@ -93,7 +95,7 @@ impl<'src> NovelSourceStream<'src> {
             }
             NCodeTkKind::MarkLPare => {
                 self.next_token()?;
-                let expr = self.consume_expression()?;
+                let expr = self.consume_delimited_expression()?;
 
                 let _ = self.must_consume_next(vec![NCodeTkKindName::MarkRPare])?;
 
@@ -123,7 +125,7 @@ impl<'src> NovelSourceStream<'src> {
                 self.next_token()?;
                 break;
             } else {
-                let expr = self.consume_expression()?;
+                let expr = self.consume_delimited_expression()?;
                 args.push(expr);
 
                 match self.peek_token()? {
@@ -176,7 +178,7 @@ impl<'src> NovelSourceStream<'src> {
             } else {
                 let member = self.consume_identifier()?;
                 let _ = self.must_consume_next(vec![NCodeTkKindName::MarkAssign])?;
-                let expr = self.consume_expression()?;
+                let expr = self.consume_delimited_expression()?;
 
                 members.push((member, Box::new(expr)));
 

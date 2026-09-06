@@ -2,7 +2,7 @@ pub(crate) mod line;
 
 use std::fmt::Display;
 
-use biwac_ast::{AbsolutePathHeader, Ident, Path};
+use biwac_ast::{AbsolutePathHeader, Exprs, Ident, Path};
 use biwac_base::IdentInterner;
 use biwac_span::Span;
 
@@ -125,6 +125,14 @@ pub struct NovelSourceStream<'src> {
     // DSL部分の文字列スライス src のインデックスで持つ:
     current_line: NovelLineHandler,
     next_line_begin_idx: usize,
+
+    /// 構造体リテラルを式として認めない区間にいるか。
+    ///
+    /// `if` の条件式は直後にブロックの `{` が来るため、
+    /// `if flag {` の `{` を構造体リテラルの開始と読むと必ず誤る。
+    /// 条件式のあいだはこれを立てて構造体リテラルを候補から外す。
+    /// 括弧の内側では意味が閉じるので `(Foo { .. })` は書ける。
+    no_struct_literal: bool,
 }
 
 #[derive(Debug)]
@@ -178,7 +186,29 @@ impl<'src> NovelSourceStream<'src> {
             current_line: NovelLineHandler::new(0, 0, NovelLineKind::RawNovel),
 
             next_line_begin_idx: 0,
+
+            no_struct_literal: false,
         }
+    }
+
+    /// `if` の条件式を読む。構造体リテラルは認めない。
+    pub(crate) fn consume_condition_expression(&mut self) -> Result<Exprs, NovelParseError> {
+        let saved = std::mem::replace(&mut self.no_struct_literal, true);
+        let result = self.consume_expression();
+        self.no_struct_literal = saved;
+        result
+    }
+
+    /// `(` `)` などの区切り記号の内側で式を読む。制限はここで解ける。
+    pub(crate) fn consume_delimited_expression(&mut self) -> Result<Exprs, NovelParseError> {
+        let saved = std::mem::replace(&mut self.no_struct_literal, false);
+        let result = self.consume_expression();
+        self.no_struct_literal = saved;
+        result
+    }
+
+    pub(crate) fn struct_literal_allowed(&self) -> bool {
+        !self.no_struct_literal
     }
 
     // begin_idx は src の中での byte index

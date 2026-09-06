@@ -12,7 +12,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     ) -> Result<ExprOrStmt<IfExpr, IfStmt>, ParseError<'src>> {
         let begin = self.must_consume_next(vec![TkKindName::KwIf])?.span.clone();
 
-        let cond = self.consume_expression()?;
+        let cond = self.consume_condition_expression()?;
 
         match self.consume_block_expression_or_statement()? {
             ExprOrStmt::Expr(then) => {
@@ -57,7 +57,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     pub(super) fn consume_if_statement(&mut self) -> Result<IfStmt, ParseError<'src>> {
         let begin = self.must_consume_next(vec![TkKindName::KwIf])?.span.clone();
 
-        let cond = self.consume_expression()?;
+        let cond = self.consume_condition_expression()?;
 
         let then = self.consume_block_statement()?;
 

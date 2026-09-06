@@ -12,7 +12,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             .must_consume_next(vec![TkKindName::KwWhile])?
             .span
             .clone();
-        let cond = self.consume_expression()?;
+        let cond = self.consume_condition_expression()?;
         let stmts = self.consume_block_statement()?;
 
         Ok(WhileStmt {

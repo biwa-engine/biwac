@@ -72,7 +72,9 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                             args,
                             span: Span::merge(&begin, &span),
                         })))
-                    } else if let TkKind::MarkLBrace = t2.kind {
+                    } else if let TkKind::MarkLBrace = t2.kind
+                        && !self.no_struct_literal
+                    {
                         let (members, span) = self.consume_struct_members()?;
 
                         Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
@@ -118,7 +120,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                 span: Span::merge(&begin, &span),
                             })))
                         }
-                        TkKind::MarkLBrace => {
+                        TkKind::MarkLBrace if !self.no_struct_literal => {
                             let (members, span) = self.consume_struct_members()?;
 
                             Ok(Exprs::Primary(Primary::Literal(Literal::Struct(
@@ -157,7 +159,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             }
             TkKind::MarkLPare => {
                 self.next();
-                let expr = self.consume_expression()?;
+                let expr = self.consume_delimited_expression()?;
 
                 let _ = self.must_consume_next(vec![TkKindName::MarkRPare])?;
 
@@ -196,7 +198,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 self.next();
                 break;
             } else {
-                let expr = self.consume_expression()?;
+                let expr = self.consume_delimited_expression()?;
                 args.push(expr);
 
                 if let Some(t) = self.peek() {
@@ -243,7 +245,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             } else {
                 let member = self.consume_identifier()?;
                 let _ = self.must_consume_next(vec![TkKindName::MarkAssign])?;
-                let expr = self.consume_expression()?;
+                let expr = self.consume_delimited_expression()?;
 
                 members.push((member, Box::new(expr)));
 

@@ -6,7 +6,7 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
-use biwac_ast::{AbsolutePathHeader, Ident, Path};
+use biwac_ast::{AbsolutePathHeader, Exprs, Ident, Path};
 use biwac_base::{IdentInterner, ModId, ModPath};
 use biwac_lexer::{TkKind, TkKindName, Token};
 
@@ -43,6 +43,13 @@ pub(crate) struct TokenStream<'t, 'src, 'i> {
     mod_id: ModId,
     tokens: std::iter::Peekable<std::slice::Iter<'t, Token<'src>>>,
     interner: &'i mut IdentInterner,
+    /// 構造体リテラルを式として認めない区間にいるか。
+    ///
+    /// `if`/`while` の条件式は直後にブロックの `{` が来るため、
+    /// `if flag {` の `{` を構造体リテラルの開始と読むと必ず誤る。
+    /// 条件式のあいだはこれを立てて構造体リテラルを候補から外す。
+    /// 括弧の内側では意味が閉じるので `(Foo { .. })` は書ける。
+    no_struct_literal: bool,
 }
 
 impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
@@ -55,7 +62,24 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             mod_id,
             tokens,
             interner,
+            no_struct_literal: false,
         }
+    }
+
+    /// `if`/`while` の条件式を読む。構造体リテラルは認めない。
+    pub(crate) fn consume_condition_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
+        let saved = std::mem::replace(&mut self.no_struct_literal, true);
+        let result = self.consume_expression();
+        self.no_struct_literal = saved;
+        result
+    }
+
+    /// `(` `)` などの区切り記号の内側で式を読む。制限はここで解ける。
+    pub(crate) fn consume_delimited_expression(&mut self) -> Result<Exprs, ParseError<'src>> {
+        let saved = std::mem::replace(&mut self.no_struct_literal, false);
+        let result = self.consume_expression();
+        self.no_struct_literal = saved;
+        result
     }
 
     pub(crate) fn next(&mut self) -> Option<&Token<'src>> {
