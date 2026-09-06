@@ -1,11 +1,12 @@
 use std::{cell::OnceCell, collections::HashMap};
 
+use biwac_ast::PathSegmentResolution;
 use biwac_span::{DefIdKind, VarId};
 
 use biwac_hir::{
-    BinaryExpr, BlockExpr, Callee, DecledVar, Expr, ExprId, ExprVal, FnCall, Ident, IfExpr,
-    Literal, MemberAccess, MethodCall, Primary, Stmt, StructLiteral, UnaryExpr, VarIdKind,
-    Variable,
+    BinaryExpr, BlockExpr, Callee, DecledVar, DefinedTy, Expr, ExprId, ExprVal, FnCall, Ident,
+    IfExpr, Literal, MemberAccess, MethodCall, Primary, Stmt, StructLiteral, Ty, TyKind, UnaryExpr,
+    VarIdKind, Variable,
 };
 
 use crate::ResolveError;
@@ -204,7 +205,13 @@ pub(crate) fn lower_block_expr(
 
 fn lower_callee(path: &biwac_ast::Path, errors: &mut Vec<ResolveError>) -> Option<Callee> {
     match def_id_kind_from_path(path) {
-        Ok(DefIdKind::Val(vid)) => Some(Callee::Fn(vid)),
+        Ok(DefIdKind::Val(vid)) => match assoc_fn_self_ty(path) {
+            Some(self_ty) => Some(Callee::AssocFn {
+                def_id: vid,
+                self_ty,
+            }),
+            None => Some(Callee::Fn(vid)),
+        },
         Ok(DefIdKind::Var(vid)) => Some(Callee::Var(vid)),
         Ok(DefIdKind::Ty(tid)) => {
             errors.push(ResolveError::ValueNotFoundTypeFound {
@@ -225,6 +232,35 @@ fn lower_callee(path: &biwac_ast::Path, errors: &mut Vec<ResolveError>) -> Optio
             None
         }
     }
+}
+
+/// `Foo::bar(..)` の `Foo` を型として取り出す。
+///
+/// パスの最後から 2 番目のセグメントが型に解決されていれば、それが
+/// 関連関数を持っている型である。これを残さないと、
+/// `type CharacterBiwa = Character[BiwaCharacterProps]` のように
+/// エイリアスが書き込んだ型引数が推論に届かない。
+///
+/// 呼び出し位置に型引数を書く構文はまだ無いので `genargs` は空である。
+/// エイリアスなら [`super::alias_expansion`] が右辺ごと置き換えるので、
+/// そこで型引数が入る。
+///
+/// `Self::new(..)` は `abs_header` に `Self` が来てセグメントが 1 つしかないため、
+/// ここでは `None` になる (従来どおり [`Callee::Fn`] になる)。
+fn assoc_fn_self_ty(path: &biwac_ast::Path) -> Option<Ty> {
+    let owner = path.segments.get(path.segments.len().checked_sub(2)?)?;
+
+    let Some(PathSegmentResolution::Ok(DefIdKind::Ty(def_id))) = owner.resolved_id.get() else {
+        return None;
+    };
+
+    Some(Ty::new(
+        TyKind::Defined(DefinedTy {
+            def_id: *def_id,
+            genargs: Vec::new(),
+        }),
+        owner.span(),
+    ))
 }
 
 fn lower_literal(

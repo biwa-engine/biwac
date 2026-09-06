@@ -1417,7 +1417,15 @@ impl DepMetadata {
             // ここが空だと impl ブロックのジェネリック引数がレシーバから決まらず、
             // 戻り値が `Self` のメソッドで型変数が解けないまま残る
             // (単相化に必要な割り当てが記録されず、MIR の符号化まで漏れる)。
+            // NOTE: `.biwameta` はレシーバの有無を記録していないので、
+            // 関連関数とメソッドを区別できない。
+            // 外部シグネチャの `self_ty` は impl の対象型で近似している。
+            //
+            // 読むのは型推論のメソッド呼び出しだけで、そこでは
+            // 実際にレシーバが書かれていることが分かっているため実害はない。
+            // レシーバの有無で分岐したい用途が出たらディスク形式に印を足すこと。
             self_ty: self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id),
+            impl_self_ty: self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id),
             rty,
             genargs,
             span: Span::dummy(),

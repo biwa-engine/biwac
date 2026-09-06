@@ -3,7 +3,7 @@ use std::cell::OnceCell;
 use biwac_ast::{BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator};
 use biwac_span::{Span, TyDefId, ValDefId, VarId};
 
-use crate::{Ident, Stmt};
+use crate::{Ident, Stmt, Ty};
 
 // ExprId
 // function local expression id
@@ -130,6 +130,29 @@ pub struct FnCall {
 pub enum Callee {
     Var(VarId),
     Fn(ValDefId),
+    /// 型を通した関連関数の呼び出し (`Character::new(..)`)。
+    ///
+    /// `self_ty` は**呼び出し位置に書かれた型**である。
+    /// `Callee::Fn` と違ってこれを残すのは、型エイリアスが
+    /// 型引数を書き込んでいることがあるからである。
+    ///
+    /// ```text
+    /// type CharacterBiwa = Character[BiwaCharacterProps];
+    /// CharacterBiwa::new(..)   // self_ty = Character[BiwaCharacterProps]
+    /// ```
+    ///
+    /// パスの最後のセグメントだけを見ると `Character::new` に潰れてしまい、
+    /// `BiwaCharacterProps` がどこにも残らない。
+    /// エイリアスの展開 (`alias_expansion`) はこの `self_ty` にも及ぶので、
+    /// 推論の時点では右辺に置き換わっている。
+    ///
+    /// なお呼び出し位置に型引数を書く構文はまだ無いので、
+    /// エイリアスを経由しない `Character::new(..)` の `self_ty` は
+    /// 型引数が空のままである。使えるかどうかは推論側が判断する。
+    AssocFn {
+        def_id: ValDefId,
+        self_ty: Ty,
+    },
 }
 
 #[derive(Debug, Clone)]

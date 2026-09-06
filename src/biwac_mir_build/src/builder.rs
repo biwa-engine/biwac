@@ -673,7 +673,10 @@ impl<'a> BodyBuilder<'a> {
                 }
 
                 let callee = match &c.callee {
-                    HirCallee::Fn(def_id) => Callee::Direct {
+                    // 関連関数も呼び先は直接呼び出しである。
+                    // self 型は推論で型引数を決めるために使うだけなので、
+                    // ここまで来たら `call_genargs` に畳まれている。
+                    HirCallee::Fn(def_id) | HirCallee::AssocFn { def_id, .. } => Callee::Direct {
                         def_id: *def_id,
                         genargs: self.genargs_of(expr.id),
                     },

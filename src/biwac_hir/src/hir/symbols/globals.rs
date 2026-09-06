@@ -72,6 +72,22 @@ pub struct FnSignature {
     // Some if this is a method (first arg is self receiver)
     pub self_ty: Option<Ty>,
 
+    /// この関数を持つ impl ブロックの対象型。
+    ///
+    /// `self_ty` と違い、レシーバを取らない関連関数でも入る。
+    /// impl ブロックの外で定義された関数では `None`。
+    ///
+    /// ```text
+    /// impl[P] Character[P] {
+    ///   fn new(..) -> Self { .. }   // self_ty: None, impl_self_ty: Some(Character[P])
+    ///   fn appear(self) { .. }      // self_ty: Some(Character[P]), impl_self_ty: 同上
+    /// }
+    /// ```
+    ///
+    /// 呼び出し位置に書かれた型 ([`crate::Callee::AssocFn`] の `self_ty`) と
+    /// 単一化して、impl ブロックのジェネリック引数を決めるために使う。
+    pub impl_self_ty: Option<Ty>,
+
     // if the function does not return value ( = void function),
     // Ty::Void
     pub rty: Ty,

@@ -1,6 +1,7 @@
 import math::pos::Pos;
 import math::pos::Pos::new;
 import collections::Pair;
+import collections::Vec;
 
 type PairIntT[T] = Pair[Int, T];
 
@@ -18,7 +19,9 @@ fn foo() {
   let z = native_add(3, 2);
   let pair = Pair::new(l, z);
   let aa = Pair::new(x, pair.y()).add();
-  // let ab = PairIntT::new(0, aa).x();
+  // 型引数が埋まりきっていないエイリアス越しの呼び出し。
+  // 呼び出し位置の self 型は使えないので、引数からの推論に落ちる。
+  let ab = PairIntT::new(0, aa).x();
 }
 
 [[native(arch="typescript")]]
@@ -66,6 +69,7 @@ type ExtGreeting = greeter::Greeting;      // 非ジェネリックな外部型
 type IntBox = greeter::Box[Int];           // ジェネリックな外部型 (型引数つき)
 type IntBox2 = IntBox;                     // エイリアスの連鎖
 type PairIntInt = Pair[Int, Int];          // 自パッケージの型 (回帰確認)
+type IntVec = Vec[Int];                    // 型引数がエイリアスからしか決まらない
 
 fn alias_assoc_demo() {
   let g = ExtGreeting::new(greeter::greet("Hi"));
@@ -78,6 +82,10 @@ fn alias_assoc_demo() {
   let n2 = b2.get();
 
   let p = PairIntInt::new(3, 4).add();
+
+  // `new()` の型引数は戻り値にしか現れず、以降どこからも決まらない。
+  // エイリアスに書かれた `Int` で決まらなければ単相化できない。
+  let v = IntVec::new();
 }
 
 // 単相化の根はランタイムが呼ぶ scene (main) だけなので、

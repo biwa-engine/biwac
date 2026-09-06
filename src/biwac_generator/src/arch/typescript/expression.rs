@@ -32,7 +32,9 @@ impl<'a> AsOxcLocal<'a, oxc_span::Ident<'a>> for Callee {
             Self::Var(var_id) => {
                 oxc_span::Ident::new_const(ctx.allocator.alloc_str(&var_id.mangled(ctx)))
             }
-            Self::Fn(def_id) => {
+            // 呼び先は関数そのものなので、self 型は名前に出ない。
+            // 型引数は単相化で解決済みである。
+            Self::Fn(def_id) | Self::AssocFn { def_id, .. } => {
                 oxc_span::Ident::new_const(ctx.allocator.alloc_str(&def_id.mangled(ctx)))
             }
         }
@@ -221,6 +223,7 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                     // scene は generator なので、呼ぶ側が委譲しなければならない。
                     // 呼び出し先が出した syscall はそのまま外側の kernel まで抜ける。
                     match &c.callee {
+                        // scene は型の関連関数にはならないので Fn だけ見ればよい。
                         Callee::Fn(def_id) if ctx.is_scene(def_id) => {
                             yield_expr(call, true, ctx.allocator)
                         }

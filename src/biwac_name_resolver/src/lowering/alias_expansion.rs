@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use biwac_hir::{
-    AssocValDefKind, DefinedTy, FnBody, FnDef, FnSignature, FnTy, Hir, NativeFnDef, NovelSceneDef,
-    Ty, TyDefKind, TyKind, TypeAliasDef, ValDefKind,
+    AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprVal, FnBody, FnDef,
+    FnSignature, FnTy, Hir, Literal, NativeFnDef, NovelSceneDef, Primary, Stmt, Ty, TyDefKind,
+    TyKind, TypeAliasDef, ValDefKind,
 };
 use biwac_span::{GenDefId, TyDefId};
 
@@ -158,12 +159,108 @@ fn expand_fn_signature(sig: &mut FnSignature, aliases: &HashMap<TyDefId, TypeAli
     if let Some(self_ty) = &mut sig.self_ty {
         *self_ty = expand_ty(self_ty.clone(), aliases);
     }
+    if let Some(impl_self_ty) = &mut sig.impl_self_ty {
+        *impl_self_ty = expand_ty(impl_self_ty.clone(), aliases);
+    }
     sig.rty = expand_ty(sig.rty.clone(), aliases);
 }
 
 fn expand_fn_body(body: &mut FnBody, aliases: &HashMap<TyDefId, TypeAliasDef>) {
     for decled_var in body.vars.values_mut() {
         decled_var.ty = expand_ty(decled_var.ty.clone(), aliases);
+    }
+    for stmt in &mut body.stmts {
+        expand_stmt(stmt, aliases);
+    }
+    if let Some(expr) = &mut body.expr {
+        expand_expr(expr, aliases);
+    }
+}
+
+// 式の中にも型が現れる。
+//
+// `Callee::AssocFn` の `self_ty` がそれで、`CharacterBiwa::new(..)` の
+// `CharacterBiwa` をここで `Character[BiwaCharacterProps]` に置き換える。
+// これをやらないと推論がエイリアスの型引数を受け取れない。
+
+fn expand_stmt(stmt: &mut Stmt, aliases: &HashMap<TyDefId, TypeAliasDef>) {
+    match stmt {
+        Stmt::Block(b) => expand_block_stmt(b, aliases),
+        Stmt::Expr(e) => expand_expr(&mut e.expr, aliases),
+        Stmt::Return(r) => expand_expr(&mut r.expr, aliases),
+        Stmt::If(i) => {
+            expand_expr(&mut i.cond, aliases);
+            expand_block_stmt(&mut i.then, aliases);
+            if let Some(els) = &mut i.els {
+                expand_block_stmt(els, aliases);
+            }
+        }
+        Stmt::While(w) => {
+            expand_expr(&mut w.cond, aliases);
+            expand_block_stmt(&mut w.stmts, aliases);
+        }
+        Stmt::VarDecl(v) => expand_expr(&mut v.init, aliases),
+        Stmt::Assign(a) => {
+            expand_primary(&mut a.dst, aliases);
+            expand_expr(&mut a.src, aliases);
+        }
+        Stmt::NovelWrite(_) | Stmt::NovelWait(_) => {}
+    }
+}
+
+fn expand_block_stmt(block: &mut BlockStmt, aliases: &HashMap<TyDefId, TypeAliasDef>) {
+    for stmt in &mut block.stmts {
+        expand_stmt(stmt, aliases);
+    }
+}
+
+fn expand_block_expr(block: &mut BlockExpr, aliases: &HashMap<TyDefId, TypeAliasDef>) {
+    for stmt in &mut block.stmts {
+        expand_stmt(stmt, aliases);
+    }
+    expand_expr(&mut block.expr, aliases);
+}
+
+fn expand_expr(expr: &mut Expr, aliases: &HashMap<TyDefId, TypeAliasDef>) {
+    match &mut expr.expr {
+        ExprVal::Primary(p) => expand_primary(p, aliases),
+        ExprVal::Unary(u) => expand_expr(&mut u.right, aliases),
+        ExprVal::Binary(b) => {
+            expand_expr(&mut b.left, aliases);
+            expand_expr(&mut b.right, aliases);
+        }
+    }
+}
+
+fn expand_primary(primary: &mut Primary, aliases: &HashMap<TyDefId, TypeAliasDef>) {
+    match primary {
+        Primary::FnCall(call) => {
+            if let Callee::AssocFn { self_ty, .. } = &mut call.callee {
+                *self_ty = expand_ty(self_ty.clone(), aliases);
+            }
+            for arg in &mut call.args {
+                expand_expr(arg, aliases);
+            }
+        }
+        Primary::MethodCall(m) => {
+            expand_expr(&mut m.left, aliases);
+            for arg in &mut m.args {
+                expand_expr(arg, aliases);
+            }
+        }
+        Primary::MemberAccess(m) => expand_expr(&mut m.left, aliases),
+        Primary::IfExpr(i) => {
+            expand_expr(&mut i.cond, aliases);
+            expand_block_expr(&mut i.then, aliases);
+            expand_block_expr(&mut i.els, aliases);
+        }
+        Primary::Block(b) => expand_block_expr(b, aliases),
+        Primary::Literal(Literal::Struct(s)) => {
+            for (_, member) in &mut s.members {
+                expand_expr(member, aliases);
+            }
+        }
+        Primary::Literal(_) | Primary::Variable(_) => {}
     }
 }
 

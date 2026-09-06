@@ -67,6 +67,9 @@ pub(super) fn build_fn_signature(
         })
         .unwrap_or_default();
 
+    // impl ブロックの対象型は関連関数でも要るので、
+    // レシーバの有無で絞る前に控えておく。
+    let impl_self_ty_hir = self_ty.clone().map(|k| Ty::new(k, span.clone()));
     let self_ty_hir = self_ty
         .filter(|_| has_self)
         .map(|k| Ty::new(k, span.clone()));
@@ -74,6 +77,7 @@ pub(super) fn build_fn_signature(
     FnSignature {
         args: hir_args,
         self_ty: self_ty_hir,
+        impl_self_ty: impl_self_ty_hir,
         rty,
         genargs,
         span,

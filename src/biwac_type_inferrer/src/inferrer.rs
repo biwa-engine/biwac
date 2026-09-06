@@ -823,6 +823,75 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                     Ok(rty)
                 }
+                Callee::AssocFn { def_id, self_ty } => {
+                    // 同上
+                    self.tctx
+                        .hir
+                        .deps_recorder
+                        .borrow_mut()
+                        .depends_on_val(def_id);
+
+                    let callee_sign = self.tctx.get_value_signature(def_id).unwrap();
+
+                    let mut args = c
+                        .args
+                        .iter()
+                        .map(|a| self.infer_expr(a))
+                        .collect::<TyResult<Vec<_>>>()?;
+                    let mut callee_args: Vec<Ty> =
+                        callee_sign.args.iter().map(|a| a.ty.clone()).collect();
+
+                    // 呼び出し位置に書かれた型を、レシーバと同じように
+                    // 第 1 引数として単一化に混ぜる。
+                    //
+                    // これで `type CharacterBiwa = Character[BiwaCharacterProps];` の
+                    // `CharacterBiwa::new(..)` が `P := BiwaCharacterProps` を決められる。
+                    // 引数からしか決まらなかったものが、書かれた型からも決まるようになる。
+                    if let Some(impl_self_ty) = &callee_sign.impl_self_ty
+                        && call_site_self_ty_is_usable(impl_self_ty, self_ty)
+                    {
+                        callee_args.insert(0, impl_self_ty.clone());
+                        args.insert(0, self_ty.clone());
+                    }
+
+                    let callee_ty = Ty::new(
+                        TyKind::Fn(FnTy {
+                            args: callee_args,
+                            rty: Box::new(callee_sign.rty.clone()),
+                            genargs: callee_sign.genargs.iter().map(|(_, g)| *g).collect(),
+                        }),
+                        callee_sign.span.clone(),
+                    );
+
+                    let rty = self.fresh();
+
+                    let mut cctx = CallCtx::default();
+                    let unified_ty = self.call_unify(
+                        callee_ty,
+                        Ty::new(
+                            TyKind::Fn(FnTy {
+                                args,
+                                rty: Box::new(Ty::new(rty, primary.span())),
+                                genargs: vec![],
+                            }),
+                            primary.span(),
+                        ),
+                        &mut cctx,
+                    )?;
+
+                    let unified_fty = if let TyKind::Fn(fty) = unified_ty {
+                        fty
+                    } else {
+                        panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
+                    };
+
+                    // 同上
+                    let mut subst = cctx.gen_assigns.clone();
+                    let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &mut subst);
+                    self.record_call_genargs(expr_id, subst);
+
+                    Ok(rty)
+                }
                 Callee::Var(v) => {
                     // 変数は名前解決済みであるため、先に型推論されているはず
                     // TODO: callee を式に対応させる
@@ -1296,6 +1365,47 @@ fn substitute_struct_gens(ty: &Ty, params: &[GenDefId], args: &[Ty]) -> Ty {
     };
 
     Ty::new(kind, ty.span.clone())
+}
+
+/// 呼び出し位置に書かれた self 型を単一化に使ってよいか。
+///
+/// 使えないのは、書かれた型が**まだ型引数を伴っていない**場合である。
+/// 呼び出し位置に型引数を書く構文が無いので、
+///
+/// ```text
+/// Character::new(..)   // self_ty = Character (型引数なし)
+/// Vec::new()           // self_ty = Vec       (型引数なし)
+/// ```
+///
+/// のように、エイリアスを経由しないと `genargs` は空のままになる。
+/// これをシグネチャ側の `Character[P]` と単一化しようとすると
+/// 型引数の個数が合わずに落ちるので、そのときは混ぜずに
+/// 引数から推論する従来どおりの動きにする。
+///
+/// また `type PairIntT[T] = Pair[Int, T];` のように
+/// エイリアス自身が型引数を取る場合、展開しても `Gen` が残る。
+/// `Gen` は型定義の中にしか現れてはいけないので、これも除く。
+fn call_site_self_ty_is_usable(sign_self_ty: &Ty, call_site_self_ty: &Ty) -> bool {
+    let (TyKind::Defined(sign), TyKind::Defined(site)) =
+        (&sign_self_ty.kind, &call_site_self_ty.kind)
+    else {
+        return false;
+    };
+
+    sign.def_id == site.def_id
+        && sign.genargs.len() == site.genargs.len()
+        && !contains_gen(&call_site_self_ty.kind)
+}
+
+fn contains_gen(tk: &TyKind) -> bool {
+    match tk {
+        TyKind::Gen(_) => true,
+        TyKind::Defined(defined_ty) => defined_ty.genargs.iter().any(|g| contains_gen(&g.kind)),
+        TyKind::Fn(fty) => {
+            fty.args.iter().any(|a| contains_gen(&a.kind)) || contains_gen(&fty.rty.kind)
+        }
+        _ => false,
+    }
 }
 
 fn occurs(v: &TyVar, tk: &TyKind) -> bool {
