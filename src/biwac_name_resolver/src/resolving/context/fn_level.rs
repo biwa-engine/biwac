@@ -50,7 +50,8 @@ impl VariableScope {
 #[derive(Debug)]
 pub struct FnResolveCtx<'ctx, C: ResolveCtx> {
     ctx: &'ctx C,
-    genargs: HashMap<InternedIdent, LocalGenDefId>,
+    /// 宣言されたジェネリック引数。重複を報告するために宣言位置も持つ。
+    genargs: HashMap<InternedIdent, (LocalGenDefId, Span)>,
     scopes: Vec<VariableScope>,
     next_var_id: u32,
     self_var: Option<VarId>,
@@ -72,7 +73,7 @@ impl<'ctx, C: ResolveCtx> ResolveCtx for FnResolveCtx<'ctx, C> {
                 }
             }
 
-            if let Some(def_id) = self.genargs.get(interned_ident) {
+            if let Some((def_id, _)) = self.genargs.get(interned_ident) {
                 let def_id_kind = DefIdKind::LocalGen(*def_id);
                 path.segments[0]
                     .resolved_id
@@ -116,13 +117,13 @@ impl<'ctx, C: ResolveCtx> FnResolveCtx<'ctx, C> {
 
                 match genargs.entry(item.id.id) {
                     Entry::Vacant(e) => {
-                        e.insert(def_id);
+                        e.insert((def_id, item.id.span.clone()));
                     }
                     Entry::Occupied(e) => {
                         errors.push(ResolveError::DuplicatedLocalGenName {
                             name: item.id.id,
-                            def_id1: *e.get(),
-                            def_id2: def_id,
+                            span1: e.get().1.clone(),
+                            span2: item.id.span.clone(),
                         });
                     }
                 }

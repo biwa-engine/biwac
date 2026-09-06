@@ -11,7 +11,7 @@ use biwac_hir::{
 use biwac_lang_item::{LangItem, LangItemKind, LangItemTable};
 use biwac_span::{LocalGenDefId, TyDefId, ValDefId, VarId};
 
-use crate::{TyError, TyResult};
+use crate::{TyError, TyErrorReport, TyNames, TyResult};
 
 pub struct TyCtx<'a> {
     pub(super) hir: Hir,
@@ -48,6 +48,114 @@ impl<'a> TyCtx<'a> {
             ext_ty_cache: RefCell::new(HashMap::new()),
             ext_assoc_val_map: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// エラー表示に要る名前を引いて表にする。
+    ///
+    /// 型推論の外では [`TyDefId`] から名前を辿る手段が無いので、
+    /// ここで解決して [`TyErrorReport`] に持たせる。
+    /// エラー時にしか通らないので、素朴に全部歩いてよい。
+    pub(crate) fn report(&self, error: TyError) -> TyErrorReport {
+        let mut tys = HashMap::new();
+        for ty in crate::error_tys(&error) {
+            self.collect_ty_names(&ty.kind, &mut tys);
+        }
+        for def_id in crate::error_ty_def_ids(&error) {
+            self.insert_ty_name(def_id, &mut tys);
+        }
+
+        TyErrorReport::new(
+            error,
+            TyNames {
+                tys,
+                gens: self.collect_gen_names(),
+            },
+        )
+    }
+
+    fn insert_ty_name(&self, def_id: TyDefId, out: &mut HashMap<TyDefId, String>) {
+        if out.contains_key(&def_id) {
+            return;
+        }
+
+        // 自パッケージも外部パッケージも `get_ty_impl` で引ける
+        // (外部は `.biwameta` から遅延ロードされる)。
+        let Some(ty_impl) = self.get_ty_impl(&def_id) else {
+            return;
+        };
+        let Some(content) = &ty_impl.ty_content else {
+            return;
+        };
+
+        let ident = match content {
+            TyDefKind::Struct(struct_def) => &struct_def.name,
+            TyDefKind::NativeTypeAlias(alias_def) => &alias_def.name,
+        };
+
+        if let Some(name) = self.interner.borrow().get_str(&ident.id) {
+            out.insert(def_id, name.to_string());
+        }
+    }
+
+    fn collect_ty_names(&self, kind: &TyKind, out: &mut HashMap<TyDefId, String>) {
+        match kind {
+            TyKind::Defined(defined_ty) => {
+                self.insert_ty_name(defined_ty.def_id, out);
+                for g in &defined_ty.genargs {
+                    self.collect_ty_names(&g.kind, out);
+                }
+            }
+            TyKind::Fn(fty) => {
+                for a in &fty.args {
+                    self.collect_ty_names(&a.kind, out);
+                }
+                self.collect_ty_names(&fty.rty.kind, out);
+            }
+            _ => {}
+        }
+    }
+
+    /// 自パッケージで宣言されたジェネリック引数の名前を集める。
+    ///
+    /// 外部パッケージのものは `.biwameta` が名前を持たないので入らない。
+    /// その場合は `_` として表示される。
+    fn collect_gen_names(&self) -> HashMap<u64, String> {
+        let mut out = HashMap::new();
+        let interner = self.interner.borrow();
+
+        let push_signature = |sig: &FnSignature, out: &mut HashMap<u64, String>| {
+            for (ident, def_id) in &sig.genargs {
+                if let Some(name) = interner.get_str(&ident.id) {
+                    out.insert(def_id.value(), name.to_string());
+                }
+            }
+        };
+
+        for val in self.hir.vals.values() {
+            match val {
+                ValDefKind::Fn(f) => push_signature(&f.signature, &mut out),
+                ValDefKind::Native(f) => push_signature(&f.signature, &mut out),
+                ValDefKind::NovelScene(s) => push_signature(&s.signature, &mut out),
+            }
+        }
+
+        for ty_impl in self.hir.tys.values() {
+            for impl_list in ty_impl.vals.values() {
+                for pair in impl_list.vals.values() {
+                    for (name, (def_id, _)) in &pair.impl_block_genargs {
+                        if let Some(name) = interner.get_str(name) {
+                            out.insert(def_id.value(), name.to_string());
+                        }
+                    }
+                    match &pair.val_content {
+                        AssocValDefKind::Fn(f) => push_signature(&f.signature, &mut out),
+                        AssocValDefKind::NativeFn(f) => push_signature(&f.signature, &mut out),
+                    }
+                }
+            }
+        }
+
+        out
     }
 
     /// 型の lang item の DefId を引く。

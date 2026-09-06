@@ -102,8 +102,10 @@ pub(crate) fn lower_primary(
                         id: VarIdKind::Global(vid),
                         span,
                     })),
+                    // 値の位置にモジュールやパッケージ、ジェネリック引数が来た場合。
+                    // 名前は解決できているが値ではないので、
+                    // その名前の値は無い、という報告になる。
                     Ok(_) => {
-                        todo!();
                         errors.push(ResolveError::IdentNotFound {
                             ident: path.segments.last().unwrap().ident.clone(),
                         });
@@ -220,8 +222,8 @@ fn lower_callee(path: &biwac_ast::Path, errors: &mut Vec<ResolveError>) -> Optio
             });
             None
         }
+        // 同上。呼べる値ではないものが呼び出しの位置に来ている。
         Ok(_) => {
-            todo!();
             errors.push(ResolveError::IdentNotFound {
                 ident: path.segments.last().unwrap().ident.clone(),
             });

@@ -49,8 +49,9 @@ impl<'t> ModuleResolveCtx<'t> {
                     Entry::Occupied(e) => {
                         errors.push(ResolveError::DuplicatedSymbolName {
                             name: imported_ident.id,
-                            span1: import_decl.path.segments.last().unwrap().span(),
-                            span2: e.get().segments.last().unwrap().span(),
+                            // span1 は先に来た方
+                            span1: e.get().segments.last().unwrap().span(),
+                            span2: import_decl.path.segments.last().unwrap().span(),
                         });
                     }
                 }

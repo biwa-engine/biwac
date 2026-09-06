@@ -13,7 +13,7 @@ use biwac_lang_item::LangItem;
 use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, VarId};
 
 use crate::{
-    TyCtx, TyError, TyResult,
+    TyCtx, TyError, TyErrorReport, TyResult,
     inferrer::context::{FnTyCtx, TyInfo},
 };
 
@@ -769,7 +769,12 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     VarIdKind::Global(_) => todo!(),
                     VarIdKind::Local(var_id) => {
                         // 名前解決済みなので存在は保証されている
-                        Ok(self.vars.get(&var_id).unwrap().clone())
+                        let ty = self.vars.get(&var_id).unwrap().clone();
+
+                        // span は宣言位置ではなくこの使用位置にする。
+                        // 型が食い違ったときに指すべきなのは、
+                        // 変数を宣言した行ではなく渡した行である。
+                        Ok(Ty::new(ty.kind, primary.span()))
                     }
                 }
             }
@@ -931,7 +936,10 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             }
             Primary::IfExpr(if_expr) => {
                 let cond = self.infer_expr(&if_expr.cond)?;
-                self.unify(cond, Ty::new(TyKind::Bool, primary.span()))?;
+                // 期待している `Bool` はソースに書かれていないので、
+                // 位置は条件式のものを借りる。
+                let bool_ty = Ty::new(TyKind::Bool, cond.span.clone());
+                self.unify(bool_ty, cond)?;
 
                 // TODO: else if に対応
                 let then_ty = self.infer_block_expr(&if_expr.then)?;
@@ -1190,7 +1198,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             Stmt::If(if_stmt) => {
                 let cond = self.infer_expr(&if_stmt.cond)?;
                 let bool_ty = Ty::new(TyKind::Bool, cond.span.clone());
-                self.unify(cond, bool_ty)?;
+                self.unify(bool_ty, cond)?;
 
                 // TODO: else if に対応
                 let then_ty = self.infer_block_stmt(&if_stmt.then)?;
@@ -1215,7 +1223,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 let rty = self.infer_expr(&ret.expr)?;
 
                 Ok(Some(Ty::new(
-                    self.unify(rty, self.rty.clone())?,
+                    self.unify(self.rty.clone(), rty)?,
                     ret.expr.span(),
                 )))
             }
@@ -1239,7 +1247,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
             Stmt::While(while_stmt) => {
                 let cond = self.infer_expr(&while_stmt.cond)?;
                 let bool_ty = Ty::new(TyKind::Bool, cond.span.clone());
-                self.unify(cond, bool_ty)?;
+                self.unify(bool_ty, cond)?;
 
                 self.infer_block_stmt(&while_stmt.stmts)?;
 
@@ -1478,10 +1486,13 @@ impl<'a> TyCtx<'a> {
         // 最後の式があれば検査
         // 戻り値の型の一致を検査
         if let Some(expr) = &fn_body.expr {
+            // 単一化の第 1 引数は「要求されている側」に揃えている。
+            // 型が食い違ったときの診断が
+            // 「`宣言した戻り値` のはずが `実際の型` だった」の向きになる。
             let rty = fctx.infer_expr(expr)?;
-            fctx.unify(rty, fctx.rty.clone())?;
+            fctx.unify(fctx.rty.clone(), rty)?;
         } else if let Some(rty) = stmt_last_ty {
-            fctx.unify(rty, fctx.rty.clone())?;
+            fctx.unify(fctx.rty.clone(), rty)?;
         } else if fctx.rty.kind != TyKind::Void {
             return Err(TyError::ReturnTypeRequired {
                 rty: Box::new(fctx.rty),
@@ -1520,7 +1531,19 @@ impl<'a> TyCtx<'a> {
         })
     }
 
-    pub fn infer(mut self) -> TyResult<Hir> {
+    /// 型推論を走らせる。
+    ///
+    /// エラーは [`TyErrorReport`] に包んで返す。
+    /// `TyError` は `Ty` を持つが、型の名前は HIR と依存メタデータからしか
+    /// 辿れないので、`self` が生きているここで引いておく必要がある。
+    pub fn infer(mut self) -> Result<Hir, Box<TyErrorReport>> {
+        match self.infer_inner() {
+            Ok(()) => Ok(self.hir),
+            Err(e) => Err(Box::new(self.report(e))),
+        }
+    }
+
+    fn infer_inner(&mut self) -> TyResult<()> {
         // 構造体のメンバの型も codegen が型注釈として出力するため、
         // 外部パッケージのものは import が要る
         // (関数のシグネチャだけを見ていると、メンバにしか現れない型を取りこぼす)。
@@ -1629,6 +1652,6 @@ impl<'a> TyCtx<'a> {
             }
         }
 
-        Ok(self.hir)
+        Ok(())
     }
 }

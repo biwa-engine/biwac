@@ -81,10 +81,17 @@ impl<'ctx, C: ResolveCtx> TyDefResolveCtx<'ctx, C> {
                         genarg_list.push((def_id, item.id.span.clone()));
                     }
                     Entry::Occupied(e) => {
+                        let first = *e.get();
+                        let span1 = genarg_list
+                            .iter()
+                            .find(|(id, _)| *id == first)
+                            .map(|(_, span)| span.clone())
+                            .unwrap_or_else(|| item.id.span.clone());
+
                         errors.push(ResolveError::DuplicatedGenName {
                             name: item.id.id,
-                            def_id1: *e.get(),
-                            def_id2: def_id,
+                            span1,
+                            span2: item.id.span.clone(),
                         });
                     }
                 }

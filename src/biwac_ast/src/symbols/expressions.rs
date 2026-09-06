@@ -147,6 +147,25 @@ pub enum BinOperator {
     Ne,  // !=
 }
 
+impl std::fmt::Display for BinOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Mod => "%",
+            Self::Gt => ">",
+            Self::Lt => "<",
+            Self::Ge => ">=",
+            Self::Le => "<=",
+            Self::Eq => "==",
+            Self::Ne => "!=",
+        };
+        f.write_str(s)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryExpr {
     pub op: BinOperator,
@@ -164,6 +183,14 @@ impl BinaryExpr {
 pub enum UnOperator {
     Neg, // -
          // Not, // !
+}
+
+impl std::fmt::Display for UnOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Neg => f.write_str("-"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

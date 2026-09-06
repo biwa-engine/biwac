@@ -5,7 +5,9 @@ mod package;
 mod src;
 mod target;
 
-pub use error::{BiwacError, ErrorContext, ErrorHolder, print_error_finish_message};
+pub use error::{
+    BiwacError, DiagSpan, Diagnostic, ErrorContext, ErrorHolder, print_error_finish_message,
+};
 pub use ident::{IdentInterner, InternedIdent};
 pub use module::ModPath;
 pub use package::{

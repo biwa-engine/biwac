@@ -74,6 +74,19 @@ pub enum LangItemError {
 }
 
 impl LangItemError {
+    /// 診断でソース抜粋を出すための位置。
+    ///
+    /// `MissingDefinition` はパッケージ全体に対する不足なので位置を持たない。
+    pub fn span(&self) -> Option<&Span> {
+        match self {
+            Self::DuplicatedDefinition { span, .. }
+            | Self::UnknownKey { span, .. }
+            | Self::KindMismatch { span, .. }
+            | Self::GenericsMismatch { span, .. } => Some(span),
+            Self::MissingDefinition { .. } => None,
+        }
+    }
+
     pub fn message(&self) -> String {
         match self {
             Self::DuplicatedDefinition { item, .. } => {

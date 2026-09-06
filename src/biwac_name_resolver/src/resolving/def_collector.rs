@@ -181,8 +181,9 @@ impl DefCollector {
                     Entry::Occupied(e) => {
                         errors.push(ResolveError::DuplicatedSymbolName {
                             name: ident.id,
-                            span1: ident.span.clone(),
-                            span2: e.get().1.clone(),
+                            // span1 は先に来た方
+                            span1: e.get().1.clone(),
+                            span2: ident.span.clone(),
                         });
                     }
                 }

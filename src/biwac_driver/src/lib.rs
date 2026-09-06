@@ -620,7 +620,9 @@ fn load_analyze_and_codegen_single_package(
     let hir =
         biwac_type_inferrer::TyCtx::new(hir, lang_items.clone(), ext_pkgs_for_ty.clone(), interner)
             .infer()
-            .unwrap();
+            .map_err(|e| {
+                print_errors(std::slice::from_ref(e.as_ref()), interner, &srcs, metadata)
+            })?;
 
     // MIR は `.biwameta` と対で毎ビルド書き出す。
     // 単相化するターゲットは依存パッケージの本体を必要とするので、
