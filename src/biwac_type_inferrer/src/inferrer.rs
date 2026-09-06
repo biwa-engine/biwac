@@ -232,13 +232,28 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     }
 
     // callee の型を具体化する
-    fn call_embody(&self, callee_ty: TyKind, ctx: &mut CallCtx) -> TyKind {
+    //
+    // まだ割り当ての無い callee 側の LocGen には、ここで型変数を割り当てる。
+    // callee_ty をそのまま返すと、呼び出し先で宣言されたジェネリック型が
+    // 呼び出し側の代入表に流れ込む。
+    // 代入表は関数本体を通して生き続けるので、たとえば
+    //
+    //   let v = Vec::new();  // v: Vec[?1]
+    //   v.push(a);           // ?1 := T@push が代入表に残る
+    //   v.push(b);           // T@push と Image がぶつかる
+    //
+    // のように、以降その変数の型が二度と具体化されなくなる。
+    // 型変数にしておけば、この呼び出しの中で `Image` に解かれ、
+    // 呼び出し側にも `Vec[Image]` として伝わる。
+    fn call_embody(&mut self, callee_ty: TyKind, ctx: &mut CallCtx) -> TyKind {
         match callee_ty {
             TyKind::LocGen(lgid) => {
                 if let Some(ty) = ctx.gen_assigns.get(&lgid) {
                     ty.kind.clone()
                 } else {
-                    callee_ty
+                    let assigned = Ty::new(self.fresh(), Span::dummy());
+                    ctx.gen_assigns.insert(lgid, assigned.clone());
+                    assigned.kind
                 }
             }
             TyKind::Defined(defined_ty) => TyKind::Defined(DefinedTy {
