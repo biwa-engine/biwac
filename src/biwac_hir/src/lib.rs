@@ -6,7 +6,7 @@ pub mod hir;
 pub use biwac_ast::VariantShape;
 
 pub use crate::hir::{
-    DefinedTyImpl, Hir, TyExistence, TyValImplGenargsContentPair, TyValImplList,
+    DefinedTyImpl, Hir, TyExistence, TyTraitImpl, TyValImplGenargsContentPair, TyValImplList,
     symbols::{
         Ident,
         expressions::{
@@ -17,7 +17,8 @@ pub use crate::hir::{
         },
         globals::{
             AssocValDefKind, DecledArg, EnumDef, FnArgDecl, FnBody, FnDef, FnSignature, NativeCode,
-            NativeFnArgDecl, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef, TyDefKind,
+            NativeFnArgDecl, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef,
+            TraitAssocOwner, TraitCond, TraitCondList, TraitDef, TraitItemDef, TyDefKind,
             TypeAliasDef, ValDefKind, VariantDef, VariantOwner,
         },
         statements::{
