@@ -5,8 +5,8 @@ mod package_hash;
 use biwac_base::ModId;
 
 pub use def_id::{
-    DefId, DefIdKind, GenDefId, ImplId, LocalGenDefId, PackageLocalDefId, TyDefId, ValDefId, VarId,
-    VariantDefId,
+    DefId, DefIdKind, GenDefId, ImplId, LocalGenDefId, PackageLocalDefId, TraitAssocDefId,
+    TraitDefId, TyDefId, ValDefId, VarId, VariantDefId,
 };
 pub use def_path::{DefPath, DefPathHash, DefPathSegment};
 pub use package_hash::PackageHashId;
@@ -30,6 +30,15 @@ impl Span {
 
     pub fn dummy() -> Self {
         Self::new(ModId::new_in_self(0), 0, 0)
+    }
+
+    /// ソース上の位置を持たない span か。
+    ///
+    /// 外部パッケージから復元したシンボルは span を持たない
+    /// (`.biwameta` は自パッケージのファイルしか知らない)。
+    /// 診断のラベルを出すかどうかの判断に使う。
+    pub fn is_dummy(&self) -> bool {
+        self.begin == 0 && self.end == 0
     }
 
     pub fn merge(begin: &Self, end: &Self) -> Self {

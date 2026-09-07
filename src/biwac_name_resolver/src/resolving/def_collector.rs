@@ -9,10 +9,11 @@ use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{
     DepMetadata, DepMetadataModuleView, ExternalPackage, PackageModuleView,
 };
-use biwac_hir::TyKind;
+use biwac_hir::{Ty, TyKind};
 use biwac_package_loader::{LoadedModule, Pkg};
 use biwac_span::{
-    DefId, DefIdKind, ImplId, PackageLocalDefId, Span, TyDefId, ValDefId, VariantDefId,
+    DefId, DefIdKind, ImplId, PackageLocalDefId, Span, TraitAssocDefId, TraitDefId, TyDefId,
+    ValDefId, VariantDefId,
 };
 
 use crate::{
@@ -25,6 +26,7 @@ use crate::{
 pub(crate) enum TyOrVal<T, V> {
     Ty(T),
     Val(V),
+    Trait(TraitDefId),
 }
 
 /// DefCollector collects definitions in the self package.
@@ -63,6 +65,11 @@ impl DefCollector {
         external_packages: Vec<ExternalPackage>,
         interner: &IdentInterner,
     ) -> Result<NameTree, Vec<ResolveError>> {
+        // trait も他のシンボルと同じ走査で採番する。
+        // 制限 (`struct Foo[T: A]` の `A`) が解決されるのは Step 2 以降で、
+        // そのときには全 DefId が振り終わっている。
+        // 構造体のメンバの型が後方宣言でよいのと同じ理屈である。
+
         // Step 1: assign IDs to all non-impl symbols, build module-level NameTree.
         let root_module_tree = self.collect_in_module(&pkg.root_module)?;
         let package_tree = PackageNameTree {
@@ -107,6 +114,12 @@ impl DefCollector {
 
         // Step 3: collect impl-block symbols under their canonical (non-alias) types.
         self.collect_impls(pkg_name, &name_tree, pkg, &ty_index, &mod_index, interner)?;
+
+        // Step 4: collect trait impl blocks.
+        //
+        // Step 3 と分けているのは、名前の衝突検査が
+        // 「その型が既に持っている関連名の一覧」を要るからである。
+        self.collect_trait_impls(pkg_name, &name_tree, pkg, &ty_index, &mod_index, interner)?;
 
         Ok(name_tree)
     }
@@ -172,6 +185,20 @@ impl DefCollector {
                         Some((alias_def.ident.clone(), TyOrVal::Ty(def_id)))
                     }
                 },
+                biwac_ast::Globals::TraitDef(trait_def) => {
+                    let def_id = TraitDefId::new(self.alloc_def_id());
+                    trait_def.def_id.set(def_id).unwrap();
+
+                    // 項目にも id を振る。
+                    // 採番の順序が `.biwameta` に出るので、宣言順のまま回す
+                    // (enum のバリアントと同じ)。
+                    for item in &trait_def.items {
+                        let item_def_id = TraitAssocDefId::new(self.alloc_def_id());
+                        item.def_id.set(item_def_id).unwrap();
+                    }
+
+                    Some((trait_def.id.clone(), TyOrVal::Trait(def_id)))
+                }
                 biwac_ast::Globals::NativeCode(_) => None,
                 biwac_ast::Globals::NovelScene(scene_def) => {
                     let def_id = ValDefId::new(self.alloc_def_id());
@@ -196,6 +223,9 @@ impl DefCollector {
                         }
                         TyOrVal::Val(def_id) => {
                             e.insert((ModuleNameTreeItem::Val(def_id), ident.span.clone()));
+                        }
+                        TyOrVal::Trait(def_id) => {
+                            e.insert((ModuleNameTreeItem::Trait(def_id), ident.span.clone()));
                         }
                     },
                     Entry::Occupied(e) => {
@@ -491,6 +521,13 @@ impl DefCollector {
 
         for g in &module.ast.globals {
             if let biwac_ast::Globals::ImplBlock(impl_block) = g {
+                // trait impl は Step 4 が扱う。
+                // ここで通すと項目が名前ツリーに載ってしまい、
+                // import 無しで見えるようになってしまう。
+                if impl_block.trait_typ.is_some() {
+                    continue;
+                }
+
                 let ictx = match ImplResolveCtx::new(&mctx, impl_block, self) {
                     Ok(ictx) => ictx,
                     Err(errs) => {
@@ -536,6 +573,13 @@ impl DefCollector {
                         continue;
                     }
                 };
+
+                // TODO:
+                // if !canonical_id.pkg().is_self() &&
+                //   !(canonical_id.pkg() == PackageId::BUILTIN_RESERVED_PACKAGE && no_std) {
+                //   // foreign impl エラー
+                //   // std のみ プリミティブ型への impl が許可されていることに注意
+                // }
 
                 for f in &impl_block.assoc_fns {
                     let def_id = ValDefId::new(self.alloc_def_id());
@@ -691,12 +735,317 @@ impl DefCollector {
             Err(errors)
         }
     }
+
+    /// Step 4: trait impl ブロックを集める。
+    ///
+    /// 直接の impl (Step 3) と違い、項目は名前ツリーに載せない。
+    /// スコープにある trait を経由してしか引けないようにするためで、
+    /// これが「使う箇所で trait を import していること」という規則の実体である。
+    fn collect_trait_impls(
+        &mut self,
+        pkg_name: InternedIdent,
+        name_tree: &NameTree,
+        pkg: &Pkg,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
+    ) -> Result<(), Vec<ResolveError>> {
+        let root_module_tree = &name_tree.packages[&pkg_name].root_module_tree;
+        // (対象の型, trait) -> 既に登録した impl。重複検査に使う。
+        let mut seen: HashMap<(TyDefId, TraitDefId), Vec<(Vec<Ty>, Span)>> = HashMap::new();
+        // 対象の型 -> その型に trait impl が生やした名前。名前の衝突検査に使う。
+        let mut trait_impl_names: HashMap<TyDefId, HashMap<InternedIdent, Span>> = HashMap::new();
+
+        self.collect_trait_impls_in_module(
+            name_tree,
+            pkg_name,
+            root_module_tree,
+            &pkg.root_module,
+            ty_index,
+            mod_index,
+            interner,
+            &mut seen,
+            &mut trait_impl_names,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_trait_impls_in_module(
+        &mut self,
+        name_tree: &NameTree,
+        pkg_name: InternedIdent,
+        module_tree: &ModuleNameTree,
+        module: &LoadedModule,
+        ty_index: &HashMap<TyDefId, &TyNameTree>,
+        mod_index: &HashMap<ModId, &ModuleNameTree>,
+        interner: &IdentInterner,
+        seen: &mut HashMap<(TyDefId, TraitDefId), Vec<(Vec<Ty>, Span)>>,
+        trait_impl_names: &mut HashMap<TyDefId, HashMap<InternedIdent, Span>>,
+    ) -> Result<(), Vec<ResolveError>> {
+        let mctx = ModuleResolveCtx::new(
+            name_tree,
+            pkg_name,
+            module_tree,
+            &module.ast,
+            ty_index,
+            mod_index,
+            interner,
+        )?;
+        let mut errors = Vec::new();
+
+        for g in &module.ast.globals {
+            let biwac_ast::Globals::ImplBlock(impl_block) = g else {
+                continue;
+            };
+            let Some(trait_typ) = &impl_block.trait_typ else {
+                continue;
+            };
+
+            let ictx = match ImplResolveCtx::new(&mctx, impl_block, self) {
+                Ok(ictx) => ictx,
+                Err(errs) => {
+                    errors.extend(errs);
+                    continue;
+                }
+            };
+
+            // `impl[T] Foo[T]: Bar[T, Int]` の右辺。
+            // impl ブロックのジェネリック引数が見える文脈で解決する。
+            if let Err(errs) = ictx.resolve_trait_typ(trait_typ) {
+                errors.extend(errs);
+                continue;
+            }
+
+            let (trait_def_id, trait_genargs) = match trait_ref_of(trait_typ) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors.push(e);
+                    continue;
+                }
+            };
+
+            let self_ty = ictx.opt_self_ty().unwrap();
+            let impl_id = self.impl_collector.register_self_ty(self_ty.clone());
+            impl_block.impl_id.set(impl_id).unwrap();
+
+            let Some(canonical_id) = canonical_impl_target(&self_ty, &self.alias_canonical) else {
+                // 関数型など、impl の対象にならない型。
+                errors.push(ResolveError::ForeignTraitImpl {
+                    span: impl_block.self_typ.span.clone(),
+                });
+                continue;
+            };
+
+            // --- 孤児則 ---
+            //
+            // trait 自身か対象の型のいずれかが自パッケージであること。
+            // プリミティブ型は BUILTIN_RESERVED_PACKAGE なので、
+            // trait が自パッケージのときだけ通る (std がそれに当たる)。
+            if !canonical_id.pkg().is_self() && !trait_def_id.pkg().is_self() {
+                errors.push(ResolveError::ForeignTraitImpl {
+                    span: impl_block.span.clone(),
+                });
+                continue;
+            }
+
+            let ty_genargs: Vec<Ty> = match &self_ty {
+                TyKind::Defined(defined_ty) => defined_ty.genargs.clone(),
+                _ => Vec::new(),
+            };
+
+            // --- 重複 ---
+            let entry = seen.entry((canonical_id, trait_def_id)).or_default();
+            if let Some((_, span1)) = entry.iter().find(|(genargs, _)| {
+                genargs.len() == ty_genargs.len()
+                    && genargs
+                        .iter()
+                        .zip(&ty_genargs)
+                        .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+            }) {
+                errors.push(ResolveError::DuplicatedTraitImpl {
+                    span1: span1.clone(),
+                    span2: impl_block.span.clone(),
+                });
+                continue;
+            }
+            entry.push((ty_genargs.clone(), impl_block.span.clone()));
+
+            // --- 項目に ValDefId を振り、名前の衝突を見る ---
+            let mut vals: HashMap<InternedIdent, ValDefId> = HashMap::new();
+            let mut item_names: Vec<(InternedIdent, Span)> = Vec::new();
+
+            for f in &impl_block.assoc_fns {
+                item_names.push((f.id.id, f.id.span.clone()));
+            }
+            for m in &impl_block.methods {
+                item_names.push((m.id.id, m.id.span.clone()));
+            }
+            for f in &impl_block.native_assoc_fns {
+                item_names.push((f.id.id, f.id.span.clone()));
+            }
+            for m in &impl_block.native_methods {
+                item_names.push((m.id.id, m.id.span.clone()));
+            }
+
+            let taken = trait_impl_names.entry(canonical_id).or_default();
+            for (name, span) in &item_names {
+                let conflicts =
+                    ty_has_assoc_name(canonical_id, *name, ty_index, name_tree, interner)
+                        || taken.contains_key(name);
+                if conflicts {
+                    errors.push(ResolveError::TraitImplNameConflict {
+                        name: *name,
+                        span: span.clone(),
+                    });
+                } else {
+                    taken.insert(*name, span.clone());
+                }
+            }
+
+            let mut alloc = |cell: &std::cell::OnceCell<ValDefId>, name: InternedIdent| {
+                let def_id = ValDefId::new(self.alloc_def_id());
+                let _ = cell.set(def_id);
+                vals.insert(name, def_id);
+            };
+            for f in &impl_block.assoc_fns {
+                alloc(&f.def_id, f.id.id);
+            }
+            for m in &impl_block.methods {
+                alloc(&m.def_id, m.id.id);
+            }
+            for f in &impl_block.native_assoc_fns {
+                alloc(&f.def_id, f.id.id);
+            }
+            for m in &impl_block.native_methods {
+                alloc(&m.def_id, m.id.id);
+            }
+
+            self.impl_collector
+                .impl_traits
+                .insert(impl_id, trait_def_id);
+            self.impl_collector
+                .trait_impls
+                .entry(canonical_id)
+                .or_default()
+                .push(biwac_hir::TyTraitImpl {
+                    trait_def_id,
+                    impl_block_genargs: crate::lowering::globals::collect_impl_block_genargs_map(
+                        impl_block,
+                    ),
+                    ty_genargs,
+                    trait_genargs,
+                    vals,
+                    span: impl_block.span.clone(),
+                });
+        }
+
+        for (child_name, child_module) in module.children_ordered() {
+            let child_tree = match module_tree.children.get(child_name) {
+                Some(ModuleNameTreeItem::Mod(m)) => m,
+                _ => continue,
+            };
+            if let Err(errs) = self.collect_trait_impls_in_module(
+                name_tree,
+                pkg_name,
+                child_tree,
+                child_module,
+                ty_index,
+                mod_index,
+                interner,
+                seen,
+                trait_impl_names,
+            ) {
+                errors.extend(errs);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+/// `impl Foo: Bar[Int]` の `Bar[Int]` を (trait, ジェネリック引数) に分解する。
+fn trait_ref_of(trait_typ: &biwac_ast::TypRepr) -> Result<(TraitDefId, Vec<Ty>), ResolveError> {
+    let TypReprVal::Defined(def_typ) = &trait_typ.val else {
+        return Err(ResolveError::TraitExpected {
+            path: Box::new(biwac_ast::Path::new(None, vec![])),
+        });
+    };
+
+    match crate::lowering::def_id_kind_from_path(&def_typ.path)? {
+        DefIdKind::Trait(def_id) => {
+            let genargs = def_typ
+                .genargs
+                .iter()
+                .flat_map(|gs| {
+                    gs.iter()
+                        .map(|t| crate::lowering::ty_from_typ_repr(t, None))
+                })
+                .collect();
+            Ok((def_id, genargs))
+        }
+        _ => Err(ResolveError::TraitExpected {
+            path: Box::new(def_typ.path.clone()),
+        }),
+    }
+}
+
+/// impl の対象になれる型の、エイリアスを辿った先の `TyDefId`。
+///
+/// [`canonical_ty_def_id`] と違い、プリミティブ型も返す。
+/// 孤児則の判定はプリミティブ型にも及ぶためである
+/// (`impl Int: Foo` は `Foo` が自パッケージのときだけ通る)。
+fn canonical_impl_target(
+    ty_kind: &TyKind,
+    alias_canonical: &HashMap<TyDefId, TyDefId>,
+) -> Option<TyDefId> {
+    match ty_kind {
+        TyKind::Defined(biwac_hir::DefinedTy { def_id, .. }) => {
+            Some(*alias_canonical.get(def_id).unwrap_or(def_id))
+        }
+        _ => ty_kind.def_id(),
+    }
+}
+
+/// その型が既にこの名前の関連アイテムを持っているか。
+///
+/// 自パッケージの型は名前ツリーから、
+/// 外部パッケージの型は `.biwameta` から引く。
+fn ty_has_assoc_name(
+    ty_def_id: TyDefId,
+    name: InternedIdent,
+    ty_index: &HashMap<TyDefId, &TyNameTree>,
+    name_tree: &NameTree,
+    interner: &IdentInterner,
+) -> bool {
+    if let Some(ty_tree) = ty_index.get(&ty_def_id) {
+        return ty_tree.children.borrow().contains_key(&name);
+    }
+
+    let pkg_id = ty_def_id.pkg();
+    let Some(dep_arc) = name_tree.ext_pkg_data.get(&pkg_id) else {
+        return false;
+    };
+    let view =
+        DepMetadataModuleView::new_for_sym_idx(Arc::clone(dep_arc), ty_def_id.local_idx(), pkg_id);
+    view.lookup_assoc(ty_def_id.local_idx(), name, interner)
+        .is_some()
 }
 
 #[derive(Debug)]
 pub(crate) struct ImplCollector {
     next_impl_id: u32,
     pub(crate) impl_self_tys: HashMap<ImplId, TyKind>,
+    /// trait impl なら、その trait。直接の impl は載らない。
+    pub(crate) impl_traits: HashMap<ImplId, TraitDefId>,
+    /// エイリアスを辿った先の型 -> その型に対する trait impl。
+    ///
+    /// 名前解決のフォールバック (`biwac_trait_solver`) と、
+    /// lowering が `DefinedTyImpl::trait_impls` を組むのに使う。
+    pub(crate) trait_impls: HashMap<TyDefId, Vec<biwac_hir::TyTraitImpl>>,
 }
 
 impl ImplCollector {
@@ -704,6 +1053,8 @@ impl ImplCollector {
         Self {
             next_impl_id: 0,
             impl_self_tys: HashMap::new(),
+            impl_traits: HashMap::new(),
+            trait_impls: HashMap::new(),
         }
     }
 
@@ -728,7 +1079,7 @@ pub(super) fn collect_ty_trees<'a>(
             ModuleNameTreeItem::Mod(mod_tree) => {
                 collect_ty_trees(mod_tree, map);
             }
-            ModuleNameTreeItem::Val(_) => {}
+            ModuleNameTreeItem::Val(_) | ModuleNameTreeItem::Trait(_) => {}
         }
     }
 }

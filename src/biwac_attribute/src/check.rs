@@ -39,6 +39,18 @@ pub fn check_mod_ast(ast: &ModAst, interner: &IdentInterner, errors: &mut Vec<At
                     errors,
                 ),
             },
+            Globals::TraitDef(t) => {
+                check(&t.attrs, Target::Trait, &t.id.span, interner, errors);
+                for item in &t.items {
+                    check(
+                        &item.attrs,
+                        Target::TraitItem,
+                        &item.id.span,
+                        interner,
+                        errors,
+                    );
+                }
+            }
             Globals::ImplBlock(b) => check_impl_block(b, interner, errors),
             Globals::Import(_) | Globals::VarDecl(_) => {}
         }

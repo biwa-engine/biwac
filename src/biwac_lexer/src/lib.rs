@@ -48,6 +48,7 @@ pub fn lex<'src>(
                     // `_` 単体だけがワイルドカードである。`_foo` は識別子のまま。
                     "_" => TkKind::KwUnderscore,
                     "impl" => TkKind::KwImpl,
+                    "trait" => TkKind::KwTrait,
                     "Self" => TkKind::KwSelfTyp,
                     "self" => TkKind::KwSelfVar,
                     "scene" => TkKind::KwScene,

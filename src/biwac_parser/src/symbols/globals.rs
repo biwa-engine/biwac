@@ -6,7 +6,8 @@ use biwac_span::Span;
 use biwac_ast::{
     ArgDecl, ArgDeclList, Attrs, EnumDef, FnDef, Globals, Ident, ImplBlock, ImportDecl,
     MethodArgDeclList, MethodDef, NativeCode, NativeFnDef, NativeMethodDef, NativeTypeAlias,
-    NovelScene, RetTypRepr, StructDef, TypRepr, TypeAlias, TypeDef, VariantDecl, VariantFieldsDecl,
+    NovelScene, RetTypRepr, StructDef, TraitDef, TraitItemArgs, TraitItemDecl, TypRepr, TypeAlias,
+    TypeDef, VariantDecl, VariantFieldsDecl,
 };
 
 use crate::{ExprOrStmt, ParseError, TokenStream};
@@ -98,6 +99,49 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 genargs,
             }))
         }
+    }
+
+    /// trait が宣言する項目。
+    ///
+    /// ```biwa
+    /// fn gyao(self) -> Gyoe;
+    /// fn guee(aaa: Aaa) -> Self;
+    /// ```
+    ///
+    /// 本体は書かない。`self` を取るかどうかで
+    /// メソッド形式と関連関数形式に分かれる。
+    fn consume_trait_item(&mut self) -> Result<TraitItemDecl, ParseError<'src>> {
+        let attrs = self.consume_attributes()?;
+        let begin = self.must_consume_next(vec![TkKindName::KwFn])?.span.clone();
+
+        let id = self.consume_identifier()?;
+        let genargs = self.opt_consume_generic_argument_declaration()?;
+
+        let args = match self.consume_method_argsdec()? {
+            FnOrMethod::Fn(args) => TraitItemArgs::Assoc(args),
+            FnOrMethod::Method(args) => TraitItemArgs::Method(args),
+        };
+        let args_span = match &args {
+            TraitItemArgs::Assoc(a) => a.span.clone(),
+            TraitItemArgs::Method(a) => a.span.clone(),
+        };
+
+        let rtype = self.consume_return_type(&args_span)?;
+
+        let end = self
+            .must_consume_next(vec![TkKindName::MarkSemiColon])?
+            .span
+            .clone();
+
+        Ok(TraitItemDecl {
+            id,
+            def_id: OnceCell::new(),
+            args,
+            rtype,
+            genargs,
+            attrs,
+            span: Span::merge(&begin, &end),
+        })
     }
 
     fn consume_function_or_method_definition(
@@ -396,12 +440,26 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                     }
                 }
                 TkKind::KwImpl => {
-                    // "impl" ( <generic-argument-declaration> )? <type-representation> "{" ... "}"
+                    // "impl" <generic-argument-declaration>? <type-representation>
+                    //        ( ":" <type-representation> )? "{" ... "}"
+                    let begin = t.span.clone();
                     self.next();
 
                     let genargs_decl = self.opt_consume_generic_argument_declaration()?;
 
                     let self_typ = self.consume_type_representaion()?;
+
+                    // `impl Nyoee: Gyao { .. }`
+                    //
+                    // 直後が `{` か `:` かの 1 トークンで決まるので曖昧さは無い。
+                    let trait_typ = if self
+                        .consume_next_if_match(vec![TkKindName::MarkColon])
+                        .is_some()
+                    {
+                        Some(self.consume_type_representaion()?)
+                    } else {
+                        None
+                    };
 
                     self.must_consume_next(vec![TkKindName::MarkLBrace])?;
 
@@ -414,6 +472,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         if let Some(t) = self.peek().copied()
                             && TkKind::MarkRBrace == t.kind
                         {
+                            let end = t.span.clone();
                             self.next();
 
                             return Ok(Some(Globals::ImplBlock(ImplBlock {
@@ -424,6 +483,8 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                                 native_methods,
                                 genargs_decl,
                                 self_typ,
+                                trait_typ,
+                                span: Span::merge(&begin, &end),
                             })));
                         } else {
                             let attrs = self.consume_attributes()?;
@@ -445,6 +506,43 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                             }
                         }
                     }
+                }
+                TkKind::KwTrait => {
+                    // "trait" <identifier> <generic-argument-declaration>?
+                    //         "{" ( <fn-signature> ";" )* "}"
+                    let begin = t.span.clone();
+                    self.next();
+
+                    let id = self.consume_identifier()?;
+                    let genargs = self.opt_consume_generic_argument_declaration()?;
+
+                    self.must_consume_next(vec![TkKindName::MarkLBrace])?;
+
+                    let mut items = Vec::new();
+
+                    let end = loop {
+                        let t = self.peek().ok_or(ParseError::InvalidEOF {
+                            mod_id,
+                            expecteds: vec![TkKindName::MarkRBrace],
+                        })?;
+                        if let TkKind::MarkRBrace = t.kind {
+                            let end = t.span.clone();
+                            self.next();
+                            break end;
+                        }
+
+                        items.push(self.consume_trait_item()?);
+                    };
+
+                    Ok(Some(Globals::TraitDef(TraitDef {
+                        id,
+                        def_id: OnceCell::new(),
+                        self_gen: OnceCell::new(),
+                        items,
+                        genargs,
+                        attrs,
+                        span: Span::merge(&begin, &end),
+                    })))
                 }
                 TkKind::DslLiteral(str) => {
                     let native = str.to_string();
@@ -516,6 +614,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                         TkKindName::KwType,
                         TkKindName::KwImport,
                         TkKindName::KwImpl,
+                        TkKindName::KwTrait,
                         TkKindName::KwScene,
                     ],
                     found: t.to_owned().clone(),

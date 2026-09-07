@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use biwac_base::{IdentInterner, InternedIdent, ModId};
+use biwac_hir::TyTraitImpl;
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::TyDefId;
+use biwac_span::{TraitDefId, TyDefId};
 
 use crate::{
     ModuleNameTree, NameTree, ResolveError, ResolveErrorHandler, TyNameTree,
@@ -25,12 +26,16 @@ trait LocalNameResolve<C: LocalResolveCtx> {
     fn resolve(&self, ctx: &mut C) -> Result<(), Vec<ResolveError>>;
 }
 
+/// 自パッケージの名前解決を行い、モジュールごとの trait スコープを返す。
+///
+/// スコープは HIR に持ち越す。
+/// 型推論のメソッド解決が import 規則を判断するのに要るためである。
 pub(crate) fn resolve_in_self_package(
     pkg: &Pkg,
     name_tree: &NameTree,
     def_collector: &mut DefCollector,
     interner: &IdentInterner,
-) -> Result<(), Vec<ResolveError>> {
+) -> Result<HashMap<ModId, Vec<TraitDefId>>, Vec<ResolveError>> {
     let root_module_tree = &name_tree
         .packages
         .get(&name_tree.self_pkg_name)
@@ -43,6 +48,11 @@ pub(crate) fn resolve_in_self_package(
     let mut mod_index: HashMap<ModId, &ModuleNameTree> = HashMap::new();
     collect_mod_trees(root_module_tree, &mut mod_index);
 
+    // 表はここで完成している。
+    // `def_collector` は下で可変借用するので、複製を取って持ち回る。
+    let trait_impls = def_collector.impl_collector.trait_impls.clone();
+    let mut trait_scopes: HashMap<ModId, Vec<TraitDefId>> = HashMap::new();
+
     resolve_in_module(
         name_tree,
         name_tree.self_pkg_name,
@@ -52,7 +62,11 @@ pub(crate) fn resolve_in_self_package(
         &ty_index,
         &mod_index,
         interner,
-    )
+        &trait_impls,
+        &mut trait_scopes,
+    )?;
+
+    Ok(trait_scopes)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -65,6 +79,8 @@ fn resolve_in_module(
     ty_index: &HashMap<TyDefId, &TyNameTree>,
     mod_index: &HashMap<ModId, &ModuleNameTree>,
     interner: &IdentInterner,
+    trait_impls: &HashMap<TyDefId, Vec<TyTraitImpl>>,
+    trait_scopes: &mut HashMap<ModId, Vec<TraitDefId>>,
 ) -> Result<(), Vec<ResolveError>> {
     let ctx = ModuleResolveCtx::new(
         name_tree,
@@ -74,9 +90,13 @@ fn resolve_in_module(
         ty_index,
         mod_index,
         interner,
-    )?;
+    )?
+    .with_trait_impls(trait_impls);
 
     let mut errors = Vec::new();
+
+    // trait のフォールバックより先に、このモジュールのスコープを決める。
+    trait_scopes.insert(module.mod_id, ctx.prepare_trait_scope(&mut errors));
 
     for g in &module.ast.globals {
         if let Some(Err(errs)) = match g {
@@ -99,6 +119,7 @@ fn resolve_in_module(
                     Some(alias_def.resolve(&ctx, def_collector))
                 }
             },
+            biwac_ast::Globals::TraitDef(trait_def) => Some(trait_def.resolve(&ctx, def_collector)),
             biwac_ast::Globals::NativeCode(_) => None,
             biwac_ast::Globals::NovelScene(scene_def) => {
                 Some(scene_def.resolve(&ctx, def_collector))
@@ -123,6 +144,8 @@ fn resolve_in_module(
                     ty_index,
                     mod_index,
                     interner,
+                    trait_impls,
+                    trait_scopes,
                 )
                 .handle(&mut errors);
             }

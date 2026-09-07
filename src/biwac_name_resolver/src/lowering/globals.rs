@@ -4,10 +4,11 @@ use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef, VariantFieldsDecl};
 use biwac_base::InternedIdent;
 use biwac_hir::{
     AssocValDefKind, DefinedTy, DefinedTyImpl, EnumDef, FnArgDecl, FnBody, FnDef, FnSignature,
-    Ident, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, Ty, TyDefKind, TyKind,
-    TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind, VariantDef,
+    Ident, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, TraitDef, TraitItemDef, Ty,
+    TyDefKind, TyKind, TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
+    VariantDef,
 };
-use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, ValDefId, VarId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TraitDefId, TyDefId, ValDefId, VarId};
 
 use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
@@ -159,7 +160,7 @@ fn collect_impl_genargs(impl_block: &biwac_ast::ImplBlock) -> Vec<(Ident, LocalG
         .unwrap_or_default()
 }
 
-fn collect_impl_block_genargs_map(
+pub(crate) fn collect_impl_block_genargs_map(
     impl_block: &biwac_ast::ImplBlock,
 ) -> HashMap<InternedIdent, (LocalGenDefId, Span)> {
     impl_block
@@ -326,6 +327,7 @@ fn lower_struct_def(
         DefinedTyImpl {
             ty_content: Some(ty_content.clone()),
             vals: HashMap::new(),
+            trait_impls: Vec::new(),
         },
     )
 }
@@ -396,6 +398,7 @@ fn lower_enum_def(
         DefinedTyImpl {
             ty_content: Some(ty_content),
             vals: HashMap::new(),
+            trait_impls: Vec::new(),
         },
     )
 }
@@ -466,6 +469,7 @@ fn lower_native_type_alias(native_def: &biwac_ast::NativeTypeAlias) -> (TyDefId,
         DefinedTyImpl {
             ty_content: Some(ty_content.clone()),
             vals: HashMap::new(),
+            trait_impls: Vec::new(),
         },
     )
 }
@@ -476,11 +480,12 @@ pub(super) fn lower_impl_block(
     impl_collector: &ImplCollector,
     errors: &mut Vec<ResolveError>,
 ) {
-    let self_ty_kind = impl_collector
-        .impl_self_tys
-        .get(impl_block.impl_id.get().unwrap())
-        .unwrap()
-        .clone();
+    let impl_id = impl_block.impl_id.get().unwrap();
+    let self_ty_kind = impl_collector.impl_self_tys.get(impl_id).unwrap().clone();
+
+    // trait impl なら、その項目は直接の関連アイテムとしては見えない。
+    // 印を付けておかないと import 無しで引けてしまう。
+    let trait_of = impl_collector.impl_traits.get(impl_id).copied();
     let impl_genargs = collect_impl_genargs(impl_block);
     let impl_block_genargs_map = collect_impl_block_genargs_map(impl_block);
 
@@ -522,6 +527,7 @@ pub(super) fn lower_impl_block(
             impl_block_genargs_map.clone(),
             ty_genargs.clone(),
             AssocValDefKind::Fn(Box::new(hir_fn)),
+            trait_of,
         );
     }
 
@@ -561,6 +567,7 @@ pub(super) fn lower_impl_block(
             impl_block_genargs_map.clone(),
             ty_genargs.clone(),
             AssocValDefKind::Fn(Box::new(hir_fn)),
+            trait_of,
         );
     }
 
@@ -589,6 +596,7 @@ pub(super) fn lower_impl_block(
             impl_block_genargs_map.clone(),
             ty_genargs.clone(),
             AssocValDefKind::NativeFn(Box::new(hir_fn)),
+            trait_of,
         );
     }
 
@@ -621,10 +629,17 @@ pub(super) fn lower_impl_block(
             impl_block_genargs_map.clone(),
             ty_genargs.clone(),
             AssocValDefKind::NativeFn(Box::new(hir_fn)),
+            trait_of,
         );
     }
 }
 
+/// 関連アイテム 1 つを型の実装表に登録する。
+///
+/// `trait_of` は省略できない。
+/// 付け忘れると trait impl の項目が直接の関連アイテムとして見えてしまい、
+/// import 規則が効かなくなる。呼ぶ側に必ず書かせる。
+#[allow(clippy::too_many_arguments)]
 fn register_impl_val(
     tys: &mut HashMap<TyDefId, DefinedTyImpl>,
     def_id: ValDefId,
@@ -633,10 +648,27 @@ fn register_impl_val(
     impl_block_genargs: HashMap<InternedIdent, (LocalGenDefId, Span)>,
     genargs: Vec<Ty>,
     val_content: AssocValDefKind,
+    trait_of: Option<TraitDefId>,
 ) {
+    let pair = TyValImplGenargsContentPair {
+        impl_block_genargs,
+        genargs,
+        val_content,
+        trait_of,
+    };
+
     match self_ty_kind {
         TyKind::Defined(defined_ty) => {
-            let entry = tys.get_mut(&defined_ty.def_id).unwrap();
+            // 外部パッケージの型への trait impl では、
+            // その型はまだ `tys` に居ない。中身の無い入れ物を作る
+            // (型の定義は依存メタデータの側にある)。
+            let entry = tys
+                .entry(defined_ty.def_id)
+                .or_insert_with(|| DefinedTyImpl {
+                    ty_content: None,
+                    vals: HashMap::new(),
+                    trait_impls: Vec::new(),
+                });
             entry
                 .vals
                 .entry(name)
@@ -644,20 +676,14 @@ fn register_impl_val(
                     vals: HashMap::new(),
                 })
                 .vals
-                .insert(
-                    def_id,
-                    TyValImplGenargsContentPair {
-                        impl_block_genargs,
-                        genargs,
-                        val_content,
-                    },
-                );
+                .insert(def_id, pair);
         }
         other => {
             if let Some(prim_def_id) = other.def_id() {
                 let entry = tys.entry(prim_def_id).or_insert_with(|| DefinedTyImpl {
                     ty_content: None,
                     vals: HashMap::new(),
+                    trait_impls: Vec::new(),
                 });
                 entry
                     .vals
@@ -666,18 +692,268 @@ fn register_impl_val(
                         vals: HashMap::new(),
                     })
                     .vals
-                    .insert(
-                        def_id,
-                        TyValImplGenargsContentPair {
-                            impl_block_genargs,
-                            genargs,
-                            val_content,
-                        },
-                    );
+                    .insert(def_id, pair);
             }
             // Fn/Gen/LocGen/Infer は impl 対象外
         }
     }
+}
+
+/// trait の宣言を lower する。
+///
+/// 項目は本体を持たないのでシグニチャだけを作る。
+/// 宣言の中の `Self` は [`TraitDef::self_gen`] の `TyKind::Gen` になる。
+pub(crate) fn lower_trait_def(trait_def: &biwac_ast::TraitDef) -> (TraitDefId, TraitDef) {
+    let def_id = *trait_def
+        .def_id
+        .get()
+        .expect("compiler bug: trait def_id not assigned before lowering");
+    let self_gen = *trait_def
+        .self_gen
+        .get()
+        .expect("compiler bug: trait self_gen not assigned before lowering");
+    let self_ty_kind = TyKind::Gen(self_gen);
+
+    let genargs: Vec<GenDefId> = trait_def
+        .genargs
+        .as_ref()
+        .map(|gd| {
+            gd.genargs
+                .iter()
+                .map(|item| {
+                    *item
+                        .def_id
+                        .get()
+                        .expect("compiler bug: trait genarg def_id not set")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let items = trait_def
+        .items
+        .iter()
+        .map(|item| {
+            let (args, is_method) = match &item.args {
+                biwac_ast::TraitItemArgs::Assoc(a) => (a, false),
+                biwac_ast::TraitItemArgs::Method(a) => (
+                    &ArgDeclList {
+                        args: a.args.clone(),
+                        span: a.span.clone(),
+                    },
+                    true,
+                ),
+            };
+
+            let signature = build_fn_signature(
+                args,
+                &item.rtype,
+                Some(self_ty_kind.clone()),
+                is_method,
+                &item.genargs,
+                item.span.clone(),
+            );
+
+            TraitItemDef {
+                name: item.id.clone().into(),
+                def_id: *item
+                    .def_id
+                    .get()
+                    .expect("compiler bug: trait item def_id not assigned"),
+                signature,
+            }
+        })
+        .collect();
+
+    (
+        def_id,
+        TraitDef {
+            name: trait_def.id.clone().into(),
+            self_gen,
+            items,
+            genargs,
+        },
+    )
+}
+
+/// trait impl を型の側に登録し、宣言との一致を検査する。
+///
+/// 実体 (`DefinedTyImpl::vals`) は [`lower_impl_block`] が既に入れてある。
+/// ここでやるのは索引を張ることと、宣言と食い違っていないかを見ることである。
+///
+/// シグニチャの検査をここまで遅らせるのは、
+/// def collection の段では trait の項目の型がまだ解決されていないからである。
+pub(crate) fn register_trait_impls(
+    tys: &mut HashMap<TyDefId, DefinedTyImpl>,
+    traits: &HashMap<TraitDefId, TraitDef>,
+    impl_collector: &ImplCollector,
+    ext_pkgs: &[biwac_dependency_metadata::ExternalPackage],
+    interner: &mut biwac_base::IdentInterner,
+    errors: &mut Vec<ResolveError>,
+) {
+    // 走査の順序を固定する。エラーの並びがビルドごとに変わらないようにするため。
+    let mut targets: Vec<(&TyDefId, &Vec<biwac_hir::TyTraitImpl>)> =
+        impl_collector.trait_impls.iter().collect();
+    targets.sort_by_key(|(ty_def_id, _)| ty_def_id.value());
+
+    for (ty_def_id, impls) in targets {
+        for imp in impls {
+            // 外部パッケージの trait は `.biwameta` から復元する。
+            let ext_trait_def = if imp.trait_def_id.pkg().is_self() {
+                None
+            } else {
+                ext_pkgs
+                    .iter()
+                    .find(|p| p.pkg_id == imp.trait_def_id.pkg())
+                    .and_then(|p| {
+                        p.meta.get_ext_trait_def(
+                            imp.trait_def_id.local_idx(),
+                            imp.trait_def_id.pkg(),
+                            interner,
+                        )
+                    })
+            };
+
+            if let Some(trait_def) = traits.get(&imp.trait_def_id).or(ext_trait_def.as_ref()) {
+                check_trait_impl(*ty_def_id, imp, trait_def, tys, errors);
+            }
+
+            let entry = tys.entry(*ty_def_id).or_insert_with(|| DefinedTyImpl {
+                ty_content: None,
+                vals: HashMap::new(),
+                trait_impls: Vec::new(),
+            });
+            entry.trait_impls.push(imp.clone());
+        }
+    }
+}
+
+fn check_trait_impl(
+    ty_def_id: TyDefId,
+    imp: &biwac_hir::TyTraitImpl,
+    trait_def: &TraitDef,
+    tys: &HashMap<TyDefId, DefinedTyImpl>,
+    errors: &mut Vec<ResolveError>,
+) {
+    // 宣言の `Self` と trait のジェネリック引数を、この impl のもので置き換える。
+    let mut assigns: HashMap<GenDefId, TyKind> = HashMap::new();
+    assigns.insert(
+        trait_def.self_gen,
+        TyKind::Defined(DefinedTy {
+            def_id: ty_def_id,
+            genargs: imp.ty_genargs.clone(),
+        }),
+    );
+    for (gid, ty) in trait_def.genargs.iter().zip(&imp.trait_genargs) {
+        assigns.insert(*gid, ty.kind.clone());
+    }
+
+    // 宣言された項目がすべて実装されているか。
+    for item in &trait_def.items {
+        let Some(val_def_id) = imp.vals.get(&item.name.id) else {
+            errors.push(ResolveError::MissingTraitItem {
+                name: item.name.id,
+                span: imp.span.clone(),
+            });
+            continue;
+        };
+
+        let Some(actual) = find_signature(tys, ty_def_id, item.name.id, val_def_id) else {
+            continue;
+        };
+
+        let expected = substitute_signature(&item.signature, &assigns);
+        if let Some(detail) = signature_mismatch(&expected, actual) {
+            errors.push(ResolveError::TraitItemSignatureMismatch {
+                name: item.name.id,
+                span: actual.span.clone(),
+                decl_span: item.signature.span.clone(),
+                detail,
+            });
+        }
+    }
+
+    // 宣言に無い項目が実装されていないか。
+    for name in imp.vals.keys() {
+        if trait_def.item(name).is_none() {
+            errors.push(ResolveError::UnknownTraitItem {
+                name: *name,
+                span: imp.span.clone(),
+            });
+        }
+    }
+}
+
+fn find_signature<'a>(
+    tys: &'a HashMap<TyDefId, DefinedTyImpl>,
+    ty_def_id: TyDefId,
+    name: InternedIdent,
+    val_def_id: &ValDefId,
+) -> Option<&'a FnSignature> {
+    match &tys
+        .get(&ty_def_id)?
+        .vals
+        .get(&name)?
+        .vals
+        .get(val_def_id)?
+        .val_content
+    {
+        AssocValDefKind::Fn(f) => Some(&f.signature),
+        AssocValDefKind::NativeFn(f) => Some(&f.signature),
+    }
+}
+
+fn substitute_signature(sig: &FnSignature, assigns: &HashMap<GenDefId, TyKind>) -> FnSignature {
+    FnSignature {
+        args: sig
+            .args
+            .iter()
+            .map(|a| FnArgDecl {
+                id: a.id.clone(),
+                ty: a.ty.clone().embody_by_gen_ty_id(assigns),
+                var_id: a.var_id,
+            })
+            .collect(),
+        self_ty: sig.self_ty.clone().map(|t| t.embody_by_gen_ty_id(assigns)),
+        impl_self_ty: sig
+            .impl_self_ty
+            .clone()
+            .map(|t| t.embody_by_gen_ty_id(assigns)),
+        rty: sig.rty.clone().embody_by_gen_ty_id(assigns),
+        genargs: sig.genargs.clone(),
+        span: sig.span.clone(),
+    }
+}
+
+/// 食い違っていれば、その説明を返す。
+fn signature_mismatch(expected: &FnSignature, actual: &FnSignature) -> Option<String> {
+    if expected.self_ty.is_some() != actual.self_ty.is_some() {
+        return Some(if expected.self_ty.is_some() {
+            "the trait declares this as a method taking `self`".to_string()
+        } else {
+            "the trait declares this as an associated function without `self`".to_string()
+        });
+    }
+
+    if expected.args.len() != actual.args.len() {
+        return Some(format!(
+            "expected {} argument(s), found {}",
+            expected.args.len(),
+            actual.args.len()
+        ));
+    }
+
+    for (i, (e, a)) in expected.args.iter().zip(&actual.args).enumerate() {
+        if e.ty.kind != a.ty.kind {
+            return Some(format!("argument {} has a different type", i + 1));
+        }
+    }
+
+    if expected.rty.kind != actual.rty.kind {
+        return Some("the return type is different".to_string());
+    }
+
+    None
 }
 
 pub(super) fn lower_native_code(native: &biwac_ast::NativeCode) -> NativeCode {

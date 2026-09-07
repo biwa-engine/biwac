@@ -127,6 +127,11 @@ pub enum DefIdKind {
     Ty(TyDefId),
     /// enum のバリアント。
     Variant(VariantDefId),
+    /// trait。
+    ///
+    /// 型でも値でもないので `Ty` にも `Val` にも入らない。
+    /// `import package::Gyao;` と `impl Nyoee: Gyao` がパスの解決先にする。
+    Trait(TraitDefId),
     Val(ValDefId),
     Gen(GenDefId),
     LocalGen(LocalGenDefId),
@@ -208,6 +213,16 @@ impl_typed_def_id!(ValDefId);
 // 親の enum が何番目のバリアントかは DefId からは分からない。
 // `Hir::variant_owners` (外部パッケージなら `.biwameta`) から引く。
 impl_typed_def_id!(VariantDefId);
+
+// trait に割り当てられる id
+impl_typed_def_id!(TraitDefId);
+
+// trait が宣言した項目 (fn シグニチャ) に割り当てられる id。
+//
+// 親の trait と宣言順の添字は id からは分からない。
+// `Hir::trait_assoc_owners` (外部パッケージなら `.biwameta`) から引く。
+// `VariantDefId` と同じ扱いである。
+impl_typed_def_id!(TraitAssocDefId);
 
 // 型定義側で
 // 宣言されるジェネリクス型に割り当てられるid

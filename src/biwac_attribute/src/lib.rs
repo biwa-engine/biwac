@@ -36,6 +36,8 @@ pub enum Target {
     NativeTypeAlias,
     NativeCode,
     Scene,
+    Trait,
+    TraitItem,
 }
 
 impl Target {
@@ -51,6 +53,8 @@ impl Target {
             Self::NativeTypeAlias => "a native type alias",
             Self::NativeCode => "a native code block",
             Self::Scene => "a scene",
+            Self::Trait => "a trait",
+            Self::TraitItem => "a trait item",
         }
     }
 

@@ -4,7 +4,7 @@ use biwac_ast::PathSegment;
 use biwac_base::{InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{DepMetadata, PackageModuleView};
 use biwac_hir::Ty;
-use biwac_span::{TyDefId, ValDefId, VariantDefId};
+use biwac_span::{TraitDefId, TyDefId, ValDefId, VariantDefId};
 
 use crate::ResolveError;
 
@@ -62,6 +62,12 @@ pub enum ModuleNameTreeItem {
     Mod(ModuleNameTree),
     Ty(TyNameTree),
     Val(ValDefId),
+    /// trait。
+    ///
+    /// 項目は載せない。trait の項目をパスから直接引く構文
+    /// (`Gyao::gyao`) は今のところ無く、
+    /// 実装は型の側 (`TyNameTree`) からしか引かないためである。
+    Trait(TraitDefId),
 }
 
 #[derive(Debug)]

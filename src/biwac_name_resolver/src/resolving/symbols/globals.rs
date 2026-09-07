@@ -8,7 +8,8 @@ use crate::{
         LocalNameResolve, NameResolve,
         context::{
             LocalResolveCtx, ResolveCtx, fn_level::FnResolveCtx, impl_level::ImplResolveCtx,
-            module_level::ModuleResolveCtx, ty_def_level::TyDefResolveCtx,
+            module_level::ModuleResolveCtx, trait_def_level::TraitDefResolveCtx,
+            ty_def_level::TyDefResolveCtx,
         },
         def_collector::DefCollector,
     },
@@ -230,6 +231,56 @@ impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::NativeTypeAlias {
     ) -> Result<(), Vec<ResolveError>> {
         // nothing to do because right is native string
         Ok(())
+    }
+}
+
+impl NameResolve<ModuleResolveCtx<'_>> for biwac_ast::TraitDef {
+    fn resolve(
+        &self,
+        ctx: &ModuleResolveCtx<'_>,
+        def_collector: &mut DefCollector,
+    ) -> Result<(), Vec<ResolveError>> {
+        let ctx = TraitDefResolveCtx::new(ctx, self, def_collector)?;
+        let mut errors = Vec::new();
+
+        let mut seen: HashMap<biwac_base::InternedIdent, biwac_span::Span> = HashMap::new();
+
+        for item in &self.items {
+            match seen.entry(item.id.id) {
+                Entry::Vacant(e) => {
+                    e.insert(item.id.span.clone());
+                }
+                Entry::Occupied(e) => {
+                    errors.push(ResolveError::DuplicatedTraitItem {
+                        name: item.id.id,
+                        span1: e.get().clone(),
+                        span2: item.id.span.clone(),
+                    });
+                }
+            }
+
+            let (args, is_method) = match &item.args {
+                biwac_ast::TraitItemArgs::Assoc(a) => (&a.args, false),
+                biwac_ast::TraitItemArgs::Method(a) => (&a.args, true),
+            };
+
+            let item_ctx =
+                match FnResolveCtx::new(&ctx, &item.genargs, is_method, args, def_collector) {
+                    Ok(c) => c,
+                    Err(errs) => {
+                        errors.extend(errs);
+                        continue;
+                    }
+                };
+
+            fn_signature_resolve(&item_ctx, args, &item.rtype).handle(&mut errors);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 

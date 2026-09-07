@@ -40,6 +40,7 @@ pub enum TkKind<'src> {
     KwMatch,                  // match
     KwUnderscore,             // _ (wildcard pattern)
     KwImpl,                   // impl (reserved word of implementation for type)
+    KwTrait,                  // trait (reserved word of type behavior)
     KwSelfTyp,                // Self (reserved word of type)
     KwSelfVar,                // self (reserved word of method value)
     KwScene,                  // scene (reserved word of novel scene)
@@ -98,6 +99,7 @@ impl TkKind<'_> {
             Self::KwMatch => "match".to_string(),
             Self::KwUnderscore => "_".to_string(),
             Self::KwImpl => "impl".to_string(),
+            Self::KwTrait => "trait".to_string(),
             Self::KwSelfTyp => "Self".to_string(),
             Self::KwSelfVar => "self".to_string(),
             Self::KwScene => "scene".to_string(),
@@ -157,6 +159,7 @@ pub enum TkKindName {
     KwMatch,         // match
     KwUnderscore,    // _ (wildcard pattern)
     KwImpl,          // impl (reserved word of implementation for type)
+    KwTrait,         // trait (reserved word of type behavior)
     KwSelfTyp,       // Self (reserved word of type)
     KwSelfVar,       // self (reserved word of method value)
     KwScene,         // scene (reserved word of novel scene)
@@ -214,34 +217,35 @@ impl TkKind<'_> {
             Self::KwEnum => TkKindName::KwEnum,  // enum (reserved word of type)
             Self::KwMatch => TkKindName::KwMatch, // match
             Self::KwUnderscore => TkKindName::KwUnderscore, // _
-            Self::KwImpl => TkKindName::KwImpl,  // impl (reserved word of implementation for type)
-            Self::KwSelfTyp => TkKindName::KwSelfTyp, // Self (reserved word of type)
-            Self::KwSelfVar => TkKindName::KwSelfVar, // self (reserved word of method value)
-            Self::KwScene => TkKindName::KwScene, // scene (reserved word of novel scene)
-            Self::MarkLPare => TkKindName::MarkLPare, // (
-            Self::MarkRPare => TkKindName::MarkRPare, // )
+            Self::KwImpl => TkKindName::KwImpl,
+            Self::KwTrait => TkKindName::KwTrait,       // trait
+            Self::KwSelfTyp => TkKindName::KwSelfTyp,   // Self (reserved word of type)
+            Self::KwSelfVar => TkKindName::KwSelfVar,   // self (reserved word of method value)
+            Self::KwScene => TkKindName::KwScene,       // scene (reserved word of novel scene)
+            Self::MarkLPare => TkKindName::MarkLPare,   // (
+            Self::MarkRPare => TkKindName::MarkRPare,   // )
             Self::MarkLBrace => TkKindName::MarkLBrace, // {
             Self::MarkRBrace => TkKindName::MarkRBrace, // }
             Self::MarkLBracket => TkKindName::MarkLBracket, // [
             Self::MarkRBracket => TkKindName::MarkRBracket, // ]
-            Self::MarkPlus => TkKindName::MarkPlus, // +
-            Self::MarkMinus => TkKindName::MarkMinus, // -
+            Self::MarkPlus => TkKindName::MarkPlus,     // +
+            Self::MarkMinus => TkKindName::MarkMinus,   // -
             Self::MarkAsterisk => TkKindName::MarkAsterisk, // *
-            Self::MarkSlash => TkKindName::MarkSlash, // /
+            Self::MarkSlash => TkKindName::MarkSlash,   // /
             Self::MarkPercent => TkKindName::MarkPercent, // %
             Self::MarkAmpersand => TkKindName::MarkAmpersand, // &
             Self::MarkLesser => TkKindName::MarkLesser, // <
             Self::MarkGreater => TkKindName::MarkGreater, // >
-            Self::MarkLesEq => TkKindName::MarkLesEq, // <=
-            Self::MarkGrtEq => TkKindName::MarkGrtEq, // >=
-            Self::MarkEqual => TkKindName::MarkEqual, // ==
-            Self::MarkNotEq => TkKindName::MarkNotEq, // !=
+            Self::MarkLesEq => TkKindName::MarkLesEq,   // <=
+            Self::MarkGrtEq => TkKindName::MarkGrtEq,   // >=
+            Self::MarkEqual => TkKindName::MarkEqual,   // ==
+            Self::MarkNotEq => TkKindName::MarkNotEq,   // !=
             Self::MarkAssign => TkKindName::MarkAssign, // =
-            Self::MarkComma => TkKindName::MarkComma, // ,
-            Self::MarkDot => TkKindName::MarkDot, // .
-            Self::MarkArrow => TkKindName::MarkArrow, // ->
+            Self::MarkComma => TkKindName::MarkComma,   // ,
+            Self::MarkDot => TkKindName::MarkDot,       // .
+            Self::MarkArrow => TkKindName::MarkArrow,   // ->
             Self::MarkFatArrow => TkKindName::MarkFatArrow, // =>
-            Self::MarkColon => TkKindName::MarkColon, // :
+            Self::MarkColon => TkKindName::MarkColon,   // :
             Self::MarkSemiColon => TkKindName::MarkSemiColon, // ;
             Self::MarkDoubleColon => TkKindName::MarkDoubleColon, // ::
             Self::DslLiteral(_) => TkKindName::DslLiteral, // DSL
@@ -275,6 +279,7 @@ impl TkKindName {
             Self::KwMatch => "match".to_string(),
             Self::KwUnderscore => "_".to_string(),
             Self::KwImpl => "impl".to_string(),
+            Self::KwTrait => "trait".to_string(),
             Self::KwSelfTyp => "Self".to_string(),
             Self::KwSelfVar => "self".to_string(),
             Self::KwScene => "scene".to_string(),

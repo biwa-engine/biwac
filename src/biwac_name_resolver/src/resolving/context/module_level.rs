@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{HashMap, hash_map::Entry},
     sync::Arc,
 };
@@ -8,7 +9,9 @@ use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::{
     DepMetadata, DepMetadataModuleView, ExternalChildKind, ExternalChildRef, PackageModuleView,
 };
-use biwac_span::{DefIdKind, TyDefId};
+use biwac_hir::TyTraitImpl;
+use biwac_span::{DefIdKind, TraitDefId, TyDefId};
+use biwac_trait_solver::{Solved, TraitEnv, TraitSolveError};
 
 use crate::{
     ModuleNameTree, ModuleNameTreeItem, NameTree, ResolveError, TyNameTree,
@@ -25,6 +28,14 @@ pub struct ModuleResolveCtx<'t> {
     ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
     mod_index: &'t HashMap<ModId, &'t ModuleNameTree>,
     interner: &'t IdentInterner,
+    /// 型に対する trait impl の表。
+    ///
+    /// 直接の関連アイテムが空振りしたときのフォールバックに使う。
+    /// def collection の途中 (Step 2/3/4) ではまだ出来ていないので `None`。
+    trait_impls: Option<&'t HashMap<TyDefId, Vec<TyTraitImpl>>>,
+    /// このモジュールで使える trait。
+    /// [`Self::prepare_trait_scope`] が埋める。
+    traits_in_scope: RefCell<Vec<TraitDefId>>,
 }
 
 impl<'t> ModuleResolveCtx<'t> {
@@ -64,6 +75,7 @@ impl<'t> ModuleResolveCtx<'t> {
                             ModuleNameTreeItem::Mod(module) => DefIdKind::Mod(module.mod_id),
                             ModuleNameTreeItem::Ty(ty) => DefIdKind::Ty(ty.def_id),
                             ModuleNameTreeItem::Val(val_def_id) => DefIdKind::Val(*val_def_id),
+                            ModuleNameTreeItem::Trait(def_id) => DefIdKind::Trait(*def_id),
                         },
                     });
                 }
@@ -79,10 +91,58 @@ impl<'t> ModuleResolveCtx<'t> {
                 ty_index,
                 mod_index,
                 interner,
+                trait_impls: None,
+                traits_in_scope: RefCell::new(Vec::new()),
             })
         } else {
             Err(errors)
         }
+    }
+
+    /// フォールバックに使う trait impl の表を渡す。
+    ///
+    /// def collection の途中では表がまだ出来ていないので、
+    /// 本番の名前解決パスでだけ呼ぶ。
+    pub(crate) fn with_trait_impls(
+        mut self,
+        trait_impls: &'t HashMap<TyDefId, Vec<TyTraitImpl>>,
+    ) -> Self {
+        self.trait_impls = Some(trait_impls);
+        self
+    }
+
+    /// import をすべて解決し、このモジュールで使える trait を集める。
+    ///
+    /// import は名前で引かれたときに初めて解決されるので、
+    /// ここで明示的に回す必要がある。
+    /// trait の import は名前で参照されないまま
+    /// 「その trait をスコープに入れる」ためだけに書かれるからである。
+    pub(crate) fn prepare_trait_scope(&self, errors: &mut Vec<ResolveError>) -> Vec<TraitDefId> {
+        let mut scope = Vec::new();
+
+        // このモジュールで宣言された trait。
+        for item in self.module.children.values() {
+            if let ModuleNameTreeItem::Trait(def_id) = item {
+                scope.push(*def_id);
+            }
+        }
+
+        // import された trait。
+        for path in self.imports.values() {
+            match self.resolve_path(path) {
+                Ok(()) => {
+                    if let Ok(DefIdKind::Trait(def_id)) = def_id_kind_from_path(path) {
+                        scope.push(def_id);
+                    }
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+
+        scope.sort_by_key(|t| t.value());
+        scope.dedup();
+        *self.traits_in_scope.borrow_mut() = scope.clone();
+        scope
     }
 }
 
@@ -92,6 +152,12 @@ impl ModuleResolveCtx<'_> {
             ty_index: self.ty_index,
             ext_pkg_data: &self.global_tree.ext_pkg_data,
             interner: self.interner,
+            trait_env: ModuleTraitEnv {
+                trait_impls: self.trait_impls,
+                ext_pkg_data: &self.global_tree.ext_pkg_data,
+                interner: self.interner,
+                in_scope: self.traits_in_scope.borrow().clone(),
+            },
         }
     }
 }
@@ -192,6 +258,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                                         &view,
                                                         pkg_id,
                                                         self.interner,
+                                                        &self.local_tree_ctx(),
                                                     )
                                                 }
                                                 None => {
@@ -243,6 +310,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                                         &sub_view,
                                                         pkg_id,
                                                         self.interner,
+                                                        &self.local_tree_ctx(),
                                                     )
                                                 }
                                                 None => {
@@ -315,6 +383,7 @@ impl ResolveCtx for ModuleResolveCtx<'_> {
                                         view.as_ref(),
                                         pkg_id,
                                         self.interner,
+                                        &self.local_tree_ctx(),
                                     )
                                 }
                             } else {
@@ -345,6 +414,60 @@ struct LocalTreeCtx<'t> {
     ty_index: &'t HashMap<TyDefId, &'t TyNameTree>,
     ext_pkg_data: &'t HashMap<PackageId, Arc<DepMetadata>>,
     interner: &'t IdentInterner,
+    trait_env: ModuleTraitEnv<'t>,
+}
+
+/// 1 つのモジュールに閉じた [`TraitEnv`]。
+struct ModuleTraitEnv<'t> {
+    trait_impls: Option<&'t HashMap<TyDefId, Vec<TyTraitImpl>>>,
+    ext_pkg_data: &'t HashMap<PackageId, Arc<DepMetadata>>,
+    interner: &'t IdentInterner,
+    in_scope: Vec<TraitDefId>,
+}
+
+impl TraitEnv for ModuleTraitEnv<'_> {
+    fn trait_impls_of(&self, ty: TyDefId) -> Vec<TyTraitImpl> {
+        let mut out: Vec<TyTraitImpl> = self
+            .trait_impls
+            .and_then(|m| m.get(&ty))
+            .cloned()
+            .unwrap_or_default();
+
+        // trait impl は対象の型のパッケージに載るとは限らない
+        // (自分の trait を他パッケージの型に実装できる) ので、
+        // 依存すべてを見る必要がある。
+        for (pkg_id, dep) in self.ext_pkg_data {
+            out.extend(dep.trait_impls_for(ty, *pkg_id, self.interner));
+        }
+
+        out
+    }
+
+    fn traits_in_scope(&self) -> &[TraitDefId] {
+        &self.in_scope
+    }
+}
+
+/// 直接の関連アイテムが見つからなかったときの、trait 越しの解決。
+fn solve_assoc_fallback(
+    ty_def_id: TyDefId,
+    segment: &biwac_ast::PathSegment,
+    ctx: &LocalTreeCtx<'_>,
+) -> Result<DefIdKind, ResolveError> {
+    match biwac_trait_solver::solve_assoc(ty_def_id, segment.ident.id, &ctx.trait_env) {
+        Ok(Solved::Impl(val_def_id)) => Ok(DefIdKind::Val(val_def_id)),
+        Err(TraitSolveError::NotInScope { candidates }) => Err(ResolveError::TraitNotInScope {
+            segment: segment.clone(),
+            candidates,
+        }),
+        Err(TraitSolveError::Ambiguous { candidates }) => Err(ResolveError::AmbiguousTraitAssoc {
+            segment: segment.clone(),
+            candidates,
+        }),
+        Err(_) => Err(ResolveError::TraitAssocNotFound {
+            segment: segment.clone(),
+        }),
+    }
 }
 
 /// Resolves path starting at `depth` within a module tree.
@@ -374,7 +497,9 @@ fn resolve_path_in_module(
                     ModuleNameTreeItem::Ty(ty_tree) => {
                         resolve_path_in_ty(path, depth + 1, ty_tree, ctx)
                     }
-                    ModuleNameTreeItem::Val(_) => {
+                    // 値と trait はどちらもここで終端である。
+                    // trait の項目をパスから直接引く構文は無い。
+                    ModuleNameTreeItem::Val(_) | ModuleNameTreeItem::Trait(_) => {
                         path.segments[depth + 1]
                             .resolved_id
                             .set(PathSegmentResolution::Err)
@@ -437,6 +562,7 @@ fn resolve_path_in_ty(
             &view,
             pkg_id,
             ctx.interner,
+            ctx,
         );
     }
 
@@ -477,10 +603,32 @@ fn resolve_path_in_ty(
             }
         }
         None => {
-            segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
-            Err(ResolveError::PathResolutionFailed {
-                path: Box::new(path.clone()),
-            })
+            // 直接の impl に無い。ここで初めて trait を探す。
+            drop(children);
+            match solve_assoc_fallback(canonical_tree.def_id, segment, ctx) {
+                Ok(def_id_kind) => {
+                    segment
+                        .resolved_id
+                        .set(PathSegmentResolution::Ok(def_id_kind))
+                        .unwrap();
+
+                    if path.segments.len() == depth + 1 {
+                        Ok(())
+                    } else {
+                        path.segments[depth + 1]
+                            .resolved_id
+                            .set(PathSegmentResolution::Err)
+                            .unwrap();
+                        Err(ResolveError::PathResolutionFailed {
+                            path: Box::new(path.clone()),
+                        })
+                    }
+                }
+                Err(e) => {
+                    segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
+                    Err(e)
+                }
+            }
         }
     }
 }
@@ -500,6 +648,7 @@ fn module_item_to_def_id_kind(item: &ModuleNameTreeItem) -> DefIdKind {
         // 引き続き alias_target を辿る。
         ModuleNameTreeItem::Ty(ty) => DefIdKind::Ty(ty.def_id),
         ModuleNameTreeItem::Val(val_def_id) => DefIdKind::Val(*val_def_id),
+        ModuleNameTreeItem::Trait(def_id) => DefIdKind::Trait(*def_id),
     }
 }
 
@@ -515,6 +664,7 @@ fn resolve_path_in_ext_pkg(
     view: &dyn PackageModuleView,
     pkg_id: PackageId,
     interner: &IdentInterner,
+    trait_ctx: &LocalTreeCtx<'_>,
 ) -> Result<(), ResolveError> {
     let segment = &path.segments[depth];
     match view.lookup_child(segment.ident.id, interner) {
@@ -543,6 +693,7 @@ fn resolve_path_in_ext_pkg(
                             sub_view.as_ref(),
                             pkg_id,
                             interner,
+                            trait_ctx,
                         )
                     }
                     ExternalChildKind::Ty => resolve_path_in_ext_ty(
@@ -552,10 +703,13 @@ fn resolve_path_in_ext_pkg(
                         view,
                         pkg_id,
                         interner,
+                        trait_ctx,
                     ),
-                    // 値とバリアントはどちらもここで終端である。
+                    // 値・バリアント・trait はどれもここで終端である。
                     // その先にセグメントがあれば解決できない。
-                    ExternalChildKind::Val | ExternalChildKind::Variant => {
+                    ExternalChildKind::Val
+                    | ExternalChildKind::Variant
+                    | ExternalChildKind::Trait => {
                         path.segments[depth + 1]
                             .resolved_id
                             .set(PathSegmentResolution::Err)
@@ -579,14 +733,39 @@ fn resolve_path_in_ext_ty(
     view: &dyn PackageModuleView,
     pkg_id: PackageId,
     interner: &IdentInterner,
+    trait_ctx: &LocalTreeCtx<'_>,
 ) -> Result<(), ResolveError> {
     let segment = &path.segments[depth];
     match view.lookup_assoc(local_ty_idx, segment.ident.id, interner) {
         None => {
-            segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
-            Err(ResolveError::PathResolutionFailed {
-                path: Box::new(path.clone()),
-            })
+            // 外部パッケージの型でも、自パッケージが trait を実装していれば引ける。
+            let ty_def_id = TyDefId::new(biwac_span::DefId::new(
+                pkg_id,
+                biwac_span::PackageLocalDefId::new(local_ty_idx),
+            ));
+            match solve_assoc_fallback(ty_def_id, segment, trait_ctx) {
+                Ok(def_id_kind) => {
+                    segment
+                        .resolved_id
+                        .set(PathSegmentResolution::Ok(def_id_kind))
+                        .unwrap();
+                    if path.segments.len() == depth + 1 {
+                        Ok(())
+                    } else {
+                        path.segments[depth + 1]
+                            .resolved_id
+                            .set(PathSegmentResolution::Err)
+                            .unwrap();
+                        Err(ResolveError::PathResolutionFailed {
+                            path: Box::new(path.clone()),
+                        })
+                    }
+                }
+                Err(e) => {
+                    segment.resolved_id.set(PathSegmentResolution::Err).unwrap();
+                    Err(e)
+                }
+            }
         }
         Some(child_ref) => {
             let def_id_kind = ext_child_ref_to_def_id_kind(&child_ref, pkg_id);
@@ -618,6 +797,7 @@ fn ext_child_ref_to_def_id_kind(child_ref: &ExternalChildRef, pkg_id: PackageId)
         ExternalChildKind::Ty => DefIdKind::Ty(child_ref.as_ty_def_id(pkg_id)),
         ExternalChildKind::Val => DefIdKind::Val(child_ref.as_val_def_id(pkg_id)),
         ExternalChildKind::Variant => DefIdKind::Variant(child_ref.as_variant_def_id(pkg_id)),
+        ExternalChildKind::Trait => DefIdKind::Trait(child_ref.as_trait_def_id(pkg_id)),
         ExternalChildKind::Mod => DefIdKind::Mod(ModId::new_ext(pkg_id.value(), child_ref.sym_idx)),
     }
 }

@@ -1,6 +1,6 @@
 mod alias_expansion;
 mod expressions;
-mod globals;
+pub(crate) mod globals;
 mod novel;
 pub(crate) mod patterns;
 mod statements;
@@ -10,10 +10,10 @@ use std::collections::HashMap;
 pub(crate) use expressions::ExprLowerCtx;
 
 use biwac_ast::{Path, PathSegmentResolution, PrimTyp, TypRepr, TypReprVal};
-use biwac_base::{InternedIdent, PackageId, PackageName};
+use biwac_base::{InternedIdent, ModId, PackageId, PackageName};
 use biwac_hir::{DefinedTy, DefinedTyImpl, Hir, Ty, TyKind, TypeAliasDef, ValDefKind};
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TyDefId, ValDefId};
+use biwac_span::{DefIdKind, GenDefId, LocalGenDefId, TraitDefId, TyDefId, ValDefId};
 
 use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
@@ -22,18 +22,42 @@ pub(crate) fn lower(
     pkg: Pkg,
     pkg_names: HashMap<PackageId, InternedIdent>,
     impl_collector: &ImplCollector,
+    trait_scopes: HashMap<ModId, Vec<TraitDefId>>,
+    ext_pkgs: &[biwac_dependency_metadata::ExternalPackage],
+    interner: &mut biwac_base::IdentInterner,
 ) -> Result<Hir, Vec<ResolveError>> {
     let mut errors = Vec::new();
 
     // Pass 1: register all type definitions so impl blocks can reference them.
     let mut ty_list = Vec::new();
     let mut alias_list = Vec::new();
-    lower_module_types(&pkg.root_module, &mut ty_list, &mut alias_list, &mut errors);
+    let mut trait_list = Vec::new();
+    lower_module_types(
+        &pkg.root_module,
+        &mut ty_list,
+        &mut alias_list,
+        &mut trait_list,
+        &mut errors,
+    );
     let mut tys: HashMap<TyDefId, DefinedTyImpl> = ty_list.into_iter().collect();
     let ty_aliases: HashMap<TyDefId, TypeAliasDef> = alias_list.into_iter().collect();
+    let traits: HashMap<TraitDefId, biwac_hir::TraitDef> = trait_list.into_iter().collect();
 
     // Pass 2: lower impl blocks
     lower_impl_blocks(&mut tys, &pkg.root_module, impl_collector, &mut errors);
+
+    // Pass 2.5: trait impl を型の索引に張り、宣言との一致を検査する。
+    //
+    // シグニチャの検査をここまで遅らせるのは、
+    // def collection の段では trait の項目の型がまだ解決されていないからである。
+    globals::register_trait_impls(
+        &mut tys,
+        &traits,
+        impl_collector,
+        ext_pkgs,
+        interner,
+        &mut errors,
+    );
 
     // Pass 3: lower all values (fns, impls, novel scenes, native code).
     let vals = lower_module_vals(&pkg.root_module, &mut errors)
@@ -48,7 +72,16 @@ pub(crate) fn lower(
         return Err(errors);
     }
 
-    let mut hir = Hir::new(pkg_name, pkg_names, tys, vals, ty_aliases, native_codes);
+    let mut hir = Hir::new(
+        pkg_name,
+        pkg_names,
+        tys,
+        vals,
+        ty_aliases,
+        native_codes,
+        traits,
+        trait_scopes,
+    );
 
     // Pass 5: 型 alias を右辺で置き換える。
     //
@@ -68,15 +101,22 @@ fn lower_module_types(
     module: &LoadedModule,
     tys: &mut Vec<(TyDefId, DefinedTyImpl)>,
     aliases: &mut Vec<(TyDefId, TypeAliasDef)>,
+    traits: &mut Vec<(TraitDefId, biwac_hir::TraitDef)>,
     errors: &mut Vec<ResolveError>,
 ) {
     for g in &module.ast.globals {
-        if let biwac_ast::Globals::TypeDef(type_def) = g {
-            globals::lower_type_def(type_def, tys, aliases, errors);
+        match g {
+            biwac_ast::Globals::TypeDef(type_def) => {
+                globals::lower_type_def(type_def, tys, aliases, errors);
+            }
+            biwac_ast::Globals::TraitDef(trait_def) => {
+                traits.push(globals::lower_trait_def(trait_def));
+            }
+            _ => {}
         }
     }
     for (_, child) in module.children_ordered() {
-        lower_module_types(child, tys, aliases, errors);
+        lower_module_types(child, tys, aliases, traits, errors);
     }
 }
 
@@ -113,7 +153,9 @@ fn lower_module_vals(
             biwac_ast::Globals::NovelScene(scene_def) => {
                 vals.push(novel::lower_novel_scene(scene_def, errors));
             }
+            // trait の項目は本体を持たないので値にはならない。
             biwac_ast::Globals::TypeDef(_)
+            | biwac_ast::Globals::TraitDef(_)
             | biwac_ast::Globals::Import(_)
             | biwac_ast::Globals::VarDecl(_)
             | biwac_ast::Globals::ImplBlock(_)
@@ -246,6 +288,11 @@ pub(crate) fn ty_def_id_kind_from_path(path: &Path) -> Result<TyDefIdKind, Resol
             path: Box::new(path.clone()),
         }),
         DefIdKind::Val(def_id) => Err(ResolveError::TypeNotFoundValueFound {
+            path: Box::new(path.clone()),
+            def_id,
+        }),
+        // trait は型ではない。型の振る舞いを表すだけである。
+        DefIdKind::Trait(def_id) => Err(ResolveError::TypeNotFoundTraitFound {
             path: Box::new(path.clone()),
             def_id,
         }),

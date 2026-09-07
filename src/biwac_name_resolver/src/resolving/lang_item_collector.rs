@@ -139,7 +139,10 @@ fn collect_in_mod_ast(
                 }
             },
             Globals::ImplBlock(b) => collect_in_impl_block(b, table, interner, errors),
-            Globals::NovelScene(_)
+            // trait への lang item はまだ扱わない。
+            // 演算子オーバーロードを入れるときに要る。
+            Globals::TraitDef(_)
+            | Globals::NovelScene(_)
             | Globals::NativeCode(_)
             | Globals::Import(_)
             | Globals::VarDecl(_) => {}

@@ -95,7 +95,10 @@ impl NameResolver {
         })
     }
 
-    pub fn try_resolve(self, interner: &IdentInterner) -> Result<ResolveOutput, Vec<ResolveError>> {
+    pub fn try_resolve(
+        self,
+        interner: &mut IdentInterner,
+    ) -> Result<ResolveOutput, Vec<ResolveError>> {
         // codegen がマングリングでパッケージ名を引くので、
         // 直接依存かどうかにかかわらず推移閉包すべてを入れる。
         let mut pkg_names = self
@@ -113,6 +116,7 @@ impl NameResolver {
             self.external_packages.clone(),
             interner,
         )?;
+        let external_packages = self.external_packages;
 
         // lang item collection
         //
@@ -120,8 +124,7 @@ impl NameResolver {
         // DefId は AST の OnceCell に入っているのでここで読める。
         // 名前解決より前でよい: lang item は名前解決に関与せず、
         // 逆に名前解決が lang item を必要とすることもない。
-        let lang_items =
-            collect_lang_items(&self.pkg, &self.external_packages, self.no_std, interner)?;
+        let lang_items = collect_lang_items(&self.pkg, &external_packages, self.no_std, interner)?;
 
         // TODO: cache on disk
         // def_collector
@@ -131,7 +134,8 @@ impl NameResolver {
         // because symbol definition is not affected by name resolution result.
 
         // symbol resolution (package internal)
-        resolve_in_self_package(&self.pkg, &name_tree, &mut def_collector, interner)?;
+        let trait_scopes =
+            resolve_in_self_package(&self.pkg, &name_tree, &mut def_collector, interner)?;
 
         // TODO: cache on disk
         // symbol signature
@@ -142,6 +146,9 @@ impl NameResolver {
             self.pkg,
             pkg_names,
             &def_collector.impl_collector,
+            trait_scopes,
+            &external_packages,
+            interner,
         )?;
 
         Ok(ResolveOutput { hir, lang_items })

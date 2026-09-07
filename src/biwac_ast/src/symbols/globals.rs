@@ -1,6 +1,9 @@
 use std::cell::OnceCell;
 
-use biwac_span::{GenDefId, ImplId, LocalGenDefId, Span, TyDefId, ValDefId, VarId, VariantDefId};
+use biwac_span::{
+    GenDefId, ImplId, LocalGenDefId, Span, TraitAssocDefId, TraitDefId, TyDefId, ValDefId, VarId,
+    VariantDefId,
+};
 
 use crate::{Attrs, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, VarDecl};
 
@@ -134,6 +137,7 @@ pub enum Globals {
     FnDef(FnDef),
     VarDecl(VarDecl),
     TypeDef(TypeDef),
+    TraitDef(TraitDef),
     ImplBlock(ImplBlock),
     NativeFnDef(NativeFnDef),
     NativeCode(NativeCode),
@@ -228,6 +232,61 @@ pub struct ImplBlock {
     pub native_methods: Vec<NativeMethodDef>,
     pub genargs_decl: Option<GenArgsDecl<LocalGenDefId>>,
     pub self_typ: TypRepr,
+    /// `impl[T] Foo[T]: Bar[T, Int]` の `Bar[T, Int]`。
+    /// trait を実装しない普通の impl なら `None`。
+    pub trait_typ: Option<TypRepr>,
+    pub span: Span,
+}
+
+//  trait 宣言
+//  ```biwa
+//  trait Gyao {
+//    fn gyao(self) -> Gyoe;
+//
+//    fn guee(aaa: Aaa) -> Self;
+//  }
+//  ```
+//
+//  項目は本体を持たない。`;` で終わる。
+#[derive(Debug, Clone)]
+pub struct TraitDef {
+    pub id: Ident,
+    pub def_id: OnceCell<TraitDefId>,
+    /// `Self` を表す暗黙のジェネリック引数。
+    ///
+    /// trait の宣言の中では `Self` はまだ何の型でもないので、
+    /// ジェネリック引数として扱っておく。
+    /// 名前解決 (`TraitDefResolveCtx`) が採番する。
+    pub self_gen: OnceCell<GenDefId>,
+    /// 宣言順。添字がそのまま `TraitAssocOwner::index` になるので
+    /// 並べ替えてはならない。
+    pub items: Vec<TraitItemDecl>,
+    pub genargs: Option<GenArgsDecl<GenDefId>>,
+    pub attrs: Attrs,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitItemDecl {
+    pub id: Ident,
+    pub def_id: OnceCell<TraitAssocDefId>,
+    pub args: TraitItemArgs,
+    pub rtype: RetTypRepr,
+    pub genargs: Option<GenArgsDecl<LocalGenDefId>>,
+    pub attrs: Attrs,
+    pub span: Span,
+}
+
+/// trait の項目が取る引数。
+///
+/// `self` を取るならメソッド形式、取らないなら関連関数形式である。
+/// どちらであるかは実装側と一致していなければならない。
+#[derive(Debug, Clone)]
+pub enum TraitItemArgs {
+    /// `fn guee(aaa: Aaa) -> Self;`
+    Assoc(ArgDeclList),
+    /// `fn gyao(self) -> Gyoe;`
+    Method(MethodArgDeclList),
 }
 
 #[derive(Debug, Clone)]

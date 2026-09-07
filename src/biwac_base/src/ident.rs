@@ -43,6 +43,16 @@ impl IdentInterner {
         }
     }
 
+    /// 既に intern されている識別子だけを引く。
+    ///
+    /// 新しく登録しないので `&self` で呼べる。
+    /// 見つからないということは、そのソースがその名前を一度も書いていない
+    /// ということなので、名前の照合には「一致しない」と同じ意味になる。
+    #[inline]
+    pub fn get(&self, ident: &str) -> Option<InternedIdent> {
+        self.idents.get(ident).copied()
+    }
+
     #[inline]
     pub fn get_str(&self, interned: &InternedIdent) -> Option<&str> {
         self.idents

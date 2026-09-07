@@ -1,6 +1,6 @@
 use biwac_ast::{Path, PathSegment, PathSegmentResolution};
 use biwac_base::{BiwacError, DiagSpan, ErrorContext, InternedIdent, ModId, PackageId};
-use biwac_span::{DefIdKind, GenDefId, Span, TyDefId, ValDefId, VarId};
+use biwac_span::{DefIdKind, GenDefId, Span, TraitDefId, TyDefId, ValDefId, VarId};
 
 use crate::{AssocNameTreeItem, name_tree::AssocNameTreeItemKind};
 
@@ -124,6 +124,91 @@ pub enum ResolveError {
     AmbiguousAssocItem {
         segment: PathSegment,
     },
+
+    // ---- trait ----
+    /// 型が要る位置に trait が書かれた。
+    TypeNotFoundTraitFound {
+        path: Box<Path>,
+        def_id: TraitDefId,
+    },
+
+    /// 値が要る位置に trait が書かれた。
+    ValueNotFoundTraitFound {
+        path: Box<Path>,
+        def_id: TraitDefId,
+    },
+
+    /// `impl Foo: Bar` の `Bar` が trait ではなかった。
+    TraitExpected {
+        path: Box<Path>,
+    },
+
+    /// trait の項目が 2 回宣言された。
+    DuplicatedTraitItem {
+        name: InternedIdent,
+        span1: Span,
+        span2: Span,
+    },
+
+    /// 孤児則違反。
+    ///
+    /// trait 自身か対象の型のいずれかが自パッケージで定義されていなければならない。
+    ForeignTraitImpl {
+        span: Span,
+    },
+
+    /// 同じ型に同じ trait を、重なる特殊化で 2 回実装した。
+    DuplicatedTraitImpl {
+        span1: Span,
+        span2: Span,
+    },
+
+    /// trait impl の項目名が、その型の既存の関連名と衝突した。
+    ///
+    /// biwa は 1 つの型にぶら下がる名前を一意に保つ。
+    /// 曖昧さを解消する構文 (`[T as Gyao]::guee()`) がまだ無いためである。
+    TraitImplNameConflict {
+        name: InternedIdent,
+        span: Span,
+    },
+
+    /// trait が宣言した項目が実装されていない。
+    MissingTraitItem {
+        name: InternedIdent,
+        span: Span,
+    },
+
+    /// trait が宣言していない項目が実装されている。
+    UnknownTraitItem {
+        name: InternedIdent,
+        span: Span,
+    },
+
+    /// 実装のシグニチャが trait の宣言と食い違っている。
+    TraitItemSignatureMismatch {
+        name: InternedIdent,
+        span: Span,
+        /// 宣言の側の位置。
+        decl_span: Span,
+        detail: String,
+    },
+
+    /// スコープにある trait のどれにも関連アイテムが見つからなかった。
+    TraitAssocNotFound {
+        segment: PathSegment,
+    },
+
+    /// 複数の trait が同じ名前を提供していて絞れない。
+    AmbiguousTraitAssoc {
+        segment: PathSegment,
+        candidates: Vec<TraitDefId>,
+    },
+
+    /// 実装はあるが、その trait が import されていない。
+    TraitNotInScope {
+        segment: PathSegment,
+        candidates: Vec<TraitDefId>,
+    },
 }
 
 /// [`Span`] を診断のラベル位置に変換する。
@@ -168,6 +253,7 @@ fn def_id_kind_name(kind: &DefIdKind) -> &'static str {
         DefIdKind::Val(_) => "a value",
         DefIdKind::Gen(_) | DefIdKind::LocalGen(_) => "a generic parameter",
         DefIdKind::Var(_) => "a variable",
+        DefIdKind::Trait(_) => "a trait",
     }
 }
 
@@ -415,6 +501,145 @@ impl BiwacError for ResolveError {
                         format!("more than one impl provides `{name}` here"),
                     )
                     .print();
+            }
+
+            // ---- trait ----
+            Self::TypeNotFoundTraitFound { path, .. } => {
+                let segment = last_segment(path);
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic(format!("`{name}` is a trait, not a type."))
+                    .label(at(&segment.ident.span), "a type is expected here")
+                    .note("a trait describes how a type behaves; it cannot be used as one")
+                    .print();
+            }
+
+            Self::ValueNotFoundTraitFound { path, .. } => {
+                let segment = last_segment(path);
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic(format!("`{name}` is a trait, not a value."))
+                    .label(at(&segment.ident.span), "a value is expected here")
+                    .print();
+            }
+
+            Self::TraitExpected { path } => {
+                let segment = last_segment(path);
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic(format!("`{name}` is not a trait."))
+                    .label(
+                        at(&segment.ident.span),
+                        "only a trait can be written after `:` here",
+                    )
+                    .print();
+            }
+
+            Self::DuplicatedTraitItem { name, span1, span2 } => {
+                let name = ident_str(ctx, name);
+
+                ctx.diagnostic(format!("`{name}` is declared twice in this trait."))
+                    .label(at(span2), format!("`{name}` is declared again here"))
+                    .sub_label(at(span1), "first declared here")
+                    .print();
+            }
+
+            Self::ForeignTraitImpl { span } => {
+                ctx.diagnostic("Neither the trait nor the type is defined in this package.")
+                    .label(at(span), "this impl is not allowed")
+                    .note(
+                        "a trait can be implemented only where the trait itself \
+                         or the type it is implemented for is defined",
+                    )
+                    .print();
+            }
+
+            Self::DuplicatedTraitImpl { span1, span2 } => {
+                ctx.diagnostic("This trait is implemented twice for the same type.")
+                    .label(at(span2), "implemented again here")
+                    .sub_label(at(span1), "first implemented here")
+                    .print();
+            }
+
+            Self::TraitImplNameConflict { name, span } => {
+                let name = ident_str(ctx, name);
+
+                ctx.diagnostic(format!("`{name}` is already defined on this type."))
+                    .label(at(span), format!("`{name}` is defined again here"))
+                    .note(
+                        "every associated name on a type must be unique, \
+                         whether it comes from a direct impl, a trait impl, or an enum variant",
+                    )
+                    .print();
+            }
+
+            Self::MissingTraitItem { name, span } => {
+                let name = ident_str(ctx, name);
+
+                ctx.diagnostic(format!("`{name}` is not implemented."))
+                    .label(at(span), format!("the trait declares `{name}`"))
+                    .print();
+            }
+
+            Self::UnknownTraitItem { name, span } => {
+                let name = ident_str(ctx, name);
+
+                ctx.diagnostic(format!("The trait does not declare `{name}`."))
+                    .label(at(span), format!("`{name}` is implemented here"))
+                    .print();
+            }
+
+            Self::TraitItemSignatureMismatch {
+                name,
+                span,
+                decl_span,
+                detail,
+            } => {
+                let name = ident_str(ctx, name);
+
+                let diag = ctx
+                    .diagnostic(format!(
+                        "The signature of `{name}` does not match the trait."
+                    ))
+                    .label(at(span), detail.clone());
+
+                // 外部パッケージの trait は宣言の位置を持たない
+                // (`.biwameta` は自パッケージのファイルしか知らない)。
+                if decl_span.is_dummy() {
+                    diag.print();
+                } else {
+                    diag.sub_label(at(decl_span), "declared here").print();
+                }
+            }
+
+            Self::TraitAssocNotFound { segment } => {
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic(format!("`{name}` is not found."))
+                    .label(at(&segment.ident.span), "no impl provides this name")
+                    .print();
+            }
+
+            Self::AmbiguousTraitAssoc { segment, .. } => {
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic(format!("`{name}` is ambiguous."))
+                    .label(
+                        at(&segment.ident.span),
+                        format!("more than one trait in scope provides `{name}`"),
+                    )
+                    .print();
+            }
+
+            Self::TraitNotInScope { segment, .. } => {
+                let name = ident_str(ctx, &segment.ident.id);
+
+                ctx.diagnostic(format!(
+                    "`{name}` is provided by a trait that is not in scope."
+                ))
+                .label(at(&segment.ident.span), format!("`{name}` is used here"))
+                .note("import the trait that implements it to make this name visible")
+                .print();
             }
         }
     }

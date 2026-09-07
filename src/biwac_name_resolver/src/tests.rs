@@ -84,7 +84,7 @@ fn test1() {
 
     let _hir = NameResolver::new(&metadata, external_packages, pkg_name, pkg)
         .unwrap()
-        .try_resolve(&interner)
+        .try_resolve(&mut interner)
         .map_err(|errors| {
             for e in errors {
                 e.print_error_message(&ErrorContext {

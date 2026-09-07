@@ -14,4 +14,5 @@ biwac_package_loader = { path = "../biwac_package_loader"}
 biwac_dependency_metadata = { path = "../biwac_dependency_metadata"}
 biwac_hir = { path = "../biwac_hir"}
 biwac_lang_item = { path = "../biwac_lang_item"}
+biwac_trait_solver = { path = "../biwac_trait_solver"}
 ariadne.workspace = true
