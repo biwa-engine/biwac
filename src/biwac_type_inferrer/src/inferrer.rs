@@ -1324,7 +1324,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 let left = self.infer_expr(&m.left)?;
 
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
-                let def_id = self.tctx.get_method_def_id(&left, &m.method)?;
+                let def_id = self.tctx.get_method_def_id(&left, &m.method, self.module)?;
                 m.def_id.set(def_id).unwrap();
 
                 // 同上
@@ -1841,7 +1841,10 @@ fn min_of_ty(t1: &Option<Ty>, t2: &Option<Ty>) -> TyResult<Option<Ty>> {
 
 impl<'a> TyCtx<'a> {
     fn infer_fn_body(&self, fn_body: &FnBody, fn_signature: &FnSignature) -> TyResult<TyInfo> {
-        let mut fctx = FnTyCtx::new(self, fn_signature.rty.clone());
+        // trait 越しのメソッド解決は「その関数が置かれているモジュールで
+        // どの trait が import されているか」で決まるので、
+        // シグニチャの span からモジュールを引いて持ち回る。
+        let mut fctx = FnTyCtx::new(self, fn_signature.rty.clone(), fn_signature.span.module());
 
         // シグネチャに現れる型は codegen が型注釈として出力するため、
         // 外部パッケージのものは import が必要になる。

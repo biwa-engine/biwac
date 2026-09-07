@@ -2,14 +2,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use biwac_base::{IdentInterner, InternedIdent, PackageId};
+use biwac_base::{IdentInterner, InternedIdent, ModId, PackageId};
 use biwac_dependency_metadata::DepMetadata;
 use biwac_hir::{
     AssocValDefKind, DefinedTyImpl, EnumDef, ExprId, FnSignature, Hir, Ident, InferTy, Ty,
-    TyDefKind, TyKind, TyVar, ValDefKind, VariantDef, VariantOwner,
+    TyDefKind, TyKind, TyTraitImpl, TyVar, ValDefKind, VariantDef, VariantOwner,
 };
 use biwac_lang_item::{LangItem, LangItemKind, LangItemTable};
-use biwac_span::{LocalGenDefId, TyDefId, ValDefId, VarId, VariantDefId};
+use biwac_span::{LocalGenDefId, TraitDefId, TyDefId, ValDefId, VarId, VariantDefId};
+use biwac_trait_solver::{Solved, TraitEnv, TraitSolveError};
 
 use crate::{TyError, TyErrorReport, TyNames, TyResult};
 
@@ -357,7 +358,37 @@ impl<'a> TyCtx<'a> {
         }
     }
 
-    pub(super) fn get_method_def_id(&self, ty: &Ty, method: &Ident) -> Result<ValDefId, TyError> {
+    /// このモジュールで使える trait。
+    ///
+    /// 自パッケージのモジュールだけが対象である
+    /// (外部パッケージのコードは既に解決済みなので推論に来ない)。
+    fn traits_in_scope(&self, module: ModId) -> Vec<TraitDefId> {
+        self.hir
+            .trait_scopes
+            .get(&module)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// 1 つのモジュールに閉じた [`TraitEnv`] を作る。
+    pub(super) fn trait_env(&self, module: ModId) -> ModuleTraitEnv<'_, 'a> {
+        ModuleTraitEnv {
+            tctx: self,
+            in_scope: self.traits_in_scope(module),
+        }
+    }
+
+    /// メソッドの解決。
+    ///
+    /// まず直接の impl を探し、見つからなかったときに初めて trait を探す。
+    /// `module` は呼び出し元の関数が置かれているモジュールで、
+    /// どの trait がスコープにあるかを決める。
+    pub(super) fn get_method_def_id(
+        &self,
+        ty: &Ty,
+        method: &Ident,
+        module: ModId,
+    ) -> Result<ValDefId, TyError> {
         let not_found = || TyError::MethodNotFound {
             ty: Box::new(ty.clone()),
             method: Box::new(method.clone()),
@@ -370,34 +401,108 @@ impl<'a> TyCtx<'a> {
             _ => &[],
         };
 
-        let assoc_list = self
+        let mut matched = Vec::new();
+        if let Some(assoc_list) = self
             .get_ty_impl(&ty_def_id)
             .and_then(|di| di.vals.get(&method.id))
-            .ok_or_else(not_found)?;
+        {
+            for (def_id, assoc) in &assoc_list.vals {
+                // trait impl の項目は直接は見えない。
+                // スコープにある trait を経由してしか引けない。
+                if assoc.trait_of.is_some() {
+                    continue;
+                }
 
-        let mut matched = Vec::new();
-        for (def_id, assoc) in &assoc_list.vals {
-            if assoc.genargs.len() == ty_genargs.len()
-                && assoc
-                    .genargs
-                    .iter()
-                    .zip(ty_genargs.iter())
-                    .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
-            {
-                matched.push(*def_id);
+                if assoc.genargs.len() == ty_genargs.len()
+                    && assoc
+                        .genargs
+                        .iter()
+                        .zip(ty_genargs.iter())
+                        .all(|(t1, t2)| t1.kind.is_duplicated_for_impl_genarg(&t2.kind))
+                {
+                    matched.push(*def_id);
+                }
             }
         }
 
         match matched.as_slice() {
             [id] => Ok(*id),
-            [] => Err(not_found()),
+            [] => self.solve_method_by_trait(ty, method, module),
             _ => panic!("compiler bug: duplicated associated implementation registered"),
         }
+    }
+
+    fn solve_method_by_trait(
+        &self,
+        ty: &Ty,
+        method: &Ident,
+        module: ModId,
+    ) -> Result<ValDefId, TyError> {
+        let env = self.trait_env(module);
+        match biwac_trait_solver::solve_method(&ty.kind, method.id, &env) {
+            Ok(Solved::Impl(def_id)) => Ok(def_id),
+            Err(TraitSolveError::NotInScope { .. }) => Err(TyError::MethodNotInScope {
+                ty: Box::new(ty.clone()),
+                method: Box::new(method.clone()),
+            }),
+            Err(TraitSolveError::Ambiguous { .. }) => Err(TyError::AmbiguousMethod {
+                ty: Box::new(ty.clone()),
+                method: Box::new(method.clone()),
+            }),
+            Err(TraitSolveError::Unresolved) => Err(TyError::InsufficientContext),
+            Err(_) => Err(TyError::MethodNotFound {
+                ty: Box::new(ty.clone()),
+                method: Box::new(method.clone()),
+            }),
+        }
+    }
+}
+
+/// 1 つのモジュールに閉じた [`TraitEnv`]。
+///
+/// `trait_impls_of` は外部パッケージの型も引ける
+/// (`get_ty_impl` が `.biwameta` から遅延ロードする)。
+/// 外部パッケージが宣言した trait impl も、依存すべてを走査して拾う。
+pub(super) struct ModuleTraitEnv<'tctx, 'a> {
+    tctx: &'tctx TyCtx<'a>,
+    in_scope: Vec<TraitDefId>,
+}
+
+impl TraitEnv for ModuleTraitEnv<'_, '_> {
+    fn trait_impls_of(&self, ty: TyDefId) -> Vec<TyTraitImpl> {
+        // 自パッケージが宣言した impl。
+        //
+        // 対象が外部パッケージの型でも、索引は自パッケージの `hir.tys` に張ってある
+        // (`get_ty_impl` は外部の型を `.biwameta` から読むので、こちらには来ない)。
+        let mut out: Vec<TyTraitImpl> = self
+            .tctx
+            .hir
+            .tys
+            .get(&ty)
+            .map(|di| di.trait_impls.clone())
+            .unwrap_or_default();
+
+        // trait impl は対象の型のパッケージに載るとは限らない
+        // (自分の trait を他パッケージの型に実装できる) ので、
+        // 依存すべてを見る必要がある。
+        let interner = self.tctx.interner.borrow();
+        for (pkg_id, dep) in &self.tctx.ext_pkgs {
+            out.extend(dep.trait_impls_for(ty, *pkg_id, &interner));
+        }
+
+        out
+    }
+
+    fn traits_in_scope(&self) -> &[TraitDefId] {
+        &self.in_scope
     }
 }
 
 pub struct FnTyCtx<'tctx, 'a> {
     pub(super) tctx: &'tctx TyCtx<'a>,
+    /// いま推論している関数が置かれているモジュール。
+    /// trait 越しのメソッド解決で、どの trait がスコープにあるかを決める。
+    pub(super) module: ModId,
     next_tv: usize,
     pub(super) substitutions: HashMap<TyVar, Ty>,
     pub(super) vars: HashMap<VarId, Ty>,
@@ -417,9 +522,10 @@ pub(super) struct TyInfo {
 }
 
 impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
-    pub(super) fn new(tctx: &'tctx TyCtx<'a>, rty: Ty) -> Self {
+    pub(super) fn new(tctx: &'tctx TyCtx<'a>, rty: Ty, module: ModId) -> Self {
         Self {
             tctx,
+            module,
             next_tv: 0,
             substitutions: HashMap::new(),
             vars: HashMap::new(),

@@ -67,6 +67,18 @@ pub enum TyError {
         method: Box<Ident>,
     },
 
+    /// 実装はあるが、その trait が import されていない。
+    MethodNotInScope {
+        ty: Box<Ty>,
+        method: Box<Ident>,
+    },
+
+    /// 複数の trait が同じ名前のメソッドを提供していて絞れない。
+    AmbiguousMethod {
+        ty: Box<Ty>,
+        method: Box<Ident>,
+    },
+
     /// バリアントの書き方が宣言と食い違う
     /// (`Rgb(Int)` を `Rgb { .. }` で作るなど)。
     VariantShapeMismatched {
@@ -406,6 +418,30 @@ impl BiwacError for TyErrorReport {
                     .print();
             }
 
+            TyError::MethodNotInScope { ty, method } => {
+                let name = ident_str(&method.id);
+                let ty = names.render(&ty.kind);
+
+                ctx.diagnostic(format!(
+                    "`{name}` is provided by a trait that is not in scope."
+                ))
+                .label(at(&method.span), format!("`{name}` is used on `{ty}` here"))
+                .note("import the trait that implements it to make this method visible")
+                .print();
+            }
+
+            TyError::AmbiguousMethod { ty, method } => {
+                let name = ident_str(&method.id);
+                let ty = names.render(&ty.kind);
+
+                ctx.diagnostic(format!("`{name}` is ambiguous on `{ty}`."))
+                    .label(
+                        at(&method.span),
+                        format!("more than one trait in scope provides `{name}`"),
+                    )
+                    .print();
+            }
+
             TyError::VariantShapeMismatched {
                 declared,
                 found,
@@ -505,6 +541,8 @@ pub(crate) fn error_tys(error: &TyError) -> Vec<&Ty> {
         | TyError::InvalidBinaryOperationForType { ty, .. }
         | TyError::InvalidUnaryOperationForType { ty, .. }
         | TyError::MethodNotFound { ty, .. }
+        | TyError::MethodNotInScope { ty, .. }
+        | TyError::AmbiguousMethod { ty, .. }
         | TyError::OccursCheckFailed { ty, .. } => vec![ty],
 
         TyError::TypeConfliced { t1, t2 } => vec![t1, t2],
