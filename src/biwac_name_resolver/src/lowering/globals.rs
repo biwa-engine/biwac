@@ -12,7 +12,10 @@ use biwac_span::{GenDefId, LocalGenDefId, Span, TraitDefId, TyDefId, ValDefId, V
 
 use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
-use super::{ExprLowerCtx, expressions::lower_expr, statements::lower_stmt, ty_from_typ_repr};
+use super::{
+    ExprLowerCtx, alias_expansion::expand_ty, expressions::lower_expr, statements::lower_stmt,
+    ty_from_typ_repr,
+};
 
 /// 関数シグネチャを HIR に落とす。
 ///
@@ -478,14 +481,35 @@ pub(super) fn lower_impl_block(
     tys: &mut HashMap<TyDefId, DefinedTyImpl>,
     impl_block: &biwac_ast::ImplBlock,
     impl_collector: &ImplCollector,
+    ty_aliases: &HashMap<TyDefId, TypeAliasDef>,
     errors: &mut Vec<ResolveError>,
 ) {
     let impl_id = impl_block.impl_id.get().unwrap();
-    let self_ty_kind = impl_collector.impl_self_tys.get(impl_id).unwrap().clone();
+
+    // 実装対象が型エイリアスで書かれていたら、ここで右辺に展開する。
+    //
+    // 名前解決はエイリアスを型の位置で潰さない
+    // (潰すと `type C = Character[P]` の `[P]` が失われる) ので、
+    // `impl_self_tys` にはエイリアス自身の `TyDefId` が入っている。
+    // それをそのまま実装の置き場所にすると、
+    // エイリアスは `.biwameta` のシンボルにならないため、
+    // 関連関数が「シンボル表に無い型」にぶら下がってしまう。
+    //
+    // 展開は `alias_expansion` (Pass 5) が式や シグニチャに対して行うが、
+    // `tys` の **キー** は書き換えられない。だからここで展開しておく必要がある。
+    let self_ty_kind = expand_ty(
+        Ty::new(
+            impl_collector.impl_self_tys.get(impl_id).unwrap().clone(),
+            impl_block.self_typ.span.clone(),
+        ),
+        ty_aliases,
+    )
+    .kind;
 
     // trait impl なら、その項目は直接の関連アイテムとしては見えない。
     // 印を付けておかないと import 無しで引けてしまう。
-    let trait_of = impl_collector.impl_traits.get(impl_id).copied();
+    let trait_impl_of = impl_collector.impl_traits.get(impl_id);
+    let trait_of = trait_impl_of.map(|(def_id, _)| *def_id);
     let impl_genargs = collect_impl_genargs(impl_block);
     let impl_block_genargs_map = collect_impl_block_genargs_map(impl_block);
 
@@ -494,6 +518,45 @@ pub(super) fn lower_impl_block(
     } else {
         vec![]
     };
+
+    // trait impl の索引を、展開後の型の下に張る。
+    //
+    // def collection 側の索引 (`ImplCollector::trait_impls`) は
+    // 名前解決のフォールバック専用で、エイリアスの型引数を持っていない。
+    // 特殊化まで見るメソッド解決はこちらを読む。
+    if let Some((trait_def_id, trait_genargs)) = trait_impl_of {
+        let mut vals: HashMap<InternedIdent, ValDefId> = HashMap::new();
+        for f in &impl_block.assoc_fns {
+            vals.insert(f.id.id, *f.def_id.get().unwrap());
+        }
+        for m in &impl_block.methods {
+            vals.insert(m.id.id, *m.def_id.get().unwrap());
+        }
+        for f in &impl_block.native_assoc_fns {
+            vals.insert(f.id.id, *f.def_id.get().unwrap());
+        }
+        for m in &impl_block.native_methods {
+            vals.insert(m.id.id, *m.def_id.get().unwrap());
+        }
+
+        if let Some(target) = self_ty_kind.def_id() {
+            tys.entry(target)
+                .or_insert_with(|| DefinedTyImpl {
+                    ty_content: None,
+                    vals: HashMap::new(),
+                    trait_impls: Vec::new(),
+                })
+                .trait_impls
+                .push(biwac_hir::TyTraitImpl {
+                    trait_def_id: *trait_def_id,
+                    impl_block_genargs: impl_block_genargs_map.clone(),
+                    ty_genargs: ty_genargs.clone(),
+                    trait_genargs: trait_genargs.clone(),
+                    vals,
+                    span: impl_block.span.clone(),
+                });
+        }
+    }
 
     for fn_def in &impl_block.assoc_fns {
         let signature = build_fn_signature(
@@ -776,24 +839,26 @@ pub(crate) fn lower_trait_def(trait_def: &biwac_ast::TraitDef) -> (TraitDefId, T
     )
 }
 
-/// trait impl を型の側に登録し、宣言との一致を検査する。
+/// trait impl が宣言と一致しているかを検査する。
 ///
-/// 実体 (`DefinedTyImpl::vals`) は [`lower_impl_block`] が既に入れてある。
-/// ここでやるのは索引を張ることと、宣言と食い違っていないかを見ることである。
+/// 索引 (`DefinedTyImpl::trait_impls`) と実体 (`DefinedTyImpl::vals`) は
+/// [`lower_impl_block`] が既に入れてある。ここでやるのは検査だけである。
 ///
-/// シグニチャの検査をここまで遅らせるのは、
-/// def collection の段では trait の項目の型がまだ解決されていないからである。
-pub(crate) fn register_trait_impls(
-    tys: &mut HashMap<TyDefId, DefinedTyImpl>,
+/// 検査をここまで遅らせるのは、def collection の段では
+/// trait の項目の型がまだ解決されていないからである。
+pub(crate) fn check_trait_impls(
+    tys: &HashMap<TyDefId, DefinedTyImpl>,
     traits: &HashMap<TraitDefId, TraitDef>,
-    impl_collector: &ImplCollector,
     ext_pkgs: &[biwac_dependency_metadata::ExternalPackage],
     interner: &mut biwac_base::IdentInterner,
     errors: &mut Vec<ResolveError>,
 ) {
     // 走査の順序を固定する。エラーの並びがビルドごとに変わらないようにするため。
-    let mut targets: Vec<(&TyDefId, &Vec<biwac_hir::TyTraitImpl>)> =
-        impl_collector.trait_impls.iter().collect();
+    let mut targets: Vec<(&TyDefId, &Vec<biwac_hir::TyTraitImpl>)> = tys
+        .iter()
+        .filter(|(_, ty_impl)| !ty_impl.trait_impls.is_empty())
+        .map(|(ty_def_id, ty_impl)| (ty_def_id, &ty_impl.trait_impls))
+        .collect();
     targets.sort_by_key(|(ty_def_id, _)| ty_def_id.value());
 
     for (ty_def_id, impls) in targets {
@@ -817,13 +882,6 @@ pub(crate) fn register_trait_impls(
             if let Some(trait_def) = traits.get(&imp.trait_def_id).or(ext_trait_def.as_ref()) {
                 check_trait_impl(*ty_def_id, imp, trait_def, tys, errors);
             }
-
-            let entry = tys.entry(*ty_def_id).or_insert_with(|| DefinedTyImpl {
-                ty_content: None,
-                vals: HashMap::new(),
-                trait_impls: Vec::new(),
-            });
-            entry.trait_impls.push(imp.clone());
         }
     }
 }

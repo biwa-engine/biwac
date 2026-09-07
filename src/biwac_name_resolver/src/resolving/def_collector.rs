@@ -922,7 +922,17 @@ impl DefCollector {
 
             self.impl_collector
                 .impl_traits
-                .insert(impl_id, trait_def_id);
+                .insert(impl_id, (trait_def_id, trait_genargs.clone()));
+
+            // 名前解決のフォールバック用の索引。
+            //
+            // `ty_genargs` はここでは正確でないことがある。
+            // 実装対象が型エイリアスで書かれていると、その右辺の型引数は
+            // まだ解決されていないためである
+            // (`type C = Character[P]` に対して `[]` になる)。
+            // パスの解決 (`solve_assoc`) は特殊化で絞らないので影響しない。
+            // 特殊化まで見る `solve_method` が読むのは
+            // lowering が組み直した `DefinedTyImpl::trait_impls` の方である。
             self.impl_collector
                 .trait_impls
                 .entry(canonical_id)
@@ -1039,8 +1049,8 @@ fn ty_has_assoc_name(
 pub(crate) struct ImplCollector {
     next_impl_id: u32,
     pub(crate) impl_self_tys: HashMap<ImplId, TyKind>,
-    /// trait impl なら、その trait。直接の impl は載らない。
-    pub(crate) impl_traits: HashMap<ImplId, TraitDefId>,
+    /// trait impl なら、その trait とジェネリック引数。直接の impl は載らない。
+    pub(crate) impl_traits: HashMap<ImplId, (TraitDefId, Vec<Ty>)>,
     /// エイリアスを辿った先の型 -> その型に対する trait impl。
     ///
     /// 名前解決のフォールバック (`biwac_trait_solver`) と、

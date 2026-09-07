@@ -194,9 +194,12 @@ impl Shade: Level {
   }
 }
 
-// 自パッケージの trait を **外部パッケージの型** に実装する。
+// 自パッケージの trait を **外部パッケージの型へのエイリアス** に実装する。
 // trait が自パッケージなので孤児則を満たす。
-impl greeter::Box[Int]: Level {
+//
+// エイリアスの右辺 (`greeter::Box[Int]`) まで展開してから登録しないと、
+// 対象の型もその型引数も取り違える。
+impl IntBox: Level {
   fn level2(self) -> Int {
     self.get() + 1000
   }
@@ -218,6 +221,18 @@ impl Pos: greeter::Describe {
   }
 }
 
+// 型エイリアスに対する普通の impl。
+//
+// 名前解決はエイリアスを型の位置で潰さないので、
+// lowering が右辺に展開して canonical な型の下に置く必要がある。
+// 置き場所を間違えると、エイリアスは `.biwameta` のシンボルにならないため
+// 「シンボル表に無い型」に関連関数がぶら下がることになる。
+impl PairIntInt {
+  fn viaalias(self) -> Int {
+    self.add() + 1
+  }
+}
+
 fn trait_demo() -> Int {
   // 自パッケージの trait 越しのメソッドと関連関数。
   let a = Shade::Mid(1).level2();
@@ -231,5 +246,5 @@ fn trait_demo() -> Int {
   let e = Pos::new(1, 2).describe();
   let f = Pos::from_code(3).describe();
 
-  a + b + c + d + e + f
+  a + b + c + d + e + f + PairIntInt::new(1, 2).viaalias()
 }

@@ -44,20 +44,19 @@ pub(crate) fn lower(
     let traits: HashMap<TraitDefId, biwac_hir::TraitDef> = trait_list.into_iter().collect();
 
     // Pass 2: lower impl blocks
-    lower_impl_blocks(&mut tys, &pkg.root_module, impl_collector, &mut errors);
-
-    // Pass 2.5: trait impl を型の索引に張り、宣言との一致を検査する。
-    //
-    // シグニチャの検査をここまで遅らせるのは、
-    // def collection の段では trait の項目の型がまだ解決されていないからである。
-    globals::register_trait_impls(
+    lower_impl_blocks(
         &mut tys,
-        &traits,
+        &pkg.root_module,
         impl_collector,
-        ext_pkgs,
-        interner,
+        &ty_aliases,
         &mut errors,
     );
+
+    // Pass 2.5: trait impl が宣言と一致しているかを検査する。
+    //
+    // 検査をここまで遅らせるのは、
+    // def collection の段では trait の項目の型がまだ解決されていないからである。
+    globals::check_trait_impls(&tys, &traits, ext_pkgs, interner, &mut errors);
 
     // Pass 3: lower all values (fns, impls, novel scenes, native code).
     let vals = lower_module_vals(&pkg.root_module, &mut errors)
@@ -124,15 +123,16 @@ fn lower_impl_blocks(
     tys: &mut HashMap<TyDefId, DefinedTyImpl>,
     module: &LoadedModule,
     impl_collector: &ImplCollector,
+    ty_aliases: &HashMap<TyDefId, TypeAliasDef>,
     errors: &mut Vec<ResolveError>,
 ) {
     for g in &module.ast.globals {
         if let biwac_ast::Globals::ImplBlock(impl_block) = g {
-            globals::lower_impl_block(tys, impl_block, impl_collector, errors);
+            globals::lower_impl_block(tys, impl_block, impl_collector, ty_aliases, errors);
         }
     }
     for (_, child) in module.children_ordered() {
-        lower_impl_blocks(tys, child, impl_collector, errors);
+        lower_impl_blocks(tys, child, impl_collector, ty_aliases, errors);
     }
 }
 
