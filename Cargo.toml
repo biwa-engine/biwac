@@ -15,6 +15,7 @@ members = [
   "src/biwac_scene",
   "src/biwac_dependency_metadata",
   "src/biwac_fingerprint",
+  "src/biwac_trait_solver",
   "src/biwac_name_resolver",
   "src/biwac_type_inferrer",
   "src/biwac_mir",

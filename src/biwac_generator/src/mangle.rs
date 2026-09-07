@@ -15,7 +15,7 @@ use std::sync::Arc;
 use biwac_base::{IdentInterner, InternedIdent, ModPath, PackageId, SourceHolder};
 use biwac_dependency_metadata::DepMetadata;
 use biwac_hir::{AssocValDefKind, DefinedTy, Hir, Ident, Ty, TyDefKind, TyKind, ValDefKind};
-use biwac_span::{DefId, Span, TyDefId, ValDefId};
+use biwac_span::{DefId, Span, TraitDefId, TyDefId, ValDefId};
 
 pub struct Mangler<'a> {
     hir: &'a Hir,
@@ -126,6 +126,7 @@ impl<'a> Mangler<'a> {
     //  <symbol>  ::= "_Z" "N" <path> "E"
     //  <path>    ::= <pkg> <mod>* <name>              トップレベル関数 / 型定義
     //              | <owner> <name>                   関連関数 / メソッド
+    //              | <owner> "R" <trait> <name>       trait impl の項目
     //  <owner>   ::= <pkg> <mod>* <name> <genargs>?   定義された型が対象
     //              | <prim>                           プリミティブ型が対象 (ツリーの根)
     //  <genargs> ::= "I" <type>+ "E"
@@ -133,8 +134,17 @@ impl<'a> Mangler<'a> {
     //              | "T" <index> "_"                          未具体化のジェネリック引数
     //              | "N" <pkg> <mod>* <name> <genargs>? "E"   定義された型
     //              | "F" <type> <type>* "E"                   関数型 (戻り値, 引数列)
+    //  <trait>   ::= <pkg> <mod>* <name>
     //  <prim>    ::= "i" | "f" | "b" | "v"
     //  <name>    ::= <len> <ident>
+    //
+    // trait 成分を挟むのは、別々のパッケージが同じ型に同じ名前を
+    // 生やしたときに衝突するからである。
+    //  ```
+    //  package a: trait Foo { fn bar(self) -> Int; }  impl std::String: Foo { .. }
+    //  package b: trait Baz { fn bar(self) -> Int; }  impl std::String: Baz { .. }
+    //  ```
+    // `R` は名前の長さ前置 (数字始まり) とも型タグとも衝突しない。
     //
     // ネストの N...E とジェネリック引数の I...E、長さ前置は
     // Itanium C++ ABI と Rust v0 に倣っている。
@@ -148,6 +158,12 @@ impl<'a> Mangler<'a> {
             // 関連関数・メソッド: 対象型のツリー上の位置にぶら下がる
             Some(self_ty) => {
                 self.push_owner(&mut path, &self_ty);
+                if let Some(trait_def_id) = self.trait_of_assoc(def_id) {
+                    path.push('R');
+                    self.push_module_path_and_name(&mut path, &trait_def_id.def_id(), || {
+                        self.get_trait_ident(&trait_def_id)
+                    });
+                }
                 push_name(&mut path, self.assoc_val_name(def_id));
             }
             // トップレベル関数
@@ -288,6 +304,36 @@ impl<'a> Mangler<'a> {
             }),
             Span::dummy(),
         ))
+    }
+
+    /// その関連アイテムが trait impl のものなら、その trait。
+    ///
+    /// 直接の impl なら `None`。マングル名に trait 成分を挟むかどうかを決める。
+    fn trait_of_assoc(&self, def_id: &ValDefId) -> Option<TraitDefId> {
+        if !def_id.pkg().is_self() {
+            return self
+                .find_ext_dep(def_id.pkg())?
+                .assoc_trait_of(def_id.local_idx(), def_id.pkg());
+        }
+
+        let (ty_def_id, name) = self.hir.assoc_val_map.get(def_id)?;
+        self.hir
+            .tys
+            .get(ty_def_id)?
+            .vals
+            .get(name)?
+            .vals
+            .get(def_id)?
+            .trait_of
+    }
+
+    fn get_trait_ident(&self, def_id: &TraitDefId) -> &Ident {
+        &self
+            .hir
+            .traits
+            .get(def_id)
+            .expect("compiler bug: trait not found for mangling")
+            .name
     }
 
     fn assoc_val_name(&self, def_id: &ValDefId) -> &str {
