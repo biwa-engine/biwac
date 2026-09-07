@@ -4,6 +4,8 @@ import collections::Pair;
 // バリアント単体を import できる。
 import package::Shade::Dark;
 import collections::Vec;
+// trait 越しの関連関数・メソッドは、その trait を import していないと引けない。
+import greeter::Describe;
 
 type PairIntT[T] = Pair[Int, T];
 
@@ -164,6 +166,70 @@ scene main(g: MyGame) -> MyGame {{
   #alias_assoc_demo()
   #let _shade = enum_demo()
   #let _opt = ext_enum_demo()
+  #let _lv = trait_demo()
 
   #endscene g
 }}
+
+// ---- trait ----
+
+// 自パッケージで宣言した trait。
+trait Level {
+  fn level2(self) -> Int;
+
+  fn from_level(n: Int) -> Self;
+}
+
+// 自パッケージの trait を自パッケージの型に実装する。
+//
+// `level` は直接の impl に既にあるので、名前を分けてある。
+// 1 つの型にぶら下がる関連名は、直接 impl でも trait impl でも一意でなければならない。
+impl Shade: Level {
+  fn level2(self) -> Int {
+    self.level() + 100
+  }
+
+  fn from_level(n: Int) -> Self {
+    Shade::Mid(n)
+  }
+}
+
+// 自パッケージの trait を **外部パッケージの型** に実装する。
+// trait が自パッケージなので孤児則を満たす。
+impl greeter::Box[Int]: Level {
+  fn level2(self) -> Int {
+    self.get() + 1000
+  }
+
+  fn from_level(n: Int) -> Self {
+    greeter::Box::new(n)
+  }
+}
+
+// **外部パッケージの trait** を自パッケージの型に実装する。
+// 対象の型が自パッケージなので孤児則を満たす。
+impl Pos: greeter::Describe {
+  fn describe(self) -> Int {
+    self.x + self.y
+  }
+
+  fn from_code(code: Int) -> Self {
+    Pos::new(code, code)
+  }
+}
+
+fn trait_demo() -> Int {
+  // 自パッケージの trait 越しのメソッドと関連関数。
+  let a = Shade::Mid(1).level2();
+  let b = Shade::from_level(2).level2();
+
+  // 外部パッケージの型への trait impl。
+  let c = greeter::Box::new(5).level2();
+  let d = IntBox::from_level(6).level2();
+
+  // 外部パッケージの trait 越し。import した Describe がスコープにある。
+  let e = Pos::new(1, 2).describe();
+  let f = Pos::from_code(3).describe();
+
+  a + b + c + d + e + f
+}

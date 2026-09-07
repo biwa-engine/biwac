@@ -54,3 +54,25 @@ impl[T] Box[T] {
     self.value
   }
 }
+
+// 型の振る舞いを表す trait。
+//
+// 使う側 (test1) がこの trait を import して
+// 自分の型に実装できることを確認する。
+// trait 自身がこのパッケージのものなので、孤児則は満たされる。
+trait Describe {
+  fn describe(self) -> Int;
+
+  fn from_code(code: Int) -> Self;
+}
+
+// 自パッケージの trait を自パッケージの型に実装する。
+impl Greeting: Describe {
+  fn describe(self) -> Int {
+    return 1;
+  }
+
+  fn from_code(code: Int) -> Self {
+    return Greeting::new(greet("code"));
+  }
+}
