@@ -210,6 +210,26 @@ impl DepMetadata {
             }
         }
 
+        // --- trait impl の項目 -> その trait への参照 ---
+        //
+        // 関連関数のシンボルに「どの trait impl のものか」を書き込むのに使う。
+        // trait 自体は型ではないが、参照の運び方は型と同じなので `Ty` で表す。
+        let mut trait_of_val: HashMap<ValDefId, biwac_hir::Ty> = HashMap::new();
+        for ty_impl in hir.tys.values() {
+            for imp in &ty_impl.trait_impls {
+                let trait_ref = biwac_hir::Ty::new(
+                    biwac_hir::TyKind::Defined(biwac_hir::DefinedTy {
+                        def_id: TyDefId::new(imp.trait_def_id.def_id()),
+                        genargs: imp.trait_genargs.clone(),
+                    }),
+                    imp.span.clone(),
+                );
+                for val_def_id in imp.vals.values() {
+                    trait_of_val.insert(*val_def_id, trait_ref.clone());
+                }
+            }
+        }
+
         // --- assoc fn (struct の impl に紐づく関数) ---
         struct AssocFnItem<'h> {
             val_def_id: ValDefId,
@@ -220,6 +240,8 @@ impl DepMetadata {
             /// impl の self 型。所属する型と、その impl 対象ジェネリック引数から組む。
             /// マングリングとメソッド解決の両方で「どの impl か」を決めるのに使う。
             impl_self_ty: biwac_hir::Ty,
+            /// trait impl の項目なら、その trait への参照。
+            trait_of: Option<biwac_hir::Ty>,
         }
         let mut assoc_fn_items: Vec<AssocFnItem> = Vec::new();
         // 所属する型ではなく、**関連関数自身の ValDefId** でこのパッケージのものかを決める。
@@ -256,6 +278,7 @@ impl DepMetadata {
                         impl_genargs: ig,
                         parent_ty_def_id: *parent_ty_def_id,
                         impl_self_ty: impl_self_ty_of(*parent_ty_def_id, &pair.genargs, &name.span),
+                        trait_of: trait_of_val.get(val_def_id).cloned(),
                     });
                 }
             }
@@ -314,6 +337,76 @@ impl DepMetadata {
             next_idx += 1;
         }
 
+        // --- trait ---
+        //
+        // 既存のシンボルの採番を動かさないよう、末尾に足す。
+        // ボディの書き出し順 (Phase 4) もここと同じ順序にしなければならない。
+        struct TraitItem<'h> {
+            def_id: biwac_span::TraitDefId,
+            def: &'h biwac_hir::TraitDef,
+        }
+        let mut trait_items: Vec<TraitItem> = hir
+            .traits
+            .iter()
+            .filter(|(def_id, _)| def_id.pkg().is_self())
+            .map(|(def_id, def)| TraitItem {
+                def_id: *def_id,
+                def,
+            })
+            .collect();
+        trait_items.sort_by_key(|i| i.def_id.value());
+
+        let mut trait_to_sym: HashMap<biwac_span::TraitDefId, DiskSymbolIndex> = HashMap::new();
+        for item in &trait_items {
+            trait_to_sym.insert(item.def_id, DiskSymbolIndex(next_idx));
+            ty_to_sym.insert(
+                TyDefId::new(item.def_id.def_id()),
+                DiskSymbolIndex(next_idx),
+            );
+            symbol_index.insert_ty(TyDefId::new(item.def_id.def_id()), next_idx);
+            next_idx += 1;
+        }
+
+        // --- trait assoc ---
+        //
+        // 宣言順で採番する。添字がそのまま `TraitAssocOwner::index` になる。
+        let mut trait_assoc_to_sym: HashMap<biwac_span::TraitAssocDefId, DiskSymbolIndex> =
+            HashMap::new();
+        for item in &trait_items {
+            for i in &item.def.items {
+                trait_assoc_to_sym.insert(i.def_id, DiskSymbolIndex(next_idx));
+                next_idx += 1;
+            }
+        }
+
+        // --- trait impl ---
+        //
+        // 対象の型が別パッケージのこともあるので、型のシンボルからは辿れない。
+        // 読む側はシンボル表を走査して集める。
+        struct TraitImplItem<'h> {
+            ty_def_id: TyDefId,
+            imp: &'h biwac_hir::TyTraitImpl,
+        }
+        let mut trait_impl_items: Vec<TraitImplItem> = hir
+            .tys
+            .iter()
+            .flat_map(|(ty_def_id, ty_impl)| {
+                ty_impl.trait_impls.iter().map(move |imp| TraitImplItem {
+                    ty_def_id: *ty_def_id,
+                    imp,
+                })
+            })
+            .collect();
+        // ビルドの決定論のために順序を固定する。
+        trait_impl_items.sort_by_key(|i| {
+            (
+                i.ty_def_id.value(),
+                i.imp.trait_def_id.value(),
+                i.imp.vals.values().map(|v| v.value()).min().unwrap_or(0),
+            )
+        });
+        next_idx += trait_impl_items.len() as u32;
+
         let total_syms = next_idx as usize;
 
         // ルートモジュールのシンボルインデックス
@@ -369,6 +462,18 @@ impl DepMetadata {
             let mod_id = item.name.span.module();
             if let Some(ms) = source_holder.mods.get(&mod_id)
                 && let Some(&sym) = val_to_sym.get(&item.val_def_id)
+            {
+                mod_children.entry(ms.modu.clone()).or_default().push(sym);
+            }
+        }
+
+        // trait を所属モジュールに登録
+        //
+        // 項目は trait の子なので、モジュールの直下には載せない。
+        for item in &trait_items {
+            let mod_id = item.def.name.span.module();
+            if let Some(ms) = source_holder.mods.get(&mod_id)
+                && let Some(&sym) = trait_to_sym.get(&item.def_id)
             {
                 mod_children.entry(ms.modu.clone()).or_default().push(sym);
             }
@@ -711,6 +816,8 @@ impl DepMetadata {
                 item.signature,
                 item.impl_genargs,
                 Some(&item.impl_self_ty),
+                item.trait_of.as_ref(),
+                &HashMap::new(),
                 &ty_to_sym,
                 &mod_to_file_idx,
                 source_holder,
@@ -738,6 +845,8 @@ impl DepMetadata {
                 item.signature,
                 item.impl_genargs,
                 None,
+                None,
+                &HashMap::new(),
                 &ty_to_sym,
                 &mod_to_file_idx,
                 source_holder,
@@ -783,6 +892,174 @@ impl DepMetadata {
                 body,
             );
         }
+
+        // --- trait ボディ ---
+        //
+        // 採番 (Phase 2) と同じ順序でなければならない。
+        // 順序がずれるとシンボル番号が別の本体を指す。
+        for item in &trait_items {
+            let name_str = interner.get_str(&item.def.name.id).unwrap_or("");
+            let disk_name = strings.push(name_str);
+            let name_span = impl_to_disk_span(&item.def.name.span, &mod_to_file_idx);
+            let def_raw_code = strings.push(name_str);
+
+            let self_gen = DiskGenArg {
+                name: strings.push("Self"),
+                name_span,
+            };
+
+            // trait の genarg は名前を HIR が持っていないので、
+            // 位置だけを運ぶ (struct と同じ扱い)。
+            let disk_genargs = DiskVec(
+                item.def
+                    .genargs
+                    .iter()
+                    .map(|_| DiskGenArg {
+                        name: strings.push(""),
+                        name_span,
+                    })
+                    .collect(),
+            );
+
+            let item_symbols: Vec<DiskSymbolIndex> = item
+                .def
+                .items
+                .iter()
+                .filter_map(|i| trait_assoc_to_sym.get(&i.def_id).copied())
+                .collect();
+
+            let body = SymbolBody::Trait(format::DiskTraitData {
+                name: disk_name,
+                name_span,
+                def_raw_code,
+                def_span: name_span,
+                self_gen,
+                genargs: disk_genargs,
+                item_symbols: DiskVec(item_symbols),
+            });
+            push_body(
+                &mut body_builder,
+                &mut sym_hdrs,
+                &mut cache,
+                DiskSymbolKind::Trait,
+                body,
+            );
+        }
+
+        // --- trait assoc ボディ ---
+        for item in &trait_items {
+            let owner = trait_to_sym
+                .get(&item.def_id)
+                .copied()
+                .unwrap_or(DiskSymbolIndex(0));
+
+            // `Self` と宣言されたジェネリック引数を序数に割り当てる。
+            // 読む側 (`get_ext_trait_def`) は同じ規則で id を組み立てる。
+            let mut trait_gen_ord: HashMap<GenDefId, u32> = item
+                .def
+                .genargs
+                .iter()
+                .enumerate()
+                .map(|(i, gid)| (*gid, i as u32))
+                .collect();
+            trait_gen_ord.insert(item.def.self_gen, TRAIT_SELF_GEN_ORD);
+
+            for (index, decl) in item.def.items.iter().enumerate() {
+                let fn_sym = trait_assoc_to_sym
+                    .get(&decl.def_id)
+                    .map(|s| s.0)
+                    .unwrap_or(0);
+                let fn_data = impl_encode_fn_data(
+                    &decl.name,
+                    &decl.signature,
+                    &[],
+                    decl.signature.impl_self_ty.as_ref(),
+                    None,
+                    &trait_gen_ord,
+                    &ty_to_sym,
+                    &mod_to_file_idx,
+                    source_holder,
+                    &mut strings,
+                    interner,
+                    &mut ext_syms,
+                    fn_sym,
+                    &mut symbol_index,
+                );
+
+                let body = SymbolBody::TraitAssoc(format::DiskTraitAssocData {
+                    owner,
+                    index: index as u32,
+                    fn_data,
+                });
+                push_body(
+                    &mut body_builder,
+                    &mut sym_hdrs,
+                    &mut cache,
+                    DiskSymbolKind::TraitAssoc,
+                    body,
+                );
+            }
+        }
+
+        // --- trait impl ボディ ---
+        for item in &trait_impl_items {
+            let empty_gen_ord: HashMap<GenDefId, u32> = HashMap::new();
+            let empty_loc_gen: HashMap<LocalGenDefId, u32> = HashMap::new();
+
+            let self_ty = impl_encode_ty(
+                &impl_self_ty_of(item.ty_def_id, &item.imp.ty_genargs, &item.imp.span),
+                &ty_to_sym,
+                &empty_gen_ord,
+                &empty_loc_gen,
+                &mod_to_file_idx,
+                &mut ext_syms,
+            );
+
+            let trait_ref = impl_encode_ty(
+                &biwac_hir::Ty::new(
+                    biwac_hir::TyKind::Defined(biwac_hir::DefinedTy {
+                        def_id: TyDefId::new(item.imp.trait_def_id.def_id()),
+                        genargs: item.imp.trait_genargs.clone(),
+                    }),
+                    item.imp.span.clone(),
+                ),
+                &ty_to_sym,
+                &empty_gen_ord,
+                &empty_loc_gen,
+                &mod_to_file_idx,
+                &mut ext_syms,
+            );
+
+            // 名前は Fn シンボルの側から引けるので、ここには番号だけを書く。
+            let mut item_symbols: Vec<DiskSymbolIndex> = item
+                .imp
+                .vals
+                .values()
+                .filter_map(|v| val_to_sym.get(v).copied())
+                .collect();
+            item_symbols.sort_by_key(|s| s.0);
+
+            let body = SymbolBody::TraitImpl(format::DiskTraitImplData {
+                self_ty,
+                trait_ref,
+                item_symbols: DiskVec(item_symbols),
+            });
+            push_body(
+                &mut body_builder,
+                &mut sym_hdrs,
+                &mut cache,
+                DiskSymbolKind::TraitImpl,
+                body,
+            );
+        }
+
+        // 採番 (Phase 2) と本体の書き出し (Phase 4) の順序がずれると、
+        // シンボル番号が別の本体を指す。数だけでも突き合わせておく。
+        debug_assert_eq!(
+            sym_hdrs.len(),
+            total_syms,
+            "compiler bug: symbol body order does not match the numbering in Phase 2"
+        );
 
         // ====================================================
         // Phase 5: 組み立て
@@ -1190,6 +1467,49 @@ impl DepMetadata {
                     for t in &d.impl_self_ty.0 {
                         self.svh_ty(&mut h, t);
                     }
+                    h.write_u32(d.has_self);
+                    h.write_usize(d.trait_of.0.len());
+                    for t in &d.trait_of.0 {
+                        self.svh_ty(&mut h, t);
+                    }
+                }
+                SymbolBody::Trait(d) => {
+                    h.write_str("trait");
+                    self.svh_name(&mut h, d.name, &d.name_span);
+                    self.svh_genargs(&mut h, &d.genargs.0);
+
+                    // 項目も **順序が意味を持つ**。
+                    // 宣言順の添字が `TraitAssocOwner::index` になる。
+                    h.write_usize(d.item_symbols.0.len());
+                    for i in &d.item_symbols.0 {
+                        h.write_u32(i.0);
+                    }
+                }
+                SymbolBody::TraitAssoc(d) => {
+                    h.write_str("trait-assoc");
+                    h.write_u32(d.owner.0);
+                    h.write_u32(d.index);
+                    self.svh_name(&mut h, d.fn_data.name, &d.fn_data.name_span);
+                    self.svh_genargs(&mut h, &d.fn_data.genargs.0);
+                    h.write_usize(d.fn_data.args.0.len());
+                    for a in &d.fn_data.args.0 {
+                        h.write_str(self.get_str(a.name).unwrap_or(""));
+                        self.svh_ty(&mut h, &a.ty);
+                    }
+                    self.svh_ty(&mut h, &d.fn_data.rty);
+                    h.write_usize(d.fn_data.impl_self_ty.0.len());
+                    for t in &d.fn_data.impl_self_ty.0 {
+                        self.svh_ty(&mut h, t);
+                    }
+                }
+                SymbolBody::TraitImpl(d) => {
+                    h.write_str("trait-impl");
+                    self.svh_ty(&mut h, &d.self_ty);
+                    self.svh_ty(&mut h, &d.trait_ref);
+                    h.write_usize(d.item_symbols.0.len());
+                    for i in &d.item_symbols.0 {
+                        h.write_u32(i.0);
+                    }
                 }
             }
         }
@@ -1285,6 +1605,10 @@ impl DepMetadata {
             SymbolBody::Mod(d) => (d.name, d.name_span),
             SymbolBody::Enum(d) => (d.name, d.name_span),
             SymbolBody::Variant(d) => (d.name, d.name_span),
+            SymbolBody::Trait(d) => (d.name, d.name_span),
+            SymbolBody::TraitAssoc(d) => (d.fn_data.name, d.fn_data.name_span),
+            // trait impl ブロックには名前が無い。
+            SymbolBody::TraitImpl(_) => return None,
         };
 
         let name = self.get_str(name).ok()?;
@@ -1327,7 +1651,7 @@ impl DepMetadata {
         let SymbolBody::Fn(fn_data) = body else {
             return None;
         };
-        let sig = self.impl_disk_fn_to_signature(sym_idx, fn_data, pkg_id, interner);
+        let sig = self.impl_disk_fn_to_signature(sym_idx, fn_data, pkg_id, None, interner);
         Some(sig)
     }
 
@@ -1345,6 +1669,189 @@ impl DepMetadata {
         // fn の combined genargs の先頭に並んでいるので、
         // その序数解決に fn 自身のシンボルインデックスを使う。
         Some(self.impl_disk_ty_to_ty(disk_ty, pkg_id, None, Some(fn_sym_idx)))
+    }
+
+    /// `DiskFnData::trait_of` を trait への参照として復元する。
+    fn impl_decode_trait_of(
+        &self,
+        fn_data: &format::DiskFnData,
+        fn_sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+    ) -> Option<biwac_hir::Ty> {
+        let disk_ty = fn_data.trait_of.0.first()?;
+        Some(self.impl_disk_ty_to_ty(disk_ty, pkg_id, None, Some(fn_sym_idx)))
+    }
+
+    /// 外部パッケージの関連関数・メソッドが trait impl のものなら、その trait。
+    /// codegen のシンボル名マングリングから呼ばれる。
+    pub fn assoc_trait_of(
+        &self,
+        sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+    ) -> Option<biwac_span::TraitDefId> {
+        let SymbolBody::Fn(fn_data) = self.get_symbol_body(sym_idx as usize).ok()? else {
+            return None;
+        };
+        let ty = self.impl_decode_trait_of(fn_data, sym_idx, pkg_id)?;
+        trait_def_id_of(&ty)
+    }
+
+    /// このパッケージが持つ trait impl のうち、対象の型が `ty_def_id` のもの。
+    ///
+    /// trait impl は対象の型のパッケージに載るとは限らない
+    /// (自分の trait を他パッケージの型に実装できる) ので、
+    /// 型のシンボルからは辿れない。シンボル表を走査して集める。
+    /// 走査は失敗した探索のフォールバックでしか通らないうえ、
+    /// 見るのはヘッダの種別だけなので安い。
+    /// 項目名は既に intern されているものだけを拾う。
+    /// intern されていない名前は、こちらのソースが一度も書いていない名前なので、
+    /// 解決の対象になりようがない。
+    pub fn trait_impls_for(
+        &self,
+        ty_def_id: biwac_span::TyDefId,
+        pkg_id: biwac_base::PackageId,
+        interner: &biwac_base::IdentInterner,
+    ) -> Vec<biwac_hir::TyTraitImpl> {
+        let mut out = Vec::new();
+
+        for sym_idx in 0..self.sym_hdrs.len() {
+            let Ok(kind) = self.sym_hdrs[sym_idx].kind() else {
+                continue;
+            };
+            if kind != DiskSymbolKind::TraitImpl {
+                continue;
+            }
+            let Ok(SymbolBody::TraitImpl(data)) = self.get_symbol_body(sym_idx) else {
+                continue;
+            };
+
+            let self_ty = self.impl_disk_ty_to_ty(&data.self_ty, pkg_id, None, None);
+            let (impl_ty_def_id, ty_genargs) = match &self_ty.kind {
+                biwac_hir::TyKind::Defined(dt) => (dt.def_id, dt.genargs.clone()),
+                other => match other.def_id() {
+                    Some(id) => (id, Vec::new()),
+                    None => continue,
+                },
+            };
+            if impl_ty_def_id != ty_def_id {
+                continue;
+            }
+
+            let trait_ref = self.impl_disk_ty_to_ty(&data.trait_ref, pkg_id, None, None);
+            let Some(trait_def_id) = trait_def_id_of(&trait_ref) else {
+                continue;
+            };
+            let trait_genargs = match &trait_ref.kind {
+                biwac_hir::TyKind::Defined(dt) => dt.genargs.clone(),
+                _ => Vec::new(),
+            };
+
+            let mut vals = std::collections::HashMap::new();
+            for item_sym in &data.item_symbols.0 {
+                let Ok(SymbolBody::Fn(fn_data)) = self.get_symbol_body(item_sym.0 as usize) else {
+                    continue;
+                };
+                let name_str = self.get_str(fn_data.name).unwrap_or("");
+                let Some(name_id) = interner.get(name_str) else {
+                    continue;
+                };
+                vals.insert(
+                    name_id,
+                    biwac_span::ValDefId::new(biwac_span::DefId::new(
+                        pkg_id,
+                        biwac_span::PackageLocalDefId::new(item_sym.0),
+                    )),
+                );
+            }
+
+            out.push(biwac_hir::TyTraitImpl {
+                trait_def_id,
+                impl_block_genargs: std::collections::HashMap::new(),
+                ty_genargs,
+                trait_genargs,
+                vals,
+                span: biwac_span::Span::dummy(),
+            });
+        }
+
+        out
+    }
+
+    /// 外部パッケージの trait 宣言を復元する。
+    ///
+    /// impl が宣言と一致しているかの検査に使う。
+    pub fn get_ext_trait_def(
+        &self,
+        sym_idx: u32,
+        pkg_id: biwac_base::PackageId,
+        interner: &mut biwac_base::IdentInterner,
+    ) -> Option<biwac_hir::TraitDef> {
+        use biwac_hir::{Ident, TraitItemDef};
+        use biwac_span::{DefId, GenDefId, PackageLocalDefId, Span, TraitAssocDefId};
+
+        let SymbolBody::Trait(data) = self.get_symbol_body(sym_idx as usize).ok()? else {
+            return None;
+        };
+
+        let name_str = self.get_str(data.name).unwrap_or("");
+        let name_id = interner.get_or_insert(name_str);
+
+        // `Self` と各ジェネリック引数の id は、
+        // 型の genarg と同じく (所属シンボル, 序数) から合成する。
+        let self_gen = GenDefId::new(DefId::new(
+            pkg_id,
+            PackageLocalDefId::new(ext_gen_id(sym_idx, TRAIT_SELF_GEN_ORD)),
+        ));
+        let genargs: Vec<GenDefId> = (0..data.genargs.0.len())
+            .map(|i| {
+                GenDefId::new(DefId::new(
+                    pkg_id,
+                    PackageLocalDefId::new(ext_gen_id(sym_idx, i as u32)),
+                ))
+            })
+            .collect();
+
+        let items = data
+            .item_symbols
+            .0
+            .iter()
+            .filter_map(|item_sym| {
+                let SymbolBody::TraitAssoc(item) =
+                    self.get_symbol_body(item_sym.0 as usize).ok()?
+                else {
+                    return None;
+                };
+                let signature = self.impl_disk_fn_to_signature(
+                    item_sym.0,
+                    &item.fn_data,
+                    pkg_id,
+                    Some(sym_idx),
+                    interner,
+                );
+                let item_name_str = self.get_str(item.fn_data.name).unwrap_or("");
+                Some(TraitItemDef {
+                    name: Ident {
+                        id: interner.get_or_insert(item_name_str),
+                        span: Span::dummy(),
+                    },
+                    def_id: TraitAssocDefId::new(DefId::new(
+                        pkg_id,
+                        PackageLocalDefId::new(item_sym.0),
+                    )),
+                    signature,
+                })
+            })
+            .collect();
+
+        Some(biwac_hir::TraitDef {
+            name: Ident {
+                id: name_id,
+                span: Span::dummy(),
+            },
+            self_gen,
+            items,
+            genargs,
+        })
     }
 
     /// 外部パッケージの関連関数・メソッドの impl self 型を返す。
@@ -1426,7 +1933,7 @@ impl DepMetadata {
             let fn_name_str = self.get_str(fn_data.name).unwrap_or("");
             let fn_name_id = interner.get_or_insert(fn_name_str);
             let placeholder_sig =
-                self.impl_disk_fn_to_signature(assoc_sym_idx, fn_data, pkg_id, interner);
+                self.impl_disk_fn_to_signature(assoc_sym_idx, fn_data, pkg_id, None, interner);
             let placeholder = NativeFnDef {
                 name: Ident {
                     id: fn_name_id,
@@ -1443,6 +1950,10 @@ impl DepMetadata {
                 impl_block_genargs,
                 genargs: impl_genarg_pattern,
                 val_content: AssocValDefKind::NativeFn(Box::new(placeholder)),
+                trait_of: self
+                    .impl_decode_trait_of(fn_data, assoc_sym_idx, pkg_id)
+                    .as_ref()
+                    .and_then(trait_def_id_of),
             };
 
             vals.entry(fn_name_id)
@@ -1518,6 +2029,7 @@ impl DepMetadata {
         Some(DefinedTyImpl {
             ty_content: Some(TyDefKind::NativeTypeAlias(Box::new(alias_def))),
             vals,
+            trait_impls: Vec::new(),
         })
     }
 
@@ -1570,6 +2082,7 @@ impl DepMetadata {
         Some(DefinedTyImpl {
             ty_content: Some(TyDefKind::Struct(Box::new(struct_def))),
             vals,
+            trait_impls: Vec::new(),
         })
     }
 
@@ -1653,6 +2166,7 @@ impl DepMetadata {
         Some(DefinedTyImpl {
             ty_content: Some(TyDefKind::Enum(Box::new(enum_def))),
             vals,
+            trait_impls: Vec::new(),
         })
     }
 
@@ -1668,11 +2182,16 @@ impl DepMetadata {
     }
 
     /// DiskFnData → FnSignature 変換。fn_sym_idx を LocGenDefId の名前空間として使用する。
+    /// `gen_owner_sym` は、シグニチャに現れる `TyKind::Gen` の所属シンボル。
+    ///
+    /// trait の項目だけがこれを要る (`Self` と trait のジェネリック引数が
+    /// `Gen` として現れる)。普通の関数のジェネリック引数は `LocGen` なので `None`。
     fn impl_disk_fn_to_signature(
         &self,
         fn_sym_idx: u32,
         fn_data: &format::DiskFnData,
         pkg_id: biwac_base::PackageId,
+        gen_owner_sym: Option<u32>,
         interner: &mut biwac_base::IdentInterner,
     ) -> biwac_hir::FnSignature {
         use biwac_hir::{FnArgDecl, FnSignature, Ident};
@@ -1710,7 +2229,7 @@ impl DepMetadata {
             .map(|(i, a)| {
                 let name_str = self.get_str(a.name).unwrap_or("");
                 let name_id = interner.get_or_insert(name_str);
-                let ty = self.impl_disk_ty_to_ty(&a.ty, pkg_id, None, Some(fn_sym_idx));
+                let ty = self.impl_disk_ty_to_ty(&a.ty, pkg_id, gen_owner_sym, Some(fn_sym_idx));
                 FnArgDecl {
                     id: Ident {
                         id: name_id,
@@ -1723,7 +2242,7 @@ impl DepMetadata {
             })
             .collect();
 
-        let rty = self.impl_disk_ty_to_ty(&fn_data.rty, pkg_id, None, Some(fn_sym_idx));
+        let rty = self.impl_disk_ty_to_ty(&fn_data.rty, pkg_id, gen_owner_sym, Some(fn_sym_idx));
 
         FnSignature {
             args,
@@ -1733,14 +2252,13 @@ impl DepMetadata {
             // ここが空だと impl ブロックのジェネリック引数がレシーバから決まらず、
             // 戻り値が `Self` のメソッドで型変数が解けないまま残る
             // (単相化に必要な割り当てが記録されず、MIR の符号化まで漏れる)。
-            // NOTE: `.biwameta` はレシーバの有無を記録していないので、
-            // 関連関数とメソッドを区別できない。
-            // 外部シグネチャの `self_ty` は impl の対象型で近似している。
-            //
-            // 読むのは型推論のメソッド呼び出しだけで、そこでは
-            // 実際にレシーバが書かれていることが分かっているため実害はない。
-            // レシーバの有無で分岐したい用途が出たらディスク形式に印を足すこと。
-            self_ty: self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id),
+            // レシーバを取るかは `has_self` に記録してある。
+            // `impl_self_ty` は関連関数にも入るので、それだけでは区別できない。
+            self_ty: if fn_data.has_self != 0 {
+                self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id)
+            } else {
+                None
+            },
             impl_self_ty: self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id),
             rty,
             genargs,
@@ -1868,6 +2386,23 @@ impl DepMetadata {
 /// 1シンボルあたり最大 1024 genargs、最大 4M シンボルをサポート。
 fn ext_gen_id(struct_sym_idx: u32, ordinal: u32) -> u32 {
     (struct_sym_idx << 10) | ordinal
+}
+
+/// trait の `Self` に割り当てる序数。
+///
+/// 宣言されたジェネリック引数とは別枠なので、
+/// 衝突しないように上限側から取る
+/// ([`ext_gen_id`] は下位 10 bit を序数に使う)。
+const TRAIT_SELF_GEN_ORD: u32 = 1023;
+
+/// trait への参照として書かれた [`biwac_hir::Ty`] から `TraitDefId` を取り出す。
+///
+/// trait は型ではないが、参照の運び方は型とまったく同じである。
+fn trait_def_id_of(ty: &biwac_hir::Ty) -> Option<biwac_span::TraitDefId> {
+    match &ty.kind {
+        biwac_hir::TyKind::Defined(dt) => Some(biwac_span::TraitDefId::new(dt.def_id.def_id())),
+        _ => None,
+    }
 }
 
 /// [`ext_gen_id`] / [`ext_loc_gen_id`] の合成規則。
@@ -2207,6 +2742,14 @@ fn impl_encode_fn_data(
     impl_genargs: &[(biwac_hir::Ident, biwac_span::LocalGenDefId)],
     // 関連関数・メソッドなら impl の self 型。トップレベル関数なら None。
     impl_self_ty: Option<&biwac_hir::Ty>,
+    // trait impl の項目なら、その trait への参照 (ジェネリック引数込み)。
+    trait_of: Option<&biwac_hir::Ty>,
+    // シグニチャに現れる `GenDefId` の序数。
+    //
+    // trait の項目だけがこれを使う。`Self` と trait のジェネリック引数が
+    // `TyKind::Gen` として現れるためである。
+    // 普通の関数のジェネリック引数は `LocalGenDefId` なので空でよい。
+    gen_ord: &HashMap<biwac_span::GenDefId, u32>,
     ty_to_sym: &HashMap<biwac_span::TyDefId, DiskSymbolIndex>,
     mod_to_file_idx: &HashMap<biwac_base::ModId, DiskFileIndex>,
     source_holder: &biwac_base::SourceHolder,
@@ -2269,8 +2812,6 @@ fn impl_encode_fn_data(
             .collect(),
     );
 
-    let empty_gen_ord: HashMap<biwac_span::GenDefId, u32> = HashMap::new();
-
     let disk_args = DiskVec(
         signature
             .args
@@ -2282,7 +2823,7 @@ fn impl_encode_fn_data(
                 let arg_ty = impl_encode_ty(
                     &arg.ty,
                     ty_to_sym,
-                    &empty_gen_ord,
+                    gen_ord,
                     &loc_gen_ord,
                     mod_to_file_idx,
                     ext,
@@ -2299,7 +2840,7 @@ fn impl_encode_fn_data(
     let rty = impl_encode_ty(
         &signature.rty,
         ty_to_sym,
-        &empty_gen_ord,
+        gen_ord,
         &loc_gen_ord,
         mod_to_file_idx,
         ext,
@@ -2307,21 +2848,21 @@ fn impl_encode_fn_data(
 
     let disk_impl_self_ty = DiskVec(
         impl_self_ty
-            .map(|ty| {
-                impl_encode_ty(
-                    ty,
-                    ty_to_sym,
-                    &empty_gen_ord,
-                    &loc_gen_ord,
-                    mod_to_file_idx,
-                    ext,
-                )
-            })
+            .map(|ty| impl_encode_ty(ty, ty_to_sym, gen_ord, &loc_gen_ord, mod_to_file_idx, ext))
             .into_iter()
             .collect(),
     );
 
     format::DiskFnData {
+        has_self: u32::from(signature.self_ty.is_some()),
+        trait_of: DiskVec(
+            trait_of
+                .map(|ty| {
+                    impl_encode_ty(ty, ty_to_sym, gen_ord, &loc_gen_ord, mod_to_file_idx, ext)
+                })
+                .into_iter()
+                .collect(),
+        ),
         name: disk_name,
         name_span,
         def_raw_code,

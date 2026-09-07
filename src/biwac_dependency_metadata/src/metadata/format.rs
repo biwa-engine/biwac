@@ -17,7 +17,7 @@ use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 6;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 7;
 
 // --- インデックス / オフセット型 ---
 
@@ -58,6 +58,18 @@ pub enum DiskSymbolKind {
     /// `ExternalChildRef::sym_idx` がそのまま `PackageLocalDefId` になるので、
     /// シンボル番号が無いと `VariantDefId` を組み立てられない。
     Variant = 5,
+    /// trait の宣言。
+    Trait = 6,
+    /// trait が宣言した項目。
+    ///
+    /// `TraitAssocDefId` を組み立てるのにシンボル番号が要るので、
+    /// バリアントと同じく独立したシンボルにする。
+    TraitAssoc = 7,
+    /// 1 つの trait impl ブロック。
+    ///
+    /// 対象の型が別パッケージのこともあるので、
+    /// 型のシンボルからは辿れない。読む側はシンボル表を走査して集める。
+    TraitImpl = 8,
 }
 
 impl TryFrom<u32> for DiskSymbolKind {
@@ -70,6 +82,9 @@ impl TryFrom<u32> for DiskSymbolKind {
             3 => Ok(Self::NativeTypeAlias),
             4 => Ok(Self::Enum),
             5 => Ok(Self::Variant),
+            6 => Ok(Self::Trait),
+            7 => Ok(Self::TraitAssoc),
+            8 => Ok(Self::TraitImpl),
             _ => Err(DepMetadataError::UnknownSymbolKind(v)),
         }
     }
@@ -453,6 +468,22 @@ pub struct DiskFnData {
     /// codegen のシンボル名マングリングと、
     /// 特殊化された impl のメソッド解決に使う。
     pub impl_self_ty: DiskVec<DiskTy>,
+    /// レシーバ (`self`) を取るか。メソッドなら 1、関連関数なら 0。
+    ///
+    /// `impl_self_ty` は関連関数にも入る (impl の対象型を運ぶため) ので、
+    /// それだけではメソッドかどうかを区別できない。
+    /// trait の宣言と実装の突き合わせがこの区別を必要とする。
+    pub has_self: u32,
+    /// trait impl の項目なら、その trait。直接の impl なら空。
+    ///
+    /// `impl_self_ty` と同じく、0 個か 1 個で `Option` を表す。
+    /// trait は型ではないが、参照の運び方は型とまったく同じ
+    /// (自パッケージならシンボル索引、外部なら `ext_syms` 経由) なので
+    /// [`DiskTy`] をそのまま使う。ジェネリック引数も一緒に運べる。
+    ///
+    /// 名前解決の可視性 (import 規則) と、
+    /// マングル名に trait 成分を挟むかどうかを決めるのに使う。
+    pub trait_of: DiskVec<DiskTy>,
 }
 
 impl DiskDecode for DiskFnData {
@@ -474,6 +505,10 @@ impl DiskDecode for DiskFnData {
         pos += n;
         let (impl_self_ty, n) = DiskVec::<DiskTy>::decode(&bytes[pos..])?;
         pos += n;
+        let (has_self, n) = u32::decode(&bytes[pos..])?;
+        pos += n;
+        let (trait_of, n) = DiskVec::<DiskTy>::decode(&bytes[pos..])?;
+        pos += n;
         Ok((
             Self {
                 name,
@@ -484,6 +519,8 @@ impl DiskDecode for DiskFnData {
                 args,
                 rty,
                 impl_self_ty,
+                has_self,
+                trait_of,
             },
             pos,
         ))
@@ -500,6 +537,149 @@ impl DiskEncode for DiskFnData {
         self.args.encode(buf);
         self.rty.encode(buf);
         self.impl_self_ty.encode(buf);
+        self.has_self.encode(buf);
+        self.trait_of.encode(buf);
+    }
+}
+
+// --- DiskTraitData ---
+
+#[derive(Debug)]
+pub struct DiskTraitData {
+    pub name: DiskStringOffset,
+    pub name_span: DiskSpan,
+    pub def_raw_code: DiskStringOffset,
+    pub def_span: DiskSpan,
+    /// `Self` を表す暗黙のジェネリック引数。`genargs` には含めない。
+    pub self_gen: DiskGenArg,
+    pub genargs: DiskVec<DiskGenArg>,
+    /// 宣言順。添字がそのまま `TraitAssocOwner::index` になる。
+    pub item_symbols: DiskVec<DiskSymbolIndex>,
+}
+
+impl DiskDecode for DiskTraitData {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (name, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (name_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (def_raw_code, n) = DiskStringOffset::decode(&bytes[pos..])?;
+        pos += n;
+        let (def_span, n) = DiskSpan::decode(&bytes[pos..])?;
+        pos += n;
+        let (self_gen, n) = DiskGenArg::decode(&bytes[pos..])?;
+        pos += n;
+        let (genargs, n) = DiskVec::<DiskGenArg>::decode(&bytes[pos..])?;
+        pos += n;
+        let (item_symbols, n) = DiskVec::<DiskSymbolIndex>::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                name,
+                name_span,
+                def_raw_code,
+                def_span,
+                self_gen,
+                genargs,
+                item_symbols,
+            },
+            pos,
+        ))
+    }
+}
+
+impl DiskEncode for DiskTraitData {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.name.encode(buf);
+        self.name_span.encode(buf);
+        self.def_raw_code.encode(buf);
+        self.def_span.encode(buf);
+        self.self_gen.encode(buf);
+        self.genargs.encode(buf);
+        self.item_symbols.encode(buf);
+    }
+}
+
+// --- DiskTraitAssocData ---
+
+#[derive(Debug)]
+pub struct DiskTraitAssocData {
+    /// 親の trait のシンボル。
+    pub owner: DiskSymbolIndex,
+    /// 宣言順の添字。
+    pub index: u32,
+    pub fn_data: DiskFnData,
+}
+
+impl DiskDecode for DiskTraitAssocData {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (owner, n) = DiskSymbolIndex::decode(&bytes[pos..])?;
+        pos += n;
+        let (index, n) = u32::decode(&bytes[pos..])?;
+        pos += n;
+        let (fn_data, n) = DiskFnData::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                owner,
+                index,
+                fn_data,
+            },
+            pos,
+        ))
+    }
+}
+
+impl DiskEncode for DiskTraitAssocData {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.owner.encode(buf);
+        self.index.encode(buf);
+        self.fn_data.encode(buf);
+    }
+}
+
+// --- DiskTraitImplData ---
+
+#[derive(Debug)]
+pub struct DiskTraitImplData {
+    /// 実装対象の型。ジェネリック引数 (`ty_genargs`) も含む。
+    pub self_ty: DiskTy,
+    /// 実装した trait。ジェネリック引数 (`trait_genargs`) も含む。
+    ///
+    /// trait は型ではないが、参照の運び方は同じなので [`DiskTy`] を使う
+    /// ([`DiskFnData::trait_of`] と同じ理由)。
+    pub trait_ref: DiskTy,
+    /// 実装の実体。`Fn` シンボルを指す。名前はその先から引く。
+    pub item_symbols: DiskVec<DiskSymbolIndex>,
+}
+
+impl DiskDecode for DiskTraitImplData {
+    fn decode(bytes: &[u8]) -> Result<(Self, usize), DepMetadataError> {
+        let mut pos = 0;
+        let (self_ty, n) = DiskTy::decode(&bytes[pos..])?;
+        pos += n;
+        let (trait_ref, n) = DiskTy::decode(&bytes[pos..])?;
+        pos += n;
+        let (item_symbols, n) = DiskVec::<DiskSymbolIndex>::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                self_ty,
+                trait_ref,
+                item_symbols,
+            },
+            pos,
+        ))
+    }
+}
+
+impl DiskEncode for DiskTraitImplData {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.self_ty.encode(buf);
+        self.trait_ref.encode(buf);
+        self.item_symbols.encode(buf);
     }
 }
 

@@ -54,11 +54,16 @@ pub enum ExternalChildKind {
     Ty,
     Val,
     Variant,
+    Trait,
 }
 
 impl ExternalChildRef {
     pub fn as_ty_def_id(&self, pkg_id: PackageId) -> TyDefId {
         TyDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(self.sym_idx)))
+    }
+
+    pub fn as_trait_def_id(&self, pkg_id: PackageId) -> biwac_span::TraitDefId {
+        biwac_span::TraitDefId::new(DefId::new(pkg_id, PackageLocalDefId::new(self.sym_idx)))
     }
 
     pub fn as_val_def_id(&self, pkg_id: PackageId) -> ValDefId {
@@ -142,8 +147,12 @@ impl DepMetadataModuleView {
                 SymbolBody::Mod(mod_data) => (mod_data.name, ExternalChildKind::Mod),
                 SymbolBody::NativeTypeAlias(alias) => (alias.name, ExternalChildKind::Ty),
                 SymbolBody::Enum(enum_data) => (enum_data.name, ExternalChildKind::Ty),
+                SymbolBody::Trait(trait_data) => (trait_data.name, ExternalChildKind::Trait),
                 // バリアントはモジュールの直下には載らない。enum の子である。
-                SymbolBody::Variant(_) => continue,
+                // trait の項目も同様で、trait impl ブロックには名前が無い。
+                SymbolBody::Variant(_) | SymbolBody::TraitAssoc(_) | SymbolBody::TraitImpl(_) => {
+                    continue;
+                }
             };
             let name_str = match self.dep.strings.get(name_offset) {
                 Ok(s) => s.to_string(),
