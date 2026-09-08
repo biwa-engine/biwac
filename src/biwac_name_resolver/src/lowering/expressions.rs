@@ -348,6 +348,7 @@ fn lower_literal(
 ) -> Option<Literal> {
     match lit {
         biwac_ast::Literal::Integer(i) => Some(Literal::Integer(i.clone())),
+        biwac_ast::Literal::Float(f) => Some(Literal::Float(f.clone())),
         biwac_ast::Literal::String(s) => Some(Literal::String(s.clone())),
         biwac_ast::Literal::Bool(b) => Some(Literal::Bool(b.clone())),
         biwac_ast::Literal::Struct(s) => {

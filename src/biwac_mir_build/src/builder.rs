@@ -604,6 +604,7 @@ impl<'a> BodyBuilder<'a> {
     fn lower_const(&mut self, literal: &Literal) -> Option<Const> {
         match literal {
             Literal::Integer(i) => Some(Const::Int(i.val as i64)),
+            Literal::Float(f) => Some(Const::Float(f.val)),
             Literal::Bool(b) => Some(Const::Bool(b.val)),
             Literal::String(s) => Some(Const::Str(self.strings.intern(&s.val))),
             Literal::Struct(_) => None,

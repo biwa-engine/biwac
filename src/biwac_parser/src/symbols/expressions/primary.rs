@@ -2,8 +2,8 @@ use biwac_lexer::{TkKind, TkKindName};
 use biwac_span::Span;
 
 use biwac_ast::{
-    AbsolutePathHeader, BoolLiteral, Exprs, FnCall, Ident, IntegerLiteral, Literal, Path, Primary,
-    SelfTypHeader, StringLiteral, StructLiteral, Variable,
+    AbsolutePathHeader, BoolLiteral, Exprs, FloatLiteral, FnCall, Ident, IntegerLiteral, Literal,
+    Path, Primary, SelfTypHeader, StringLiteral, StructLiteral, Variable,
 };
 
 use crate::{ParseError, TokenStream};
@@ -24,6 +24,15 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 self.next();
                 Ok(Exprs::Primary(Primary::Literal(Literal::Integer(
                     IntegerLiteral {
+                        val: *val,
+                        span: t.span.clone(),
+                    },
+                ))))
+            }
+            TkKind::LiteralFloat(val) => {
+                self.next();
+                Ok(Exprs::Primary(Primary::Literal(Literal::Float(
+                    FloatLiteral {
                         val: *val,
                         span: t.span.clone(),
                     },
@@ -176,6 +185,7 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
                 expecteds: vec![
                     TkKindName::Ident,
                     TkKindName::LiteralInteger,
+                    TkKindName::LiteralFloat,
                     TkKindName::LiteralString,
                     TkKindName::KwBoolTrue,
                     TkKindName::KwBoolFalse,

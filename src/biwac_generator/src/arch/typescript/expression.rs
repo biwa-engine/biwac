@@ -113,6 +113,19 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                             ctx.allocator,
                         ))
                     }
+                    // TypeScript には整数と浮動小数点数の区別が無いので、
+                    // どちらも `number` のリテラルになる。
+                    Literal::Float(f) => {
+                        oxc_ast::ast::Expression::NumericLiteral(oxc_allocator::Box::new_in(
+                            oxc_ast::ast::NumericLiteral {
+                                span: span(),
+                                value: f.val,
+                                raw: None,
+                                base: oxc_ast::ast::NumberBase::Decimal,
+                            },
+                            ctx.allocator,
+                        ))
+                    }
                     Literal::Bool(b) => {
                         oxc_ast::ast::Expression::BooleanLiteral(oxc_allocator::Box::new_in(
                             oxc_ast::ast::BooleanLiteral {

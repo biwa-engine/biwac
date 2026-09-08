@@ -9,6 +9,29 @@ import greeter::Describe;
 
 type PairIntT[T] = Pair[Int, T];
 
+// 浮動小数点数のリテラル。
+//
+// `1.5` の `.` は字句解析が数値の一部として読み切る。
+// 一方 `1.foo()` の `.` はメソッド呼び出しなので、
+// 小数点として扱うのは後ろに数字が続くときだけである。
+struct Ratio {
+  mul: Float,
+}
+
+impl Ratio {
+  fn normal() -> Self {
+    Self { mul = 1.5 }
+  }
+
+  fn scaled(self, k: Float) -> Float {
+    self.mul * k + 0.25
+  }
+}
+
+fn float_demo() -> Float {
+  Ratio::normal().scaled(2.0)
+}
+
 fn add(x: Int, y: Int) -> Int {
     return x + y;
 }
@@ -167,6 +190,7 @@ scene main(g: MyGame) -> MyGame {{
   #let _shade = enum_demo()
   #let _opt = ext_enum_demo()
   #let _lv = trait_demo()
+  #let _ratio = float_demo()
 
   #endscene g
 }}

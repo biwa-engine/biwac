@@ -23,6 +23,15 @@ pub enum TokenizeError {
     DslCloseNotFound {
         span: Span,
     },
+
+    /// 数字で始まる並びを数値リテラルとして読み切れなかった。
+    ///
+    /// biwa の識別子は `[a-zA-Z_][a-zA-Z0-9_]*` で数字始まりになりえないので、
+    /// `012abc` や `1.5x` のような並びはどう解釈しても意味を持たない。
+    /// 黙って識別子として通すと、遠くの段で不可解なエラーになる。
+    InvalidNumberLiteral {
+        span: Span,
+    },
 }
 
 impl BiwacError for TokenizeError {
@@ -86,6 +95,31 @@ impl BiwacError for TokenizeError {
                     )
                     .with_note(
                         "`}}` must be at the start of a line (leading whitespace is allowed)",
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+
+            Self::InvalidNumberLiteral { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+                let text = &modsrc.src[span.begin()..span.end()];
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message(format!("`{text}` is not a valid number."))
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("this cannot be read as a number")
+                            .with_color(Color::Red),
+                    )
+                    .with_note(
+                        "a number is `123`, `1.5`, or `0x1F` / `0o755` / `0b1010`, \
+                         and must be followed by a separator; \
+                         an identifier cannot start with a digit",
                     )
                     .finish()
                     .print((file_name.as_str(), Source::from(&modsrc.src)))

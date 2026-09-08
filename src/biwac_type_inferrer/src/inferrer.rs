@@ -1101,6 +1101,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
         match primary {
             Primary::Literal(l) => match l {
                 Literal::Integer(_) => Ok(Ty::new(TyKind::Int, primary.span())),
+                Literal::Float(_) => Ok(Ty::new(TyKind::Float, primary.span())),
                 // Literal::Float(_) => Ok(Ty::Float),
                 Literal::Bool(_) => Ok(Ty::new(TyKind::Bool, primary.span())),
                 // 文字列リテラルの型は lang item `string` が指す型である。

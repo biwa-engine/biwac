@@ -1,7 +1,7 @@
 use std::cell::OnceCell;
 
 use biwac_ast::{
-    BinOperator, BoolLiteral, IntegerLiteral, StringLiteral, UnOperator, VariantShape,
+    BinOperator, BoolLiteral, FloatLiteral, IntegerLiteral, StringLiteral, UnOperator, VariantShape,
 };
 use biwac_base::InternedIdent;
 use biwac_span::{Span, TyDefId, ValDefId, VarId, VariantDefId};
@@ -230,7 +230,7 @@ impl Primary {
 #[derive(Debug, Clone)]
 pub enum Literal {
     Integer(IntegerLiteral),
-    // Float(f64),
+    Float(FloatLiteral),
     String(StringLiteral),
     Bool(BoolLiteral),
     Struct(StructLiteral),
@@ -240,6 +240,7 @@ impl Literal {
     pub fn span(&self) -> Span {
         match self {
             Self::Integer(i) => i.span.clone(),
+            Self::Float(f) => f.span.clone(),
             Self::String(s) => s.span.clone(),
             Self::Bool(b) => b.span.clone(),
             Self::Struct(s) => s.span.clone(),

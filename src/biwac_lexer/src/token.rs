@@ -15,10 +15,11 @@ pub enum TkVal {
     String(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TkKind<'src> {
     Ident(InternedIdent),     // identifier
     LiteralInteger(u64),      // integer literal
+    LiteralFloat(f64),        // integer literal
     LiteralString(&'src str), // string literal
     KwBoolTrue,               // bool literal `TRUE`
     KwBoolFalse,              // bool literal `FALSE`
@@ -78,6 +79,7 @@ impl TkKind<'_> {
         match self {
             Self::Ident(_) => "<identifier>".to_string(),
             Self::LiteralInteger(i) => i.to_string(),
+            Self::LiteralFloat(f) => f.to_string(),
             Self::LiteralString(s) => s.to_string(),
             Self::KwBoolTrue => "TRUE".to_string(),
             Self::KwBoolFalse => "FALSE".to_string(),
@@ -138,6 +140,7 @@ impl TkKind<'_> {
 pub enum TkKindName {
     Ident,           // identifier
     LiteralInteger,  // integer literal
+    LiteralFloat,    // integer float
     LiteralString,   // string literal
     KwBoolTrue,      // bool literal `TRUE`
     KwBoolFalse,     // bool literal `FALSE`
@@ -197,6 +200,7 @@ impl TkKind<'_> {
         match self {
             Self::Ident(_) => TkKindName::Ident, // identifier
             Self::LiteralInteger(_) => TkKindName::LiteralInteger, // integer literal
+            Self::LiteralFloat(_) => TkKindName::LiteralFloat, // float literal
             Self::LiteralString(_) => TkKindName::LiteralString, // string literal
             Self::KwBoolTrue => TkKindName::KwBoolTrue, // bool literal `TRUE`
             Self::KwBoolFalse => TkKindName::KwBoolFalse, // bool literal `FALSE`
@@ -258,6 +262,7 @@ impl TkKindName {
         match self {
             Self::Ident => "<identifier>".to_string(),
             Self::LiteralInteger => "<integer-literal>".to_string(),
+            Self::LiteralFloat => "<float-literal>".to_string(),
             Self::LiteralString => "<string-literal>".to_string(),
             Self::KwBoolTrue => "TRUE".to_string(),
             Self::KwBoolFalse => "FALSE".to_string(),

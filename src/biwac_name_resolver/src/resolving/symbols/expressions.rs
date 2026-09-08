@@ -135,6 +135,7 @@ impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::Literal {
     fn resolve(&self, ctx: &mut C) -> Result<(), Vec<crate::ResolveError>> {
         match self {
             biwac_ast::Literal::Integer(_)
+            | biwac_ast::Literal::Float(_)
             | biwac_ast::Literal::String(_)
             | biwac_ast::Literal::Bool(_) => Ok(()),
 

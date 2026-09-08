@@ -77,7 +77,7 @@ pub struct MethodCall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Integer(IntegerLiteral),
-    // Float(f64),
+    Float(FloatLiteral),
     String(StringLiteral),
     Bool(BoolLiteral),
     Struct(StructLiteral),
@@ -87,6 +87,7 @@ impl Literal {
     pub fn span(&self) -> Span {
         match self {
             Self::Integer(i) => i.span.clone(),
+            Self::Float(f) => f.span.clone(),
             Self::String(s) => s.span.clone(),
             Self::Bool(b) => b.span.clone(),
             Self::Struct(s) => s.span.clone(),
@@ -99,6 +100,23 @@ pub struct IntegerLiteral {
     pub val: u64,
     pub span: Span,
 }
+
+/// `1.5` のような浮動小数点数のリテラル。
+///
+/// `Float` は 32bit だが、値は `f64` で持つ。
+/// 字句解析が `f64` で読むためで、狭めるのはコード生成の側である
+/// (wasm は `f32.const` を出す)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FloatLiteral {
+    pub val: f64,
+    pub span: Span,
+}
+
+// AST の式は `Eq` を要求している。
+// `f64` は NaN があるので普通は `Eq` にできないが、
+// **リテラルとして NaN は書けない** (字句解析が読むのは数字と `.` だけ) ので、
+// `PartialEq` は反射的であり `Eq` を名乗ってよい。
+impl Eq for FloatLiteral {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolLiteral {

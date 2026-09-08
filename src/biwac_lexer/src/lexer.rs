@@ -1,6 +1,7 @@
 use biwac_base::ModId;
 use biwac_span::Span;
 
+use crate::number::{NumberError, ScannedNumber, scan_number};
 use crate::{TokenizeError, token::TkKind};
 
 #[derive(Debug)]
@@ -171,6 +172,12 @@ pub(crate) struct PreToken<'src> {
 pub(crate) enum PreTkKind<'src> {
     Word, // 識別子または予約語; identifier ([a-zA-Z_][a-zA-Z0-9_]) or reserved word (only alphabet)
     Mark(TkKind<'src>), // 記号; reserved mark, such as `+`, `/`, `::`
+    /// 数値リテラル。
+    ///
+    /// 他のトークンと違い、この段で値まで読み切っている。
+    /// `1.5` の `.` を記号として切ってしまうと後から復元できないためである
+    /// ([`crate::number`] を参照)。
+    Number(TkKind<'src>),
     StringLiteral, // 文字列リテラル; string literal `"..."`, span contains double quotes
     Dsl,
 }
@@ -179,17 +186,19 @@ pub(crate) fn pre_lex<'src>(
     mod_id: ModId,
     src: &'src str,
     regions: Vec<SrcRegion>,
-) -> Vec<PreToken<'src>> {
+) -> Result<Vec<PreToken<'src>>, TokenizeError> {
     let mut pretokens = vec![];
 
     for r in &regions {
         match r.kind {
             RegionKind::Raw => {
-                let region_src: Vec<char> = src[r.span.begin()..r.span.end()].chars().collect();
-                let mut idx = 0; // region 内のインデックス
+                let region_src_str = &src[r.span.begin()..r.span.end()];
+                let mut region_src = region_src_str.char_indices().peekable();
                 let mut token_begin_idx = 0;
-                while let Some(c) = region_src.get(idx) {
-                    if *c == '\n' {
+                while let Some((idx, c)) = region_src.next() {
+                    if c == '\n' {
+                        // 改行は区切りであって語の一部ではない。
+                        // span に含めると `None` と `None\n` が別の識別子になる。
                         if token_begin_idx < idx {
                             pretokens.push(PreToken {
                                 kind: PreTkKind::Word,
@@ -200,10 +209,10 @@ pub(crate) fn pre_lex<'src>(
                                 ),
                             });
                         }
-                        idx += 1;
-                        token_begin_idx = idx;
-                    } else if let Some(c2) = region_src.get(idx + 1)
-                        && let Some(kind) = match (*c, *c2) {
+
+                        token_begin_idx = idx + 1;
+                    } else if let Some((_, c2)) = region_src.peek()
+                        && let Some(kind) = match (c, c2) {
                             ('<', '=') => Some(TkKind::MarkLesEq),
                             ('>', '=') => Some(TkKind::MarkGrtEq),
                             ('=', '=') => Some(TkKind::MarkEqual),
@@ -227,16 +236,12 @@ pub(crate) fn pre_lex<'src>(
 
                         pretokens.push(PreToken {
                             kind: PreTkKind::Mark(kind),
-                            span: Span::new(
-                                mod_id,
-                                r.span.begin() + token_begin_idx,
-                                r.span.begin() + idx + 2,
-                            ),
+                            span: Span::new(mod_id, r.span.begin() + idx, r.span.begin() + idx + 2),
                         });
 
-                        idx += 2;
-                        token_begin_idx = idx;
-                    } else if let Some(kind) = match *c {
+                        region_src.next(); // 2 文字めをdiscard
+                        token_begin_idx = idx + 2;
+                    } else if let Some(kind) = match c {
                         '.' => Some(TkKind::MarkDot),
                         '(' => Some(TkKind::MarkLPare),
                         ')' => Some(TkKind::MarkRPare),
@@ -274,9 +279,8 @@ pub(crate) fn pre_lex<'src>(
                             span: Span::new(mod_id, r.span.begin() + idx, r.span.begin() + idx + 1),
                         });
 
-                        idx += 1;
-                        token_begin_idx = idx;
-                    } else if *c == ' ' || *c == '\t' {
+                        token_begin_idx = idx + 1;
+                    } else if c == ' ' || c == '\t' {
                         if token_begin_idx < idx {
                             pretokens.push(PreToken {
                                 kind: PreTkKind::Word,
@@ -288,14 +292,44 @@ pub(crate) fn pre_lex<'src>(
                             });
                         }
 
-                        idx += 1;
-                        token_begin_idx = idx;
-                    } else {
-                        idx += 1;
+                        token_begin_idx = idx + 1;
+                    } else if token_begin_idx == idx && c.is_ascii_digit() {
+                        // 数字始まりは、その場で数値リテラルとして読み切る。
+                        //
+                        // 空白と記号で切ってから語を解釈する流れには乗せられない。
+                        // `1.5` の `.` が記号として切り出されてしまうためである。
+                        match scan_number(&region_src_str[idx..]) {
+                            Ok(ScannedNumber { kind, len }) => {
+                                pretokens.push(PreToken {
+                                    kind: PreTkKind::Number(kind.into_token_kind()),
+                                    span: Span::new(
+                                        mod_id,
+                                        r.span.begin() + idx,
+                                        r.span.begin() + idx + len,
+                                    ),
+                                });
+
+                                // 先頭の 1 文字は外側の `next()` が既に消費している。
+                                for _ in 1..len {
+                                    region_src.next();
+                                }
+                                token_begin_idx = idx + len;
+                            }
+                            Err(NumberError { len }) => {
+                                return Err(TokenizeError::InvalidNumberLiteral {
+                                    span: Span::new(
+                                        mod_id,
+                                        r.span.begin() + idx,
+                                        r.span.begin() + idx + len,
+                                    ),
+                                });
+                            }
+                        }
                     }
                 }
 
-                if token_begin_idx < idx {
+                // 区切りに出会わないまま領域が終わった分を流す。
+                if token_begin_idx < region_src_str.len() {
                     pretokens.push(PreToken {
                         kind: PreTkKind::Word,
                         span: Span::new(mod_id, r.span.begin() + token_begin_idx, r.span.end()),
@@ -317,28 +351,5 @@ pub(crate) fn pre_lex<'src>(
         }
     }
 
-    pretokens
-}
-
-pub(crate) fn try_get_dec_integer(str: &str) -> Option<u64> {
-    str.parse::<u64>().ok()
-}
-
-pub(crate) fn try_get_prefixed_int(str: &str) -> Option<u64> {
-    if str.len() > 2 && str.starts_with('0') {
-        let radix = match str.chars().nth(1).unwrap().to_ascii_lowercase() {
-            'b' => 2,
-            'o' => 8,
-            'x' => 16,
-            _ => 0,
-        };
-
-        if radix != 0 {
-            u64::from_str_radix(&str[2..], radix).ok()
-        } else {
-            None
-        }
-    } else {
-        None
-    }
+    Ok(pretokens)
 }

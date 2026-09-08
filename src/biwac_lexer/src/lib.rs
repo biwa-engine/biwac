@@ -1,11 +1,12 @@
 mod error;
 mod lexer;
+mod number;
 pub mod token;
 
 #[cfg(test)]
 mod tests;
 
-use crate::lexer::{PreTkKind, divide_regions, pre_lex, try_get_dec_integer, try_get_prefixed_int};
+use crate::lexer::{PreTkKind, divide_regions, pre_lex};
 use biwac_base::{IdentInterner, ModId};
 
 pub use error::TokenizeError;
@@ -18,7 +19,7 @@ pub fn lex<'src>(
 ) -> Result<Vec<Token<'src>>, TokenizeError> {
     let regions = divide_regions(file_id, src)?;
 
-    let pretokens = pre_lex(file_id, src, regions);
+    let pretokens = pre_lex(file_id, src, regions)?;
 
     let tokens = pretokens
         .into_iter()
@@ -52,21 +53,15 @@ pub fn lex<'src>(
                     "Self" => TkKind::KwSelfTyp,
                     "self" => TkKind::KwSelfVar,
                     "scene" => TkKind::KwScene,
-                    _ => {
-                        if let Some(i) = try_get_dec_integer(w) {
-                            TkKind::LiteralInteger(i)
-                        } else if let Some(i) = try_get_prefixed_int(w) {
-                            TkKind::LiteralInteger(i)
-                        } else {
-                            let interned = interner.get_or_insert(w);
-                            TkKind::Ident(interned)
-                        }
-                    }
+                    // 数値リテラルは pre_lex が読み切っているので、
+                    // ここに来る語は必ず識別子である
+                    // (biwa の識別子は数字始まりになりえない)。
+                    _ => TkKind::Ident(interner.get_or_insert(w)),
                 };
 
                 Token { kind, span: p.span }
             }
-            PreTkKind::Mark(kind) => Token { kind, span: p.span },
+            PreTkKind::Mark(kind) | PreTkKind::Number(kind) => Token { kind, span: p.span },
             PreTkKind::StringLiteral => Token {
                 // `"` をトリムする
                 kind: TkKind::LiteralString(&src[p.span.begin() + 1..p.span.end() - 1]),
