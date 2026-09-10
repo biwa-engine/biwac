@@ -212,6 +212,15 @@ fn collect_packages(mir: &Mir, ctx: &EncodeCtx, out: &mut BTreeSet<u32>) {
                                     out.insert(resolve_pkg(def_id.pkg(), ctx));
                                     collect_genargs_packages(genargs, ctx, out);
                                 }
+                                Callee::TraitAssoc {
+                                    assoc,
+                                    self_ty,
+                                    genargs,
+                                } => {
+                                    out.insert(resolve_pkg(assoc.pkg(), ctx));
+                                    collect_ty_packages(self_ty, ctx, out);
+                                    collect_genargs_packages(genargs, ctx, out);
+                                }
                                 Callee::Indirect(op) => collect_operand_packages(op, ctx, out),
                             }
                             for a in args {
@@ -347,6 +356,18 @@ impl Encoder<'_> {
         if def_id.pkg().is_self() {
             let sym = self.symbols().val(def_id).unwrap_or_else(|| {
                 panic!("compiler bug: value {def_id:?} is not in the metadata symbol table")
+            });
+            (alias, sym)
+        } else {
+            (alias, def_id.local_idx())
+        }
+    }
+
+    fn trait_assoc_sym(&self, def_id: &biwac_span::TraitAssocDefId) -> (u32, u32) {
+        let alias = self.alias_of(def_id.pkg());
+        if def_id.pkg().is_self() {
+            let sym = self.symbols().trait_assoc(def_id).unwrap_or_else(|| {
+                panic!("compiler bug: trait item {def_id:?} is not in the metadata symbol table")
             });
             (alias, sym)
         } else {
@@ -657,6 +678,17 @@ impl Encoder<'_> {
                         let (pkg, sym) = self.val_sym(def_id);
                         let ga = self.intern_genargs(genargs, sym);
                         format!("d p{pkg}:{sym} ga{ga}")
+                    }
+                    Callee::TraitAssoc {
+                        assoc,
+                        self_ty,
+                        genargs,
+                    } => {
+                        let (pkg, sym) = self.trait_assoc_sym(assoc);
+                        // 型は索引をそのまま書く (`ty` の接頭辞は付けない)。
+                        let ty = self.intern_ty(self_ty);
+                        let ga = self.intern_genargs(genargs, sym);
+                        format!("t p{pkg}:{sym} {ty} ga{ga}")
                     }
                     Callee::Indirect(op) => {
                         let op = self.render_operand(op);

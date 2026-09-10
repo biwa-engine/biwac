@@ -132,6 +132,11 @@ pub enum DefIdKind {
     /// 型でも値でもないので `Ty` にも `Val` にも入らない。
     /// `import package::Gyao;` と `impl Nyoee: Gyao` がパスの解決先にする。
     Trait(TraitDefId),
+    /// trait が宣言した項目。
+    ///
+    /// `T::guee()` のように、実装が単相化まで決まらない呼び先を表す。
+    /// 具体の型に対する `Nyoee::guee()` は `Val` に解決される。
+    TraitAssoc(TraitAssocDefId),
     Val(ValDefId),
     Gen(GenDefId),
     LocalGen(LocalGenDefId),

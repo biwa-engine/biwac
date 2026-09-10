@@ -559,6 +559,12 @@ impl<'a> Emitter<'a> {
 
         let (def_id, genargs) = match callee {
             Callee::Direct { def_id, genargs } => (*def_id, genargs.clone()),
+            // 単相化が実装を決めて `Direct` に潰しているので、ここには来ない。
+            Callee::TraitAssoc { .. } => {
+                return Err(WasmError::UnsupportedType {
+                    ty: "an unresolved trait call (this is a compiler bug)".to_string(),
+                });
+            }
             Callee::Indirect(_) => {
                 return Err(WasmError::UnsupportedType {
                     ty: "an indirect call".to_string(),

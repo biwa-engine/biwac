@@ -34,6 +34,10 @@ pub struct DefCollector {
     next_pkg_local_def_id: u32,
     /// Maps alias TyDefId → canonical (non-alias) TyDefId; populated during collect().
     pub(super) alias_canonical: HashMap<TyDefId, TyDefId>,
+    /// 自パッケージの trait が宣言した項目。宣言順。
+    ///
+    /// `T::guee()` の解決で「制限にある trait がこの名前を持つか」を引く。
+    pub(crate) trait_items: HashMap<TraitDefId, Vec<(InternedIdent, TraitAssocDefId)>>,
     pub(crate) impl_collector: ImplCollector,
 }
 
@@ -48,6 +52,7 @@ impl DefCollector {
         Self {
             next_pkg_local_def_id: 0,
             alias_canonical: HashMap::new(),
+            trait_items: HashMap::new(),
             impl_collector: ImplCollector::new(),
         }
     }
@@ -192,10 +197,13 @@ impl DefCollector {
                     // 項目にも id を振る。
                     // 採番の順序が `.biwameta` に出るので、宣言順のまま回す
                     // (enum のバリアントと同じ)。
+                    let mut items = Vec::with_capacity(trait_def.items.len());
                     for item in &trait_def.items {
                         let item_def_id = TraitAssocDefId::new(self.alloc_def_id());
                         item.def_id.set(item_def_id).unwrap();
+                        items.push((item.id.id, item_def_id));
                     }
+                    self.trait_items.insert(def_id, items);
 
                     Some((trait_def.id.clone(), TyOrVal::Trait(def_id)))
                 }

@@ -51,8 +51,6 @@ pub struct FnDef {
     // 具体化が Ty::embody_by_loc_gen_ty_id で行われるためである。
     // LocalGenDefId 順に並ぶ。
     pub call_genargs: HashMap<ExprId, Vec<(LocalGenDefId, Ty)>>,
-
-    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,8 +93,27 @@ pub struct FnSignature {
     // Ty::Void
     pub rty: Ty,
 
-    pub genargs: Vec<(Ident, LocalGenDefId)>,
+    pub genargs: Vec<GenArgDef>,
+
+    /// この関数を持つ impl ブロックのジェネリック引数の宣言。
+    ///
+    /// `genargs` は関数自身のぶんだけを持つ。
+    /// 呼び出し位置で制限を検査するには impl ブロックのぶんも要るので、
+    /// シグニチャから辿れるところに置いてある。
+    ///
+    /// 並びは常に `impl_genargs ++ genargs` で扱う
+    /// (`.biwameta` もこの順で 1 本に並べて書く)。
+    pub impl_genargs: Vec<GenArgDef>,
+
     pub span: Span,
+}
+
+impl FnSignature {
+    /// この関数から見えるジェネリック引数の宣言。
+    /// impl ブロックのぶんが先である。
+    pub fn all_genargs(&self) -> impl Iterator<Item = &GenArgDef> {
+        self.impl_genargs.iter().chain(self.genargs.iter())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -122,8 +139,6 @@ pub struct NativeFnDef {
 
     pub native_span: Span,
     pub span: Span,
-
-    pub impl_genargs: Vec<(Ident, LocalGenDefId)>,
 }
 
 #[derive(Debug, Clone)]
@@ -274,17 +289,35 @@ pub struct TraitAssocOwner {
 //  ```biwa
 //  impl[T, U: A[T] && B[T]] Foo[U] { ... }
 //  //         ^^^^    ^^^^ trait condition
-//  //         ^^^^^^^^^^^^ trait condition list
 //  ```
 #[derive(Debug, Clone)]
 pub struct TraitCond {
     pub def_id: TraitDefId,
     pub genargs: Vec<Ty>,
+    /// 制限が書かれた位置。満たされないときの下線に使う。
+    pub span: Span,
 }
 
+/// ジェネリック引数の**宣言**。
+///
+/// 名前・id・制限が 1 か所にまとまる。
 #[derive(Debug, Clone)]
-pub struct TraitCondList {
-    pub conds: Vec<TraitCond>,
+pub struct GenArgDef {
+    pub name: Ident,
+    pub def_id: LocalGenDefId,
+    /// この引数に付いた制限。無ければ空。
+    pub bounds: Vec<TraitCond>,
+}
+
+impl GenArgDef {
+    /// 制限を持たない宣言。
+    pub fn plain(name: Ident, def_id: LocalGenDefId) -> Self {
+        Self {
+            name,
+            def_id,
+            bounds: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -317,12 +350,7 @@ pub struct NovelSceneDef {
 }
 
 impl FnDef {
-    pub fn new(
-        name: Ident,
-        signature: FnSignature,
-        body: FnBody,
-        impl_genargs: Vec<(Ident, LocalGenDefId)>,
-    ) -> Self {
+    pub fn new(name: Ident, signature: FnSignature, body: FnBody) -> Self {
         Self {
             name,
             signature,
@@ -330,7 +358,6 @@ impl FnDef {
             expr_tys: HashMap::new(),
             var_tys: HashMap::new(),
             call_genargs: HashMap::new(),
-            impl_genargs,
         }
     }
 }
@@ -342,7 +369,6 @@ impl NativeFnDef {
         span: Span,
         native_body: String,
         signature: FnSignature,
-        impl_genargs: Vec<(Ident, LocalGenDefId)>,
     ) -> Self {
         Self {
             name,
@@ -350,7 +376,6 @@ impl NativeFnDef {
             native_body,
             native_span,
             span,
-            impl_genargs,
         }
     }
 }

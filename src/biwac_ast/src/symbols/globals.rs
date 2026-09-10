@@ -11,6 +11,12 @@ use crate::{Attrs, Exprs, Ident, NovelStmt, Path, RetTypRepr, Stmt, TypRepr, Var
 pub struct GenArgDeclItem<I> {
     pub id: Ident,
     pub def_id: OnceCell<I>,
+    /// `[T: A && B[Int]]` の制限。無ければ空。
+    ///
+    /// trait は型ではないが、書かれ方は型とまったく同じ
+    /// (パスとジェネリック引数) なので [`TypRepr`] で受ける。
+    /// trait であることの検査は名前解決が行う。
+    pub bounds: Vec<TypRepr>,
 }
 
 #[derive(Debug, Clone)]

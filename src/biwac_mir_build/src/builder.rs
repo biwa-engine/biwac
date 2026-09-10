@@ -28,12 +28,7 @@ pub(crate) fn build_fn(
     def_id: ValDefId,
     f: &FnDef,
 ) -> MirItem {
-    let genargs = f
-        .impl_genargs
-        .iter()
-        .chain(f.signature.genargs.iter())
-        .map(|(_, lgid)| *lgid)
-        .collect();
+    let genargs = f.signature.all_genargs().map(|g| g.def_id).collect();
 
     MirItem::Body(
         BodyBuilder::new(
@@ -56,7 +51,7 @@ pub(crate) fn build_scene(
 ) -> MirItem {
     // scene も普通の関数と同じ経路で落ちる。
     // 中断は同期的なホスト呼び出しの向こう側の話であり、MIR には現れない。
-    let genargs = s.signature.genargs.iter().map(|(_, lgid)| *lgid).collect();
+    let genargs = s.signature.all_genargs().map(|g| g.def_id).collect();
 
     MirItem::Body(
         BodyBuilder::new(
@@ -77,12 +72,7 @@ pub(crate) fn build_native_fn(def_id: ValDefId, n: &NativeFnDef) -> MirItem {
         self_ty: n.signature.self_ty.clone(),
         args: n.signature.args.iter().map(|a| a.ty.clone()).collect(),
         rty: n.signature.rty.clone(),
-        genargs: n
-            .impl_genargs
-            .iter()
-            .chain(n.signature.genargs.iter())
-            .map(|(_, lgid)| *lgid)
-            .collect(),
+        genargs: n.signature.all_genargs().map(|g| g.def_id).collect(),
         native_body: n.native_body.clone(),
         native_span: n.native_span.clone(),
         span: n.span.clone(),
@@ -696,6 +686,12 @@ impl<'a> BodyBuilder<'a> {
                         def_id: *def_id,
                         genargs: self.genargs_of(expr.id),
                     },
+                    // 実装は単相化まで決まらない。
+                    HirCallee::TraitAssoc { assoc, self_ty } => Callee::TraitAssoc {
+                        assoc: *assoc,
+                        self_ty: self_ty.clone(),
+                        genargs: self.genargs_of(expr.id),
+                    },
                     HirCallee::Var(var_id) => {
                         Callee::Indirect(Operand::from_local(self.local_of(*var_id)))
                     }
@@ -726,19 +722,26 @@ impl<'a> BodyBuilder<'a> {
                     args.push(operand);
                 }
 
-                let def_id = *m
-                    .def_id
+                let target = *m
+                    .target
                     .get()
                     .expect("compiler bug: method is not resolved after inference");
+                let genargs = self.genargs_of(expr.id);
+                let callee = match target {
+                    biwac_hir::MethodTarget::Direct(def_id) => Callee::Direct { def_id, genargs },
+                    // 実装はレシーバの型が具体になってから決まる。
+                    biwac_hir::MethodTarget::Trait(assoc) => Callee::TraitAssoc {
+                        assoc,
+                        self_ty: self.expr_ty(&m.left),
+                        genargs,
+                    },
+                };
 
                 let next = self.new_block();
                 self.terminate(
                     bb,
                     TerminatorKind::Call {
-                        callee: Callee::Direct {
-                            def_id,
-                            genargs: self.genargs_of(expr.id),
-                        },
+                        callee,
                         args,
                         dest,
                         target: next,

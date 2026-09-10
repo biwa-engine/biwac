@@ -101,6 +101,13 @@ fn collect_genargs(
 
     if let Some(genargs_decl) = genargs_decl {
         for item in &genargs_decl.genargs {
+            // trait 自身のジェネリック引数への制限も未対応 (第 3 段)。
+            for bound in &item.bounds {
+                errors.push(ResolveError::TraitBoundOnTypeDefUnsupported {
+                    span: bound.span.clone(),
+                });
+            }
+
             let def_id = match item.def_id.get() {
                 Some(def_id) => *def_id,
                 None => {

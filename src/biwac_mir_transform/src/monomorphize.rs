@@ -74,6 +74,11 @@ pub enum MonoError {
     },
     /// 間接呼び出しはまだ実体化できない。
     IndirectCall { caller: ValDefId },
+    /// trait 越しの呼び出しの実装が見つからない。
+    ///
+    /// 制限の検査は型推論が通しているので、ここに来るのは
+    /// impl の収集か単相化の側の取りこぼしである。
+    UnresolvedTraitCall { caller: ValDefId },
     /// 実体が増えすぎた。
     TooManyInstances { limit: usize },
 }
@@ -108,6 +113,11 @@ impl std::fmt::Display for MonoError {
             Self::IndirectCall { caller } => write!(
                 f,
                 "val#{}: indirect calls cannot be monomorphized yet",
+                caller.value()
+            ),
+            Self::UnresolvedTraitCall { caller } => write!(
+                f,
+                "val#{}: could not find the implementation for a trait call",
                 caller.value()
             ),
             Self::TooManyInstances { limit } => write!(
@@ -413,6 +423,32 @@ impl<'a> Collector<'a> {
                             genargs,
                         }
                     }
+                    // 実装をここで決める。rustc の `Instance::resolve` と同じ手順である。
+                    Callee::TraitAssoc {
+                        assoc,
+                        self_ty,
+                        genargs,
+                    } => {
+                        let concrete = self.subst_ty(self_ty, subst);
+                        let item_genargs = self.subst_genargs_raw(genargs, subst);
+
+                        match self.resolve_trait_assoc(*assoc, &concrete, &item_genargs) {
+                            Some((def_id, genargs)) => {
+                                self.fn_worklist
+                                    .push(InstanceKey::new(def_id, genargs.clone()));
+                                Callee::Direct { def_id, genargs }
+                            }
+                            None => {
+                                // ここで止まるので、そのまま残しておいてよい。
+                                self.errors.push(MonoError::UnresolvedTraitCall { caller });
+                                Callee::TraitAssoc {
+                                    assoc: *assoc,
+                                    self_ty: concrete,
+                                    genargs: item_genargs,
+                                }
+                            }
+                        }
+                    }
                     Callee::Indirect(op) => {
                         self.errors.push(MonoError::IndirectCall { caller });
                         Callee::Indirect(self.subst_operand(op, subst, owner))
@@ -429,6 +465,139 @@ impl<'a> Collector<'a> {
                 }
             }
         }
+    }
+
+    /// 呼び出し位置のジェネリック引数を、具体性を検査せずに置き換える。
+    ///
+    /// trait 越しの呼び出しでは、実装が決まってから鍵を付け替えるので、
+    /// この段階では検査しない。
+    fn subst_genargs_raw(
+        &mut self,
+        genargs: &GenArgs,
+        subst: &HashMap<LocalGenDefId, Ty>,
+    ) -> GenArgs {
+        genargs
+            .iter()
+            .map(|(g, ty)| (*g, self.subst_ty(ty, subst)))
+            .collect()
+    }
+
+    /// trait 越しの呼び出しの実装を決める。
+    ///
+    /// rustc の `Instance::resolve` と同じ手順である。
+    ///
+    /// 1. 具体になった self 型に対する trait impl を探す
+    /// 2. impl の対象型 (`Vec[T]`) を具体の型 (`Vec[Int]`) と突き合わせて
+    ///    impl ブロックのジェネリック引数を決める
+    /// 3. trait が宣言した項目のジェネリック引数を、実装側の並びに位置で移す
+    fn resolve_trait_assoc(
+        &mut self,
+        assoc: biwac_span::TraitAssocDefId,
+        self_ty: &Ty,
+        item_genargs: &GenArgs,
+    ) -> Option<(ValDefId, GenArgs)> {
+        let (trait_def_id, item_name, item_own_genargs) = self.trait_item_of(assoc)?;
+        let ty_def_id = self_ty.kind.def_id()?;
+        let concrete_genargs: &[Ty] = match &self_ty.kind {
+            TyKind::Defined(dt) => &dt.genargs,
+            _ => &[],
+        };
+
+        for imp in self.trait_impls_of(ty_def_id) {
+            if imp.trait_def_id != trait_def_id {
+                continue;
+            }
+            if imp.ty_genargs.len() != concrete_genargs.len() {
+                continue;
+            }
+
+            // impl ブロックのジェネリック引数を、対象型の突き合わせで決める。
+            let mut impl_subst: HashMap<LocalGenDefId, Ty> = HashMap::new();
+            if !imp
+                .ty_genargs
+                .iter()
+                .zip(concrete_genargs)
+                .all(|(pat, con)| match_ty(pat, con, &mut impl_subst))
+            {
+                continue;
+            }
+
+            let Some(val_def_id) = imp.vals.get(&item_name).copied() else {
+                continue;
+            };
+
+            // 実装側のジェネリック引数の並び (impl ブロックのぶん ++ 関数自身のぶん)。
+            let params: Vec<LocalGenDefId> = match self.item_of(val_def_id)? {
+                MirItem::Body(b) => b.genargs.clone(),
+                MirItem::Native(n) => n.genargs.clone(),
+            };
+
+            let mut out: GenArgs = impl_subst.into_iter().collect();
+
+            // 項目自身のジェネリック引数は、宣言順の位置で対応させる。
+            // シグニチャの一致検査が同じ形であることを保証している。
+            let own = params.len().checked_sub(item_own_genargs.len())?;
+            for (i, decl) in item_own_genargs.iter().enumerate() {
+                let ty = item_genargs
+                    .iter()
+                    .find(|(l, _)| l == decl)
+                    .map(|(_, t)| t.clone())?;
+                out.push((*params.get(own + i)?, ty));
+            }
+
+            out.sort_by_key(|(g, _)| g.value());
+            return Some((val_def_id, out));
+        }
+
+        None
+    }
+
+    /// trait の項目から (親 trait, 名前, 項目自身のジェネリック引数) を引く。
+    fn trait_item_of(
+        &mut self,
+        assoc: biwac_span::TraitAssocDefId,
+    ) -> Option<(biwac_span::TraitDefId, InternedIdent, Vec<LocalGenDefId>)> {
+        if assoc.pkg().is_self() {
+            let owner = self.hir.trait_assoc_owners.get(&assoc)?;
+            let trait_def = self.hir.traits.get(&owner.trait_def_id)?;
+            let item = trait_def.items.get(owner.index as usize)?;
+            return Some((
+                owner.trait_def_id,
+                item.name.id,
+                item.signature.genargs.iter().map(|g| g.def_id).collect(),
+            ));
+        }
+
+        let (meta, _) = self.dep_of(assoc.pkg())?;
+        let (trait_sym, index) = meta.trait_assoc_owner(assoc.local_idx())?;
+        let trait_def = meta.get_ext_trait_def(trait_sym, assoc.pkg(), self.interner)?;
+        let item = trait_def.items.get(index as usize)?;
+        Some((
+            biwac_span::TraitDefId::new(biwac_span::DefId::new(
+                assoc.pkg(),
+                biwac_span::PackageLocalDefId::new(trait_sym),
+            )),
+            item.name.id,
+            item.signature.genargs.iter().map(|g| g.def_id).collect(),
+        ))
+    }
+
+    /// その型に対する trait impl。
+    ///
+    /// impl は対象の型のパッケージにあるとは限らないので、依存すべてを見る。
+    fn trait_impls_of(&mut self, ty: TyDefId) -> Vec<biwac_hir::TyTraitImpl> {
+        let mut out: Vec<biwac_hir::TyTraitImpl> = self
+            .hir
+            .tys
+            .get(&ty)
+            .map(|d| d.trait_impls.clone())
+            .unwrap_or_default();
+
+        for (pkg_id, meta, _) in self.deps {
+            out.extend(meta.trait_impls_for(ty, *pkg_id, self.interner));
+        }
+
+        out
     }
 
     /// 呼び出し位置のジェネリック引数を、呼び出し側の置換で具体化する。
@@ -675,5 +844,31 @@ fn is_concrete(ty: &Ty) -> bool {
         TyKind::Gen(_) | TyKind::LocGen(_) | TyKind::Infer(_) => false,
         TyKind::Defined(dt) => dt.genargs.iter().all(is_concrete),
         TyKind::Fn(f) => f.args.iter().all(is_concrete) && is_concrete(&f.rty),
+    }
+}
+
+/// impl の対象型 (`Vec[T]`) を具体の型 (`Vec[Int]`) に突き合わせ、
+/// ジェネリック引数への割り当てを集める。
+fn match_ty(pattern: &Ty, concrete: &Ty, out: &mut HashMap<LocalGenDefId, Ty>) -> bool {
+    match (&pattern.kind, &concrete.kind) {
+        (TyKind::LocGen(lgid), _) => {
+            // 同じ引数が 2 度出るなら、同じ型でなければならない。
+            match out.get(lgid) {
+                Some(prev) => prev.kind == concrete.kind,
+                None => {
+                    out.insert(*lgid, concrete.clone());
+                    true
+                }
+            }
+        }
+        (TyKind::Defined(p), TyKind::Defined(c)) => {
+            p.def_id == c.def_id
+                && p.genargs.len() == c.genargs.len()
+                && p.genargs
+                    .iter()
+                    .zip(&c.genargs)
+                    .all(|(a, b)| match_ty(a, b, out))
+        }
+        (a, b) => a == b,
     }
 }

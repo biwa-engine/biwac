@@ -19,8 +19,8 @@
 //! このクレートが `biwac_dependency_metadata` に依存せずに済むのはそのためである。
 
 use biwac_base::InternedIdent;
-use biwac_hir::{Ty, TyKind, TyTraitImpl};
-use biwac_span::{TraitDefId, TyDefId, ValDefId};
+use biwac_hir::{TraitCond, Ty, TyKind, TyTraitImpl};
+use biwac_span::{LocalGenDefId, TraitAssocDefId, TraitDefId, TyDefId, ValDefId};
 
 /// solver が環境に問い合わせること。
 ///
@@ -39,13 +39,29 @@ pub trait TraitEnv {
     /// 名前解決はいま辿っているモジュール、
     /// 型推論はいま推論している関数のモジュールに対して作る。
     fn traits_in_scope(&self) -> &[TraitDefId];
+
+    /// この trait がこの名前の項目を宣言していれば、その id。
+    fn trait_item(&self, trait_def_id: TraitDefId, name: InternedIdent) -> Option<TraitAssocDefId>;
+
+    /// ジェネリック引数に付いた制限。
+    ///
+    /// いま推論している関数から見えるものだけを返す。
+    fn bounds_of_local_gen(&self, def_id: LocalGenDefId) -> Vec<TraitCond>;
 }
 
 /// 解決の結果。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Solved {
     /// 実装が確定した。
     Impl(ValDefId),
+    /// 型がジェネリック引数なので、実装は単相化まで決まらない。
+    ///
+    /// `cond` はその名前を提供した制限で、
+    /// 呼び先のシグニチャを具体化するのに使う。
+    Deferred {
+        assoc: TraitAssocDefId,
+        cond: TraitCond,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -96,9 +112,14 @@ pub fn solve_method<E: TraitEnv + ?Sized>(
         TyKind::Bool => TyDefId::BOOL_TY_DEF_ID,
         TyKind::Void => TyDefId::VOID_TY_DEF_ID,
 
-        // ジェネリック引数への制限は第 2 段で入れる。
-        // それまでは「制限が付いていない = 何も満たさない」ので見つからない。
-        TyKind::Gen(_) | TyKind::LocGen(_) => return Err(TraitSolveError::NotFound),
+        // レシーバがジェネリック引数なら、その制限から名前を引く。
+        // 実装は単相化まで決まらない。
+        TyKind::LocGen(lgid) => {
+            return solve_in_bounds(&env.bounds_of_local_gen(*lgid), name, env);
+        }
+
+        // 型定義のジェネリック引数への制限は未対応 (第 3 段)。
+        TyKind::Gen(_) => return Err(TraitSolveError::NotFound),
 
         // 関数型への impl は入れない。
         TyKind::Fn(_) => return Err(TraitSolveError::NotImplementable),
@@ -171,4 +192,47 @@ fn solve<E: TraitEnv + ?Sized>(
             candidates: matched.into_iter().map(|(t, _)| t).collect(),
         }),
     }
+}
+
+/// ジェネリック引数の制限から名前を引く。
+///
+/// 実装は単相化まで決まらないので [`Solved::Deferred`] を返す。
+/// 制限にある trait は `import` の有無を問わない。
+/// 制限を書いた時点でその trait は名前解決を通っているからである。
+pub fn solve_in_bounds<E: TraitEnv + ?Sized>(
+    bounds: &[TraitCond],
+    name: InternedIdent,
+    env: &E,
+) -> Result<Solved, TraitSolveError> {
+    let mut matched = Vec::new();
+
+    for cond in bounds {
+        if let Some(assoc) = env.trait_item(cond.def_id, name) {
+            matched.push((cond.clone(), assoc));
+        }
+    }
+
+    match matched.len() {
+        1 => {
+            let (cond, assoc) = matched.into_iter().next().unwrap();
+            Ok(Solved::Deferred { assoc, cond })
+        }
+        0 => Err(TraitSolveError::NotFound),
+        _ => Err(TraitSolveError::Ambiguous {
+            candidates: matched.into_iter().map(|(c, _)| c.def_id).collect(),
+        }),
+    }
+}
+
+/// 2 つの制限が同じものかを見る。
+///
+/// blanket impl を禁じてあるので、部分的に重なる制限どうしを
+/// 解く必要は無い。trait と、そのジェネリック引数の構造的な一致だけを見る。
+pub fn cond_matches(a: &TraitCond, b: &TraitCond) -> bool {
+    a.def_id == b.def_id
+        && a.genargs.len() == b.genargs.len()
+        && a.genargs
+            .iter()
+            .zip(&b.genargs)
+            .all(|(x, y)| x.kind == y.kind)
 }

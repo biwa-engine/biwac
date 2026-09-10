@@ -10,7 +10,7 @@ use biwac_dependency_metadata::{
     DepMetadata, DepMetadataModuleView, ExternalChildKind, ExternalChildRef, PackageModuleView,
 };
 use biwac_hir::TyTraitImpl;
-use biwac_span::{DefIdKind, TraitDefId, TyDefId};
+use biwac_span::{DefIdKind, TraitAssocDefId, TraitDefId, TyDefId};
 use biwac_trait_solver::{Solved, TraitEnv, TraitSolveError};
 
 use crate::{
@@ -33,6 +33,9 @@ pub struct ModuleResolveCtx<'t> {
     /// 直接の関連アイテムが空振りしたときのフォールバックに使う。
     /// def collection の途中 (Step 2/3/4) ではまだ出来ていないので `None`。
     trait_impls: Option<&'t HashMap<TyDefId, Vec<TyTraitImpl>>>,
+    /// 自パッケージの trait が宣言した項目。宣言順。
+    /// `T::guee()` の解決に使う。
+    trait_items: Option<&'t HashMap<TraitDefId, Vec<(InternedIdent, TraitAssocDefId)>>>,
     /// このモジュールで使える trait。
     /// [`Self::prepare_trait_scope`] が埋める。
     traits_in_scope: RefCell<Vec<TraitDefId>>,
@@ -92,6 +95,7 @@ impl<'t> ModuleResolveCtx<'t> {
                 mod_index,
                 interner,
                 trait_impls: None,
+                trait_items: None,
                 traits_in_scope: RefCell::new(Vec::new()),
             })
         } else {
@@ -106,8 +110,10 @@ impl<'t> ModuleResolveCtx<'t> {
     pub(crate) fn with_trait_impls(
         mut self,
         trait_impls: &'t HashMap<TyDefId, Vec<TyTraitImpl>>,
+        trait_items: &'t HashMap<TraitDefId, Vec<(InternedIdent, TraitAssocDefId)>>,
     ) -> Self {
         self.trait_impls = Some(trait_impls);
+        self.trait_items = Some(trait_items);
         self
     }
 
@@ -163,6 +169,54 @@ impl ModuleResolveCtx<'_> {
 }
 
 impl ResolveCtx for ModuleResolveCtx<'_> {
+    fn lookup_trait_assoc(
+        &self,
+        bounds: &[TraitDefId],
+        segment: &biwac_ast::PathSegment,
+    ) -> Result<TraitAssocDefId, ResolveError> {
+        let mut matched = Vec::new();
+
+        for trait_def_id in bounds {
+            let found = if trait_def_id.pkg().is_self() {
+                self.trait_items
+                    .and_then(|m| m.get(trait_def_id))
+                    .and_then(|items| {
+                        items
+                            .iter()
+                            .find(|(name, _)| *name == segment.ident.id)
+                            .map(|(_, id)| *id)
+                    })
+            } else {
+                self.global_tree
+                    .ext_pkg_data
+                    .get(&trait_def_id.pkg())
+                    .and_then(|dep| {
+                        dep.trait_item(
+                            trait_def_id.local_idx(),
+                            segment.ident.id,
+                            trait_def_id.pkg(),
+                            self.interner,
+                        )
+                    })
+            };
+
+            if let Some(id) = found {
+                matched.push((*trait_def_id, id));
+            }
+        }
+
+        match matched.as_slice() {
+            [(_, id)] => Ok(*id),
+            [] => Err(ResolveError::TraitAssocNotFound {
+                segment: segment.clone(),
+            }),
+            _ => Err(ResolveError::AmbiguousTraitAssoc {
+                segment: segment.clone(),
+                candidates: matched.into_iter().map(|(t, _)| t).collect(),
+            }),
+        }
+    }
+
     fn resolve_path(&self, path: &Path) -> Result<(), ResolveError> {
         // If already resolved, fast path.
         for (i, segment) in path.segments.iter().enumerate() {
@@ -446,6 +500,23 @@ impl TraitEnv for ModuleTraitEnv<'_> {
     fn traits_in_scope(&self) -> &[TraitDefId] {
         &self.in_scope
     }
+
+    // 名前解決の側では、これらは使わない。
+    //
+    // `T::guee()` は `ModuleResolveCtx::lookup_trait_assoc` が直接引くので
+    // solver を通らない (制限は fn / impl の文脈が持っているため)。
+
+    fn trait_item(
+        &self,
+        _trait_def_id: TraitDefId,
+        _name: InternedIdent,
+    ) -> Option<TraitAssocDefId> {
+        None
+    }
+
+    fn bounds_of_local_gen(&self, _def_id: biwac_span::LocalGenDefId) -> Vec<biwac_hir::TraitCond> {
+        Vec::new()
+    }
 }
 
 /// 直接の関連アイテムが見つからなかったときの、trait 越しの解決。
@@ -456,6 +527,10 @@ fn solve_assoc_fallback(
 ) -> Result<DefIdKind, ResolveError> {
     match biwac_trait_solver::solve_assoc(ty_def_id, segment.ident.id, &ctx.trait_env) {
         Ok(Solved::Impl(val_def_id)) => Ok(DefIdKind::Val(val_def_id)),
+        // 具体の型に対する解決なので、実装が決まらないことはない。
+        Ok(Solved::Deferred { .. }) => Err(ResolveError::TraitAssocNotFound {
+            segment: segment.clone(),
+        }),
         Err(TraitSolveError::NotInScope { candidates }) => Err(ResolveError::TraitNotInScope {
             segment: segment.clone(),
             candidates,

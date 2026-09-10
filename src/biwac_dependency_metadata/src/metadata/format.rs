@@ -17,7 +17,7 @@ use super::codec::{DiskDecode, DiskEncode, DiskVec, impl_u32_newtype_codec};
 use crate::error::DepMetadataError;
 
 pub const BIWAC_DEPENDENCY_METADATA_MAGIC: &[u8; 4] = b"bwmt";
-pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 7;
+pub const BIWAC_DEPENDENCY_METADATA_FORMAT_VERSION: u32 = 8;
 
 // --- インデックス / オフセット型 ---
 
@@ -334,16 +334,20 @@ impl DiskEncode for DiskTy {
     }
 }
 
-// --- DiskGenArg (固定長 16B): ジェネリクス引数名と宣言位置 ---
+// --- DiskGenArg (可変長): ジェネリクス引数名と宣言位置と制限 ---
+//
+// 制限 (`DiskTy`) が可変長なので固定長ではない。
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DiskGenArg {
     pub name: DiskStringOffset,
     pub name_span: DiskSpan,
-}
-
-impl DiskGenArg {
-    pub const BYTE_SIZE: usize = 4 + DiskSpan::BYTE_SIZE; // 16
+    /// この引数に付いた制限。
+    ///
+    /// trait は型ではないが、参照の運び方は型とまったく同じなので
+    /// [`DiskTy`] を使う ([`DiskFnData::trait_of`] と同じ理由)。
+    /// ジェネリック引数も一緒に運べる。
+    pub bounds: DiskVec<DiskTy>,
 }
 
 impl DiskDecode for DiskGenArg {
@@ -353,7 +357,16 @@ impl DiskDecode for DiskGenArg {
         pos += n;
         let (name_span, n) = DiskSpan::decode(&bytes[pos..])?;
         pos += n;
-        Ok((Self { name, name_span }, pos))
+        let (bounds, n) = DiskVec::<DiskTy>::decode(&bytes[pos..])?;
+        pos += n;
+        Ok((
+            Self {
+                name,
+                name_span,
+                bounds,
+            },
+            pos,
+        ))
     }
 }
 
@@ -361,6 +374,7 @@ impl DiskEncode for DiskGenArg {
     fn encode(&self, buf: &mut Vec<u8>) {
         self.name.encode(buf);
         self.name_span.encode(buf);
+        self.bounds.encode(buf);
     }
 }
 

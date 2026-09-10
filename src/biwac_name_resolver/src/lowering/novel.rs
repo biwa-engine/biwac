@@ -27,6 +27,7 @@ pub(super) fn lower_novel_scene(
         None,
         false,
         &None,
+        Vec::new(),
         scene_def.span.clone(),
     );
 

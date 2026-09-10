@@ -191,6 +191,7 @@ scene main(g: MyGame) -> MyGame {{
   #let _opt = ext_enum_demo()
   #let _lv = trait_demo()
   #let _ratio = float_demo()
+  #let _bound = bound_demo()
 
   #endscene g
 }}
@@ -271,4 +272,54 @@ fn trait_demo() -> Int {
   let f = Pos::from_code(3).describe();
 
   a + b + c + d + e + f + PairIntInt::new(1, 2).viaalias()
+}
+
+// ---- ジェネリクスの trait 制限 (第 2 段) ----
+//
+// `T::from_level(..)` と `v.level2()` の呼び先は、
+// `T` が具体になる単相化まで決まらない。
+// wasm は単相化で普通の直接呼び出しに潰す。
+// TypeScript は未対応で、driver が codegen の手前で弾く。
+
+struct Wrapper[T] {
+  inner: T,
+}
+
+// 制限つきの impl ブロック。
+impl[T: Level] Wrapper[T] {
+  fn wrap(inner: T) -> Self {
+    Self { inner = inner }
+  }
+
+  // レシーバがジェネリック引数のメソッド呼び出し。
+  fn score(self) -> Int {
+    self.inner.level2()
+  }
+
+  // ジェネリック引数越しの関連関数呼び出し。
+  fn rebuilt(self, n: Int) -> Int {
+    let other = T::from_level(n);
+    other.level2()
+  }
+}
+
+// 制限つきの通常の関数。
+fn score_of[U: Level](v: U) -> Int {
+  v.level2()
+}
+
+// 呼び出し元自身の制限をそのまま転送する形。
+fn forwarded[V: Level](v: V) -> Int {
+  score_of(v) + Wrapper::wrap(v).score()
+}
+
+fn bound_demo() -> Int {
+  // 自パッケージの型で満たす
+  let a = Wrapper::wrap(Shade::Mid(1)).score();
+  let b = Wrapper::wrap(Shade::Dark).rebuilt(2);
+  // 外部パッケージの型 (エイリアス経由の trait impl) で満たす
+  let c = score_of(greeter::Box::new(3));
+  let d = forwarded(Shade::Mid(4));
+
+  a + b + c + d
 }

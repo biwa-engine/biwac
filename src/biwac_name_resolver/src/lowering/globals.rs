@@ -4,9 +4,9 @@ use biwac_ast::{ArgDeclList, RetTypRepr, TypeDef, VariantFieldsDecl};
 use biwac_base::InternedIdent;
 use biwac_hir::{
     AssocValDefKind, DefinedTy, DefinedTyImpl, EnumDef, FnArgDecl, FnBody, FnDef, FnSignature,
-    Ident, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, TraitDef, TraitItemDef, Ty,
-    TyDefKind, TyKind, TyValImplGenargsContentPair, TyValImplList, TypeAliasDef, ValDefKind,
-    VariantDef,
+    GenArgDef, Ident, NativeCode, NativeFnDef, NativeTypeAliasDef, StructDef, TraitCond, TraitDef,
+    TraitItemDef, Ty, TyDefKind, TyKind, TyValImplGenargsContentPair, TyValImplList, TypeAliasDef,
+    ValDefKind, VariantDef,
 };
 use biwac_span::{GenDefId, LocalGenDefId, Span, TraitDefId, TyDefId, ValDefId, VarId};
 
@@ -26,12 +26,14 @@ use super::{
 /// `FnSignature::self_ty` に反映される。
 /// この 2 つを混同すると関連関数にもレシーバがあることになり、
 /// codegen が余分な第一引数を出力してしまう。
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_fn_signature(
     args: &ArgDeclList,
     rtype: &RetTypRepr,
     self_ty: Option<TyKind>,
     has_self: bool,
     genargs_decl: &Option<biwac_ast::symbols::globals::GenArgsDecl<LocalGenDefId>>,
+    impl_genargs: Vec<GenArgDef>,
     span: Span,
 ) -> FnSignature {
     let self_ty_opt_kind = self_ty.clone();
@@ -53,23 +55,7 @@ pub(super) fn build_fn_signature(
         RetTypRepr::Void(sp) => Ty::new(TyKind::Void, sp.clone()),
     };
 
-    let genargs: Vec<(Ident, LocalGenDefId)> = genargs_decl
-        .as_ref()
-        .map(|gd| {
-            gd.genargs
-                .iter()
-                .map(|item| {
-                    (
-                        Ident::from(item.id.clone()),
-                        *item
-                            .def_id
-                            .get()
-                            .expect("compiler bug: fn genarg def_id not set"),
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let genargs = lower_genargs(genargs_decl);
 
     // impl ブロックの対象型は関連関数でも要るので、
     // レシーバの有無で絞る前に控えておく。
@@ -84,6 +70,7 @@ pub(super) fn build_fn_signature(
         impl_self_ty: impl_self_ty_hir,
         rty,
         genargs,
+        impl_genargs,
         span,
     }
 }
@@ -142,25 +129,54 @@ fn build_fn_body(
     }
 }
 
-fn collect_impl_genargs(impl_block: &biwac_ast::ImplBlock) -> Vec<(Ident, LocalGenDefId)> {
-    impl_block
-        .genargs_decl
-        .as_ref()
-        .map(|gd| {
-            gd.genargs
-                .iter()
-                .map(|item| {
-                    (
-                        Ident::from(item.id.clone()),
-                        *item
-                            .def_id
-                            .get()
-                            .expect("compiler bug: impl genarg def_id not set"),
-                    )
-                })
-                .collect()
+fn collect_impl_genargs(impl_block: &biwac_ast::ImplBlock) -> Vec<GenArgDef> {
+    lower_genargs(&impl_block.genargs_decl)
+}
+
+/// ジェネリック引数の宣言を lower する。
+///
+/// 制限に書かれた trait は、パスの解決が済んでいる前提で読む。
+/// trait でないものが書かれていた場合は名前解決が既に弾いているので、
+/// ここでは黙って落とす。
+pub(crate) fn lower_genargs(
+    genargs_decl: &Option<biwac_ast::symbols::globals::GenArgsDecl<LocalGenDefId>>,
+) -> Vec<GenArgDef> {
+    let Some(gd) = genargs_decl else {
+        return Vec::new();
+    };
+
+    gd.genargs
+        .iter()
+        .map(|item| GenArgDef {
+            name: Ident::from(item.id.clone()),
+            def_id: *item
+                .def_id
+                .get()
+                .expect("compiler bug: genarg def_id not set"),
+            bounds: item.bounds.iter().filter_map(lower_trait_cond).collect(),
         })
-        .unwrap_or_default()
+        .collect()
+}
+
+/// `T: Gyao[Int]` の右辺を [`TraitCond`] にする。
+pub(crate) fn lower_trait_cond(typ: &biwac_ast::TypRepr) -> Option<TraitCond> {
+    let biwac_ast::TypReprVal::Defined(def_typ) = &typ.val else {
+        return None;
+    };
+    let Ok(biwac_span::DefIdKind::Trait(def_id)) = super::def_id_kind_from_path(&def_typ.path)
+    else {
+        return None;
+    };
+
+    Some(TraitCond {
+        def_id,
+        genargs: def_typ
+            .genargs
+            .iter()
+            .flat_map(|gs| gs.iter().map(|t| ty_from_typ_repr(t, None)))
+            .collect(),
+        span: typ.span.clone(),
+    })
 }
 
 pub(crate) fn collect_impl_block_genargs_map(
@@ -191,7 +207,7 @@ pub(crate) fn collect_impl_block_genargs_map(
 
 pub(super) fn lower_fn_def(
     fn_def: &biwac_ast::FnDef,
-    impl_genargs: Vec<(Ident, LocalGenDefId)>,
+    impl_genargs: Vec<GenArgDef>,
     errors: &mut Vec<ResolveError>,
 ) -> (ValDefId, ValDefKind) {
     let val_def_id = *fn_def
@@ -205,6 +221,7 @@ pub(super) fn lower_fn_def(
         None,
         false,
         &fn_def.genargs,
+        impl_genargs.clone(),
         fn_def.span.clone(),
     );
 
@@ -224,14 +241,13 @@ pub(super) fn lower_fn_def(
             fn_def.id.clone().into(),
             signature,
             body,
-            impl_genargs,
         ))),
     )
 }
 
 pub(super) fn lower_native_fn_def(
     fn_def: &biwac_ast::NativeFnDef,
-    impl_genargs: Vec<(Ident, LocalGenDefId)>,
+    impl_genargs: Vec<GenArgDef>,
     _errors: &mut Vec<ResolveError>,
 ) -> (ValDefId, ValDefKind) {
     let val_def_id = *fn_def
@@ -245,6 +261,7 @@ pub(super) fn lower_native_fn_def(
         None,
         false,
         &fn_def.genargs,
+        impl_genargs.clone(),
         fn_def.span.clone(),
     );
 
@@ -256,7 +273,6 @@ pub(super) fn lower_native_fn_def(
             fn_def.span.clone(),
             fn_def.native.clone(),
             signature,
-            impl_genargs,
         ))),
     )
 }
@@ -565,6 +581,7 @@ pub(super) fn lower_impl_block(
             Some(self_ty_kind.clone()),
             false,
             &fn_def.genargs,
+            impl_genargs.clone(),
             fn_def.span.clone(),
         );
         let body = build_fn_body(
@@ -576,12 +593,7 @@ pub(super) fn lower_impl_block(
             &signature,
             errors,
         );
-        let hir_fn = FnDef::new(
-            fn_def.id.clone().into(),
-            signature,
-            body,
-            impl_genargs.clone(),
-        );
+        let hir_fn = FnDef::new(fn_def.id.clone().into(), signature, body);
         register_impl_val(
             tys,
             *fn_def.def_id.get().unwrap(),
@@ -605,6 +617,7 @@ pub(super) fn lower_impl_block(
             Some(self_ty_kind.clone()),
             true,
             &method_def.genargs,
+            impl_genargs.clone(),
             method_def.span.clone(),
         );
         let body = build_fn_body(
@@ -616,12 +629,7 @@ pub(super) fn lower_impl_block(
             &signature,
             errors,
         );
-        let hir_fn = FnDef::new(
-            method_def.id.clone().into(),
-            signature,
-            body,
-            impl_genargs.clone(),
-        );
+        let hir_fn = FnDef::new(method_def.id.clone().into(), signature, body);
         register_impl_val(
             tys,
             *method_def.def_id.get().unwrap(),
@@ -641,6 +649,7 @@ pub(super) fn lower_impl_block(
             Some(self_ty_kind.clone()),
             false,
             &fn_def.genargs,
+            impl_genargs.clone(),
             fn_def.span.clone(),
         );
         let hir_fn = NativeFnDef::new(
@@ -649,7 +658,6 @@ pub(super) fn lower_impl_block(
             fn_def.span.clone(),
             fn_def.native.clone(),
             signature,
-            impl_genargs.clone(),
         );
         register_impl_val(
             tys,
@@ -674,6 +682,7 @@ pub(super) fn lower_impl_block(
             Some(self_ty_kind.clone()),
             true,
             &method_def.genargs,
+            impl_genargs.clone(),
             method_def.span.clone(),
         );
         let hir_fn = NativeFnDef::new(
@@ -682,7 +691,6 @@ pub(super) fn lower_impl_block(
             method_def.span.clone(),
             method_def.native.clone(),
             signature,
-            impl_genargs.clone(),
         );
         register_impl_val(
             tys,
@@ -814,6 +822,7 @@ pub(crate) fn lower_trait_def(trait_def: &biwac_ast::TraitDef) -> (TraitDefId, T
                 Some(self_ty_kind.clone()),
                 is_method,
                 &item.genargs,
+                Vec::new(),
                 item.span.clone(),
             );
 
@@ -979,6 +988,7 @@ fn substitute_signature(sig: &FnSignature, assigns: &HashMap<GenDefId, TyKind>) 
             .map(|t| t.embody_by_gen_ty_id(assigns)),
         rty: sig.rty.clone().embody_by_gen_ty_id(assigns),
         genargs: sig.genargs.clone(),
+        impl_genargs: sig.impl_genargs.clone(),
         span: sig.span.clone(),
     }
 }

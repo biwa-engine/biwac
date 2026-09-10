@@ -1,5 +1,5 @@
 use biwac_hir::Ty;
-use biwac_span::{LocalGenDefId, Span, ValDefId};
+use biwac_span::{LocalGenDefId, Span, TraitAssocDefId, ValDefId};
 
 use crate::{Operand, Place, Rvalue};
 
@@ -246,6 +246,20 @@ pub enum Callee {
     /// `genargs` はこの呼び出し位置でのジェネリック型への割り当てで、
     /// 単相化パスの入力になる。
     Direct { def_id: ValDefId, genargs: GenArgs },
+
+    /// trait 越しで、実装がまだ決まっていない呼び出し (`T::guee(..)`)。
+    ///
+    /// `self_ty` は呼び出し位置に書かれた型で、この時点ではジェネリック引数である。
+    /// 単相化が具体の型に置き換え、そこから実装を引いて
+    /// [`Callee::Direct`] に潰す。
+    ///
+    /// `genargs` は **trait が宣言した項目**のジェネリック引数への割り当てで、
+    /// 単相化が実装側の並びに移し替える。
+    TraitAssoc {
+        assoc: TraitAssocDefId,
+        self_ty: Ty,
+        genargs: GenArgs,
+    },
 
     /// 関数を保持する値を通した呼び出し。
     Indirect(Operand),

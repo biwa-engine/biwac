@@ -3,12 +3,17 @@ use std::collections::HashMap;
 use biwac_ast::{AbsolutePathHeader, ImplBlock};
 use biwac_base::InternedIdent;
 use biwac_hir::TyKind;
-use biwac_span::{DefIdKind, LocalGenDefId};
+use biwac_span::{DefIdKind, LocalGenDefId, TraitAssocDefId, TraitDefId};
 
 use crate::{
     ResolveError, lowering,
     resolving::{
-        context::{ResolveCtx, module_level::ModuleResolveCtx},
+        context::{
+            ResolveCtx,
+            fn_level::{GenArgEntry, resolve_genarg_assoc_path},
+            module_level::ModuleResolveCtx,
+            resolved_bound_traits,
+        },
         def_collector::DefCollector,
     },
 };
@@ -16,17 +21,25 @@ use crate::{
 #[derive(Debug)]
 pub struct ImplResolveCtx<'mctx> {
     mctx: &'mctx ModuleResolveCtx<'mctx>,
-    genargs: HashMap<InternedIdent, LocalGenDefId>,
+    genargs: HashMap<InternedIdent, GenArgEntry>,
     self_ty: TyKind,
 }
 
 impl ResolveCtx for ImplResolveCtx<'_> {
+    fn lookup_trait_assoc(
+        &self,
+        bounds: &[TraitDefId],
+        segment: &biwac_ast::PathSegment,
+    ) -> Result<TraitAssocDefId, ResolveError> {
+        self.mctx.lookup_trait_assoc(bounds, segment)
+    }
+
     fn resolve_path(&self, path: &biwac_ast::Path) -> Result<(), crate::ResolveError> {
         if path.abs_header.is_none()
             && path.segments.len() == 1
-            && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
+            && let Some(entry) = self.genargs.get(&path.segments[0].ident.id)
         {
-            let def_id_kind = DefIdKind::LocalGen(*def_id);
+            let def_id_kind = DefIdKind::LocalGen(entry.def_id);
             if path.segments[0].resolved_id.get().is_none() {
                 path.segments[0]
                     .resolved_id
@@ -35,6 +48,11 @@ impl ResolveCtx for ImplResolveCtx<'_> {
             }
 
             Ok(())
+        } else if path.abs_header.is_none()
+            && path.segments.len() == 2
+            && let Some(entry) = self.genargs.get(&path.segments[0].ident.id)
+        {
+            resolve_genarg_assoc_path(path, entry, self.mctx)
         } else if let Some(AbsolutePathHeader::SelfTyp(self_typ)) = &path.abs_header {
             if self_typ.resolved_id.get().is_none() {
                 if let TyKind::Defined(defined_ty) = &self.self_ty {
@@ -61,7 +79,7 @@ impl<'mctx> ImplResolveCtx<'mctx> {
         impl_block: &ImplBlock,
         def_collector: &mut DefCollector,
     ) -> Result<Self, Vec<ResolveError>> {
-        let genargs = match &impl_block.genargs_decl {
+        let genargs: HashMap<InternedIdent, GenArgEntry> = match &impl_block.genargs_decl {
             Some(genargs) => genargs
                 .genargs
                 .iter()
@@ -75,19 +93,39 @@ impl<'mctx> ImplResolveCtx<'mctx> {
                         def_id
                     };
 
-                    (item.id.id, def_id)
+                    (
+                        item.id.id,
+                        GenArgEntry {
+                            def_id,
+                            span: item.id.span.clone(),
+                            bounds: Vec::new(),
+                        },
+                    )
                 })
                 .collect(),
             None => HashMap::new(),
         };
 
         let prectx = PreImplResolveCtx { mctx, genargs };
+        // 制限は impl の対象型より先に解決する。
+        // `impl[T: Gyao] Bbb[T]` の `Gyao` は対象型を知らなくても解けるし、
+        // 対象型の側が制限を参照することもない。
+        prectx.resolve_genarg_bounds(&impl_block.genargs_decl)?;
         prectx.resolve_typ(&impl_block.self_typ)?;
         let self_ty = lowering::ty_kind_from_typ_repr(&impl_block.self_typ, None);
 
+        let mut genargs = prectx.genargs;
+        if let Some(decl) = &impl_block.genargs_decl {
+            for item in &decl.genargs {
+                if let Some(entry) = genargs.get_mut(&item.id.id) {
+                    entry.bounds = resolved_bound_traits(item);
+                }
+            }
+        }
+
         Ok(Self {
             mctx,
-            genargs: prectx.genargs,
+            genargs,
             self_ty,
         })
     }
@@ -105,16 +143,16 @@ impl<'mctx> ImplResolveCtx<'mctx> {
 #[derive(Debug)]
 struct PreImplResolveCtx<'mctx> {
     mctx: &'mctx ModuleResolveCtx<'mctx>,
-    genargs: HashMap<InternedIdent, LocalGenDefId>,
+    genargs: HashMap<InternedIdent, GenArgEntry>,
 }
 
 impl ResolveCtx for PreImplResolveCtx<'_> {
     fn resolve_path(&self, path: &biwac_ast::Path) -> Result<(), ResolveError> {
         if path.abs_header.is_none()
             && path.segments.len() == 1
-            && let Some(def_id) = self.genargs.get(&path.segments[0].ident.id)
+            && let Some(entry) = self.genargs.get(&path.segments[0].ident.id)
         {
-            let def_id_kind = DefIdKind::LocalGen(*def_id);
+            let def_id_kind = DefIdKind::LocalGen(entry.def_id);
             if path.segments[0].resolved_id.get().is_none() {
                 path.segments[0]
                     .resolved_id

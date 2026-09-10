@@ -34,6 +34,12 @@ impl<'a> AsOxcLocal<'a, oxc_span::Ident<'a>> for Callee {
             }
             // 呼び先は関数そのものなので、self 型は名前に出ない。
             // 型引数は単相化で解決済みである。
+            // 実装が単相化まで決まらない呼び出しは TypeScript では出せない。
+            // driver がこの手前で弾いているので、ここには来ない。
+            Self::TraitAssoc { .. } => panic!(
+                "compiler bug: a trait-bound call reached the TypeScript backend; \
+                 the driver must reject it first"
+            ),
             Self::Fn(def_id) | Self::AssocFn { def_id, .. } => {
                 oxc_span::Ident::new_const(ctx.allocator.alloc_str(&def_id.mangled(ctx)))
             }
@@ -294,7 +300,15 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Expression<'a>> for Expr {
                 }
                 Primary::Block(block) => block.as_oxc_local(ctx, fctx),
                 Primary::MethodCall(m) => {
-                    let callee_mangled_name = ctx.get_value_mangled(m.def_id.get().unwrap());
+                    // driver が手前で弾いているので、ここに来るのは
+                    // 実装が確定しているメソッドだけである。
+                    let Some(biwac_hir::MethodTarget::Direct(def_id)) = m.target.get() else {
+                        panic!(
+                            "compiler bug: a trait-bound method call reached the TypeScript backend; \
+                             the driver must reject it first"
+                        )
+                    };
+                    let callee_mangled_name = ctx.get_value_mangled(def_id);
 
                     // selfは第一引数として与える
                     let mut args =

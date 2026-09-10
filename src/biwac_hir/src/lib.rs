@@ -11,15 +11,15 @@ pub use crate::hir::{
         Ident,
         expressions::{
             BinaryExpr, BlockExpr, Callee, Expr, ExprId, ExprVal, FieldBinding, FnCall, IfExpr,
-            Literal, MatchExpr, MatchExprArm, MemberAccess, MethodCall, Pattern, PatternFields,
-            Primary, ResolvedVariant, StructLiteral, UnaryExpr, VarIdKind, Variable, VariantCtor,
-            VariantCtorFields, VariantPattern,
+            Literal, MatchExpr, MatchExprArm, MemberAccess, MethodCall, MethodTarget, Pattern,
+            PatternFields, Primary, ResolvedVariant, StructLiteral, UnaryExpr, VarIdKind, Variable,
+            VariantCtor, VariantCtorFields, VariantPattern,
         },
         globals::{
-            AssocValDefKind, DecledArg, EnumDef, FnArgDecl, FnBody, FnDef, FnSignature, NativeCode,
-            NativeFnArgDecl, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef,
-            TraitAssocOwner, TraitCond, TraitCondList, TraitDef, TraitItemDef, TyDefKind,
-            TypeAliasDef, ValDefKind, VariantDef, VariantOwner,
+            AssocValDefKind, DecledArg, EnumDef, FnArgDecl, FnBody, FnDef, FnSignature, GenArgDef,
+            NativeCode, NativeFnArgDecl, NativeFnDef, NativeTypeAliasDef, NovelSceneDef, StructDef,
+            TraitAssocOwner, TraitCond, TraitDef, TraitItemDef, TyDefKind, TypeAliasDef,
+            ValDefKind, VariantDef, VariantOwner,
         },
         statements::{
             AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, MatchStmt, MatchStmtArm,

@@ -235,7 +235,7 @@ impl DepMetadata {
             val_def_id: ValDefId,
             name: &'h biwac_hir::Ident,
             signature: &'h biwac_hir::FnSignature,
-            impl_genargs: &'h [(biwac_hir::Ident, LocalGenDefId)],
+            impl_genargs: &'h [biwac_hir::GenArgDef],
             parent_ty_def_id: TyDefId,
             /// impl の self 型。所属する型と、その impl 対象ジェネリック引数から組む。
             /// マングリングとメソッド解決の両方で「どの impl か」を決めるのに使う。
@@ -263,14 +263,11 @@ impl DepMetadata {
                     if !val_def_id.pkg().is_self() {
                         continue;
                     }
-                    let (name, sig, ig) = match &pair.val_content {
-                        AssocValDefKind::Fn(f) => {
-                            (&f.name, &f.signature, f.impl_genargs.as_slice())
-                        }
-                        AssocValDefKind::NativeFn(f) => {
-                            (&f.name, &f.signature, f.impl_genargs.as_slice())
-                        }
+                    let (name, sig) = match &pair.val_content {
+                        AssocValDefKind::Fn(f) => (&f.name, &f.signature),
+                        AssocValDefKind::NativeFn(f) => (&f.name, &f.signature),
                     };
+                    let ig = sig.impl_genargs.as_slice();
                     assoc_fn_items.push(AssocFnItem {
                         val_def_id: *val_def_id,
                         name,
@@ -297,18 +294,19 @@ impl DepMetadata {
             val_def_id: ValDefId,
             name: &'h biwac_hir::Ident,
             signature: &'h biwac_hir::FnSignature,
-            impl_genargs: &'h [(biwac_hir::Ident, LocalGenDefId)],
+            impl_genargs: &'h [biwac_hir::GenArgDef],
         }
         let mut top_fn_items: Vec<TopFnItem> = hir
             .vals
             .iter()
             .filter(|(def_id, _)| def_id.pkg().is_self())
             .filter_map(|(def_id, val_kind)| {
-                let (name, sig, ig) = match val_kind {
-                    ValDefKind::Fn(f) => (&f.name, &f.signature, f.impl_genargs.as_slice()),
-                    ValDefKind::Native(f) => (&f.name, &f.signature, f.impl_genargs.as_slice()),
-                    ValDefKind::NovelScene(ns) => (&ns.name, &ns.signature, [].as_slice()),
+                let (name, sig) = match val_kind {
+                    ValDefKind::Fn(f) => (&f.name, &f.signature),
+                    ValDefKind::Native(f) => (&f.name, &f.signature),
+                    ValDefKind::NovelScene(ns) => (&ns.name, &ns.signature),
                 };
+                let ig = sig.impl_genargs.as_slice();
                 Some(TopFnItem {
                     val_def_id: *def_id,
                     name,
@@ -375,6 +373,7 @@ impl DepMetadata {
         for item in &trait_items {
             for i in &item.def.items {
                 trait_assoc_to_sym.insert(i.def_id, DiskSymbolIndex(next_idx));
+                symbol_index.insert_trait_assoc(i.def_id, next_idx);
                 next_idx += 1;
             }
         }
@@ -564,6 +563,8 @@ impl DepMetadata {
                             begin: 0,
                             end: 0,
                         },
+                        // 型定義のジェネリック引数への制限は未対応 (第 3 段)。
+                        bounds: DiskVec(Vec::new()),
                     })
                     .collect(),
             );
@@ -648,6 +649,8 @@ impl DepMetadata {
                     .map(|g| DiskGenArg {
                         name: strings.push(interner.get_str(&g.id).unwrap_or("")),
                         name_span: impl_to_disk_span(&g.span, &mod_to_file_idx),
+                        // 型定義のジェネリック引数への制限は未対応 (第 3 段)。
+                        bounds: DiskVec(Vec::new()),
                     })
                     .collect(),
             );
@@ -712,6 +715,8 @@ impl DepMetadata {
                             begin: 0,
                             end: 0,
                         },
+                        // 型定義のジェネリック引数への制限は未対応 (第 3 段)。
+                        bounds: DiskVec(Vec::new()),
                     })
                     .collect(),
             );
@@ -906,6 +911,7 @@ impl DepMetadata {
             let self_gen = DiskGenArg {
                 name: strings.push("Self"),
                 name_span,
+                bounds: DiskVec(Vec::new()),
             };
 
             // trait の genarg は名前を HIR が持っていないので、
@@ -917,6 +923,7 @@ impl DepMetadata {
                     .map(|_| DiskGenArg {
                         name: strings.push(""),
                         name_span,
+                        bounds: DiskVec(Vec::new()),
                     })
                     .collect(),
             );
@@ -1777,6 +1784,50 @@ impl DepMetadata {
         out
     }
 
+    /// trait の項目のシンボルから (親 trait のシンボル番号, 宣言順の添字) を引く。
+    ///
+    /// `TraitAssocDefId` は親も添字も持たないので、この表引きが要る
+    /// (`variant_owner` と同じ)。
+    pub fn trait_assoc_owner(&self, assoc_sym_idx: u32) -> Option<(u32, u32)> {
+        let SymbolBody::TraitAssoc(data) = self.get_symbol_body(assoc_sym_idx as usize).ok()?
+        else {
+            return None;
+        };
+        Some((data.owner.0, data.index))
+    }
+
+    /// 外部パッケージの trait が宣言した項目を、名前で引く。
+    ///
+    /// 宣言そのものは要らず id だけが欲しいときに使う
+    /// (`T::guee()` の名前解決)。`get_ext_trait_def` と違い
+    /// interner を書き換えないので `&IdentInterner` で呼べる。
+    pub fn trait_item(
+        &self,
+        trait_sym_idx: u32,
+        name: biwac_base::InternedIdent,
+        pkg_id: biwac_base::PackageId,
+        interner: &biwac_base::IdentInterner,
+    ) -> Option<biwac_span::TraitAssocDefId> {
+        let SymbolBody::Trait(data) = self.get_symbol_body(trait_sym_idx as usize).ok()? else {
+            return None;
+        };
+        let name_str = interner.get_str(&name)?;
+
+        for item_sym in &data.item_symbols.0 {
+            let Ok(SymbolBody::TraitAssoc(item)) = self.get_symbol_body(item_sym.0 as usize) else {
+                continue;
+            };
+            if self.get_str(item.fn_data.name).ok() == Some(name_str) {
+                return Some(biwac_span::TraitAssocDefId::new(biwac_span::DefId::new(
+                    pkg_id,
+                    biwac_span::PackageLocalDefId::new(item_sym.0),
+                )));
+            }
+        }
+
+        None
+    }
+
     /// 外部パッケージの trait 宣言を復元する。
     ///
     /// impl が宣言と一致しているかの検査に使う。
@@ -1943,7 +1994,6 @@ impl DepMetadata {
                 native_body: String::new(),
                 native_span: Span::dummy(),
                 span: Span::dummy(),
-                impl_genargs: vec![],
             };
 
             let pair = TyValImplGenargsContentPair {
@@ -2197,8 +2247,11 @@ impl DepMetadata {
         use biwac_hir::{FnArgDecl, FnSignature, Ident};
         use biwac_span::{DefId, LocalGenDefId, PackageLocalDefId, Span, VarId};
 
-        // disk のジェネリクス引数 → LocalGenDefId のマップ (ordinal → lgid)
-        let genargs: Vec<(biwac_hir::Ident, biwac_span::LocalGenDefId)> = fn_data
+        // disk のジェネリクス引数 → 宣言 (ordinal → LocalGenDefId)
+        //
+        // 制限に現れる trait は型と同じ運び方をしているので、
+        // 復元も `impl_disk_ty_to_ty` に任せられる。
+        let genargs: Vec<biwac_hir::GenArgDef> = fn_data
             .genargs
             .0
             .iter()
@@ -2210,13 +2263,33 @@ impl DepMetadata {
                     pkg_id,
                     PackageLocalDefId::new(ext_loc_gen_id(fn_sym_idx, i as u32)),
                 ));
-                (
-                    Ident {
+
+                let bounds = g
+                    .bounds
+                    .0
+                    .iter()
+                    .filter_map(|b| {
+                        let ty =
+                            self.impl_disk_ty_to_ty(b, pkg_id, gen_owner_sym, Some(fn_sym_idx));
+                        let biwac_hir::TyKind::Defined(dt) = &ty.kind else {
+                            return None;
+                        };
+                        Some(biwac_hir::TraitCond {
+                            def_id: biwac_span::TraitDefId::new(dt.def_id.def_id()),
+                            genargs: dt.genargs.clone(),
+                            span: Span::dummy(),
+                        })
+                    })
+                    .collect();
+
+                biwac_hir::GenArgDef {
+                    name: Ident {
                         id: name_id,
                         span: Span::dummy(),
                     },
-                    lgid,
-                )
+                    def_id: lgid,
+                    bounds,
+                }
             })
             .collect();
 
@@ -2262,6 +2335,9 @@ impl DepMetadata {
             impl_self_ty: self.impl_decode_impl_self_ty(fn_data, fn_sym_idx, pkg_id),
             rty,
             genargs,
+            // `.biwameta` は impl ブロックのぶんと関数自身のぶんを
+            // 1 本に並べて書くので、復元では `genargs` にまとまる。
+            impl_genargs: Vec::new(),
             span: Span::dummy(),
         }
     }
@@ -2739,7 +2815,7 @@ fn impl_self_ty_of(
 fn impl_encode_fn_data(
     name: &biwac_hir::Ident,
     signature: &biwac_hir::FnSignature,
-    impl_genargs: &[(biwac_hir::Ident, biwac_span::LocalGenDefId)],
+    impl_genargs: &[biwac_hir::GenArgDef],
     // 関連関数・メソッドなら impl の self 型。トップレベル関数なら None。
     impl_self_ty: Option<&biwac_hir::Ty>,
     // trait impl の項目なら、その trait への参照 (ジェネリック引数込み)。
@@ -2781,16 +2857,15 @@ fn impl_encode_fn_data(
     let def_span = impl_to_disk_span(&signature.span, mod_to_file_idx);
 
     // combined genargs: impl_genargs 先頭, 次に signature.genargs
-    let all_genargs: Vec<(&biwac_hir::Ident, LocalGenDefId)> = impl_genargs
+    let all_genargs: Vec<&biwac_hir::GenArgDef> = impl_genargs
         .iter()
         .chain(signature.genargs.iter())
-        .map(|(ident, lgid)| (ident, *lgid))
         .collect();
 
     let loc_gen_ord: HashMap<LocalGenDefId, u32> = all_genargs
         .iter()
         .enumerate()
-        .map(|(i, (_, lgid))| (*lgid, i as u32))
+        .map(|(i, g)| (g.def_id, i as u32))
         .collect();
 
     for (lgid, ord) in &loc_gen_ord {
@@ -2800,13 +2875,34 @@ fn impl_encode_fn_data(
     let disk_genargs = DiskVec(
         all_genargs
             .iter()
-            .map(|(ident, _)| {
-                let gname = interner.get_str(&ident.id).unwrap_or("");
+            .map(|g| {
+                let gname = interner.get_str(&g.name.id).unwrap_or("");
                 let gname_off = strings.push(gname);
-                let gname_span = impl_to_disk_span(&ident.span, mod_to_file_idx);
+                let gname_span = impl_to_disk_span(&g.name.span, mod_to_file_idx);
                 DiskGenArg {
                     name: gname_off,
                     name_span: gname_span,
+                    bounds: DiskVec(
+                        g.bounds
+                            .iter()
+                            .map(|c| {
+                                impl_encode_ty(
+                                    &biwac_hir::Ty::new(
+                                        biwac_hir::TyKind::Defined(biwac_hir::DefinedTy {
+                                            def_id: biwac_span::TyDefId::new(c.def_id.def_id()),
+                                            genargs: c.genargs.clone(),
+                                        }),
+                                        c.span.clone(),
+                                    ),
+                                    ty_to_sym,
+                                    gen_ord,
+                                    &loc_gen_ord,
+                                    mod_to_file_idx,
+                                    ext,
+                                )
+                            })
+                            .collect(),
+                    ),
                 }
             })
             .collect(),

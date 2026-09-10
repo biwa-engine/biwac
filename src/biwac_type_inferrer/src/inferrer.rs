@@ -6,12 +6,13 @@ use biwac_ast::{BinOperator, UnOperator};
 use biwac_base::InternedIdent;
 use biwac_hir::{
     AssocValDefKind, BlockExpr, BlockStmt, Callee, DefinedTy, Expr, ExprId, ExprVal, FnBody,
-    FnSignature, FnTy, Hir, Ident, InferTy, Literal, MemberAccess, Pattern, PatternFields, Primary,
-    ResolvedVariant, Stmt, StructLiteral, Ty, TyDefKind, TyKind, TyVar, ValDefKind, VarIdKind,
-    VariantCtor, VariantCtorFields,
+    FnSignature, FnTy, Hir, Ident, InferTy, Literal, MemberAccess, MethodTarget, Pattern,
+    PatternFields, Primary, ResolvedVariant, Stmt, StructLiteral, TraitCond, Ty, TyDefKind, TyKind,
+    TyVar, ValDefKind, VarIdKind, VariantCtor, VariantCtorFields,
 };
 use biwac_lang_item::LangItem;
-use biwac_span::{GenDefId, LocalGenDefId, Span, TyDefId, VarId};
+use biwac_span::{GenDefId, LocalGenDefId, Span, TraitAssocDefId, TyDefId, VarId};
+use biwac_trait_solver::cond_matches;
 
 use crate::{
     TyCtx, TyError, TyErrorReport, TyResult,
@@ -210,6 +211,227 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     ///    (推論の最後に `resolve_ty` が解く)
     ///
     /// の両方である。
+    /// trait が宣言した項目への呼び出しを型付けする。
+    ///
+    /// 普通の呼び出しと違い、具体化したシグニチャには
+    /// **呼び出し元自身のジェネリック引数**が混ざっている
+    /// (`Self` を `T` に置き換えたため)。
+    /// それを呼び先のものと取り違えると、
+    ///
+    /// - 呼び出し元の `T` が型変数に化けて戻り値が解けなくなる
+    /// - `.biwamir` に「呼び先が宣言していないジェネリック引数」が書かれる
+    ///
+    /// ので、恒等の割り当てを先に置いて固定し、
+    /// 記録するのも呼び先が宣言したぶんだけに絞る。
+    fn infer_trait_assoc_call(
+        &mut self,
+        callee_sign: &FnSignature,
+        mut args: Vec<Ty>,
+        receiver: Option<Ty>,
+        expr_id: Option<ExprId>,
+        span: Span,
+    ) -> TyResult<Ty> {
+        let own: HashSet<LocalGenDefId> = callee_sign.genargs.iter().map(|g| g.def_id).collect();
+
+        let mut callee_args: Vec<Ty> = callee_sign.args.iter().map(|a| a.ty.clone()).collect();
+        if let (Some(self_ty), Some(recv)) = (&callee_sign.self_ty, receiver) {
+            callee_args.insert(0, self_ty.clone());
+            args.insert(0, recv);
+        }
+
+        // 呼び出し元のジェネリック引数を固定する。
+        let mut cctx = CallCtx::default();
+        let mut outer = HashSet::new();
+        for a in &callee_args {
+            collect_loc_gens(a, &mut outer);
+        }
+        collect_loc_gens(&callee_sign.rty, &mut outer);
+        for lgid in outer.difference(&own) {
+            cctx.gen_assigns
+                .insert(*lgid, Ty::new(TyKind::LocGen(*lgid), span.clone()));
+        }
+
+        let callee_ty = Ty::new(
+            TyKind::Fn(FnTy {
+                args: callee_args,
+                rty: Box::new(callee_sign.rty.clone()),
+                genargs: own.iter().copied().collect(),
+            }),
+            callee_sign.span.clone(),
+        );
+
+        let rty = self.fresh();
+        let unified_ty = self.call_unify(
+            callee_ty,
+            Ty::new(
+                TyKind::Fn(FnTy {
+                    args,
+                    rty: Box::new(Ty::new(rty, span.clone())),
+                    genargs: vec![],
+                }),
+                span.clone(),
+            ),
+            &mut cctx,
+        )?;
+
+        let TyKind::Fn(unified_fty) = unified_ty else {
+            panic!("compiler bug: 2 Ty::Fn unification must be Ty::Fn")
+        };
+
+        let mut subst = cctx.gen_assigns.clone();
+        let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &own, &mut subst);
+
+        subst.retain(|lgid, _| own.contains(lgid));
+        self.record_call_genargs(expr_id, subst);
+
+        Ok(rty)
+    }
+
+    /// trait が宣言した項目のシグニチャを、この呼び出し位置の型で具体化する。
+    ///
+    /// 宣言の中の `Self` は trait の `self_gen`、
+    /// trait のジェネリック引数は制限に書かれた型で置き換える。
+    fn trait_item_signature(
+        &mut self,
+        assoc: TraitAssocDefId,
+        self_ty: &Ty,
+    ) -> TyResult<FnSignature> {
+        let (trait_def, item) = self
+            .tctx
+            .get_trait_item(&assoc)
+            .ok_or(TyError::InsufficientContext)?;
+
+        let cond = self.cond_for_assoc(self_ty, assoc);
+
+        let mut assigns: HashMap<GenDefId, TyKind> = HashMap::new();
+        assigns.insert(trait_def.self_gen, self_ty.kind.clone());
+        if let Some(cond) = &cond {
+            for (gid, ty) in trait_def.genargs.iter().zip(&cond.genargs) {
+                assigns.insert(*gid, ty.kind.clone());
+            }
+        }
+
+        let sig = &item.signature;
+        Ok(FnSignature {
+            args: sig
+                .args
+                .iter()
+                .map(|a| biwac_hir::FnArgDecl {
+                    id: a.id.clone(),
+                    ty: a.ty.clone().embody_by_gen_ty_id(&assigns),
+                    var_id: a.var_id,
+                })
+                .collect(),
+            self_ty: sig.self_ty.clone().map(|t| t.embody_by_gen_ty_id(&assigns)),
+            impl_self_ty: sig
+                .impl_self_ty
+                .clone()
+                .map(|t| t.embody_by_gen_ty_id(&assigns)),
+            rty: sig.rty.clone().embody_by_gen_ty_id(&assigns),
+            genargs: sig.genargs.clone(),
+            impl_genargs: Vec::new(),
+            span: sig.span.clone(),
+        })
+    }
+
+    /// その関連アイテムを提供している制限を、レシーバの型から引く。
+    fn cond_for_assoc(&self, self_ty: &Ty, assoc: TraitAssocDefId) -> Option<TraitCond> {
+        let TyKind::LocGen(lgid) = &self_ty.kind else {
+            return None;
+        };
+        let bounds = self.genarg_bounds.get(lgid)?;
+
+        bounds
+            .iter()
+            .find(|cond| {
+                self.tctx
+                    .get_trait_def(&cond.def_id)
+                    .is_some_and(|t| t.items.iter().any(|i| i.def_id == assoc))
+            })
+            .cloned()
+    }
+
+    /// 呼び先のジェネリック引数に付いた制限を宿題として積む。
+    ///
+    /// この時点では割り当てがまだ型変数のことがあるので、ここでは解かない。
+    /// 解くのは本体を推論し終えてからである
+    /// (`let v = Vec::new(); v.push(x);` のように、
+    ///  あとの文で初めて決まる型引数がある)。
+    /// 積んでおいた制限の宿題を解く。
+    ///
+    /// 割り当てられた型で場合分けする。
+    ///
+    /// - 具体の型 → その型に trait が実装されているかを見る
+    /// - 呼び出し元自身のジェネリック引数 → 同じ制限が付いているかを見る
+    /// - まだ型変数 → 決まらなかったということなので、文脈が足りない
+    fn solve_obligations(&mut self) -> TyResult<()> {
+        let obligations = std::mem::take(&mut self.obligations);
+
+        for ob in obligations {
+            let ty = self.resolve_ty(&ob.ty);
+
+            match &ty.kind {
+                // 呼び出し元自身の制限で満たす。
+                TyKind::LocGen(lgid) => {
+                    let has = self
+                        .genarg_bounds
+                        .get(lgid)
+                        .is_some_and(|bs| bs.iter().any(|b| cond_matches(b, &ob.cond)));
+                    if !has {
+                        return Err(TyError::TraitBoundNotSatisfied {
+                            ty: Box::new(ty),
+                            trait_def_id: ob.cond.def_id,
+                            span: ob.span.clone(),
+                        });
+                    }
+                }
+
+                TyKind::Infer(_) => return Err(TyError::InsufficientContext),
+
+                // 具体の型。実装があるかを見る。
+                _ => {
+                    let env = self.tctx.trait_env(self.module, self.genarg_bounds.clone());
+                    let satisfied = env
+                        .trait_impls_of_kind(&ty.kind)
+                        .into_iter()
+                        .any(|imp| imp.trait_def_id == ob.cond.def_id);
+                    if !satisfied {
+                        return Err(TyError::TraitBoundNotSatisfied {
+                            ty: Box::new(ty),
+                            trait_def_id: ob.cond.def_id,
+                            span: ob.span.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn record_obligations(
+        &mut self,
+        callee_sign: &FnSignature,
+        assigns: &HashMap<LocalGenDefId, Ty>,
+        span: Span,
+    ) {
+        for g in callee_sign.all_genargs() {
+            if g.bounds.is_empty() {
+                continue;
+            }
+            let Some(ty) = assigns.get(&g.def_id) else {
+                continue;
+            };
+            for cond in &g.bounds {
+                self.obligations.push(context::Obligation {
+                    ty: ty.clone(),
+                    cond: cond.clone(),
+                    span: span.clone(),
+                });
+            }
+        }
+    }
+
     fn record_call_genargs(
         &mut self,
         expr_id: Option<ExprId>,
@@ -1136,7 +1358,8 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                         .depends_on_val(def_id);
 
                     // let callee_ty = self.tctx.hir.get_fn_sign(vid).unwrap().as_ty();
-                    let callee_ty = self.tctx.get_value_ty(def_id).unwrap();
+                    let callee_sign = self.tctx.get_value_signature(def_id).unwrap();
+                    let callee_ty = callee_sign.as_ty();
 
                     let args = c
                         .args
@@ -1171,7 +1394,10 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     // 型変数を割り当てておき、外側の文脈で解かれた結果を
                     // 推論の最後 (`resolve_ty`) に拾う。
                     let mut subst = cctx.gen_assigns.clone();
-                    let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &mut subst);
+                    let declared: HashSet<LocalGenDefId> =
+                        callee_sign.all_genargs().map(|g| g.def_id).collect();
+                    let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &declared, &mut subst);
+                    self.record_obligations(&callee_sign, &subst, primary.span());
                     self.record_call_genargs(expr_id, subst);
 
                     Ok(rty)
@@ -1211,7 +1437,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                         TyKind::Fn(FnTy {
                             args: callee_args,
                             rty: Box::new(callee_sign.rty.clone()),
-                            genargs: callee_sign.genargs.iter().map(|(_, g)| *g).collect(),
+                            genargs: callee_sign.genargs.iter().map(|g| g.def_id).collect(),
                         }),
                         callee_sign.span.clone(),
                     );
@@ -1240,10 +1466,26 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                     // 同上
                     let mut subst = cctx.gen_assigns.clone();
-                    let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &mut subst);
+                    let declared: HashSet<LocalGenDefId> =
+                        callee_sign.all_genargs().map(|g| g.def_id).collect();
+                    let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &declared, &mut subst);
+                    self.record_obligations(&callee_sign, &subst, primary.span());
                     self.record_call_genargs(expr_id, subst);
 
                     Ok(rty)
+                }
+                // `T::guee(..)`。実装は単相化まで決まらないので、
+                // 型付けには trait が宣言したシグニチャを使う。
+                Callee::TraitAssoc { assoc, self_ty } => {
+                    let callee_sign = self.trait_item_signature(*assoc, self_ty)?;
+
+                    let args = c
+                        .args
+                        .iter()
+                        .map(|a| self.infer_expr(a))
+                        .collect::<TyResult<Vec<_>>>()?;
+
+                    self.infer_trait_assoc_call(&callee_sign, args, None, expr_id, primary.span())
                 }
                 Callee::Var(v) => {
                     // 変数は名前解決済みであるため、先に型推論されているはず
@@ -1325,16 +1567,41 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                 let left = self.infer_expr(&m.left)?;
 
                 // 左辺値の型のメソッド実装からメソッド名をキーにメソッドを取得
-                let def_id = self.tctx.get_method_def_id(&left, &m.method, self.module)?;
-                m.def_id.set(def_id).unwrap();
+                let target = self.tctx.get_method_target(
+                    &left,
+                    &m.method,
+                    self.module,
+                    &self.genarg_bounds,
+                )?;
+                m.target.set(target).unwrap();
 
+                // 実装は単相化まで決まらないので、
+                // 型付けには trait が宣言したシグニチャを使う。
+                if let MethodTarget::Trait(assoc) = target {
+                    let callee_sign = self.trait_item_signature(assoc, &left)?;
+                    let args = m
+                        .args
+                        .iter()
+                        .map(|a| self.infer_expr(a))
+                        .collect::<TyResult<Vec<_>>>()?;
+                    return self.infer_trait_assoc_call(
+                        &callee_sign,
+                        args,
+                        Some(left),
+                        expr_id,
+                        primary.span(),
+                    );
+                }
+
+                let MethodTarget::Direct(def_id) = target else {
+                    unreachable!()
+                };
                 // 同上
                 self.tctx
                     .hir
                     .deps_recorder
                     .borrow_mut()
                     .depends_on_val(&def_id);
-
                 let callee_sign = self.tctx.get_value_signature(&def_id).unwrap();
 
                 let mut args = m
@@ -1360,7 +1627,7 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     TyKind::Fn(FnTy {
                         args: callee_args,
                         rty: Box::new(callee_sign.rty.clone()),
-                        genargs: callee_sign.genargs.iter().map(|(_, g)| *g).collect(),
+                        genargs: callee_sign.genargs.iter().map(|g| g.def_id).collect(),
                     }),
                     callee_sign.span.clone(),
                 );
@@ -1388,50 +1655,14 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                 // 同上。
                 let mut subst = cctx.gen_assigns.clone();
-                let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &mut subst);
+                let declared: HashSet<LocalGenDefId> =
+                    callee_sign.all_genargs().map(|g| g.def_id).collect();
+                let rty = self.fresh_loc_gen_ty(*unified_fty.rty, &declared, &mut subst);
+                self.record_obligations(&callee_sign, &subst, primary.span());
                 self.record_call_genargs(expr_id, subst);
 
                 Ok(rty)
             }
-        }
-    }
-
-    // 関数や型などの定義に存在するジェネリック型について、
-    // 呼び出して使用する際に未確定の場合、
-    // 推論が必要なものとして型変数を割り当てる
-    #[allow(dead_code)]
-    fn fresh_gen_ty(&mut self, ty: Ty, subst: &mut HashMap<LocalGenDefId, Ty>) -> Ty {
-        match ty.kind {
-            TyKind::Int
-            | TyKind::Float
-            | TyKind::Bool
-            | TyKind::Infer(_)
-            | TyKind::Void
-            | TyKind::LocGen(_) => ty,
-            TyKind::Fn(fty) => Ty::new(
-                TyKind::Fn(FnTy {
-                    args: fty
-                        .args
-                        .into_iter()
-                        .map(|a| self.fresh_loc_gen_ty(a, subst))
-                        .collect(),
-                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty, subst)),
-                    genargs: fty.genargs,
-                }),
-                ty.span,
-            ),
-            TyKind::Defined(defined_ty) => Ty::new(
-                TyKind::Defined(DefinedTy {
-                    def_id: defined_ty.def_id,
-                    genargs: defined_ty
-                        .genargs
-                        .into_iter()
-                        .map(|g| self.fresh_loc_gen_ty(g, subst))
-                        .collect(),
-                }),
-                ty.span,
-            ),
-            TyKind::Gen(_) => Ty::new(self.fresh(), ty.span),
         }
     }
 
@@ -1445,7 +1676,12 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
     //  - 引数と戻り値の両方に `T` が出る関数で両者が繋がらない
     //  - 呼び出し位置でどの `T` がどう決まったのかを後から辿れない
     // ことになり、単相化が必要とする割り当てを記録できない。
-    fn fresh_loc_gen_ty(&mut self, ty: Ty, subst: &mut HashMap<LocalGenDefId, Ty>) -> Ty {
+    fn fresh_loc_gen_ty(
+        &mut self,
+        ty: Ty,
+        declared: &HashSet<LocalGenDefId>,
+        subst: &mut HashMap<LocalGenDefId, Ty>,
+    ) -> Ty {
         match ty.kind {
             TyKind::Int
             | TyKind::Float
@@ -1458,9 +1694,9 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     args: fty
                         .args
                         .into_iter()
-                        .map(|a| self.fresh_loc_gen_ty(a, subst))
+                        .map(|a| self.fresh_loc_gen_ty(a, declared, subst))
                         .collect(),
-                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty, subst)),
+                    rty: Box::new(self.fresh_loc_gen_ty(*fty.rty, declared, subst)),
                     genargs: fty.genargs,
                 }),
                 ty.span,
@@ -1471,12 +1707,20 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
                     genargs: defined_ty
                         .genargs
                         .into_iter()
-                        .map(|g| self.fresh_loc_gen_ty(g, subst))
+                        .map(|g| self.fresh_loc_gen_ty(g, declared, subst))
                         .collect(),
                 }),
                 ty.span,
             ),
             TyKind::LocGen(lgid) => {
+                // 呼び先が宣言していないジェネリック引数は、
+                // **呼び出し元自身のもの**である。触ってはならない。
+                //
+                // 触ると呼び出し元の `T` が型変数に化けて戻り値が解けなくなり、
+                // `.biwamir` にも「呼び先が宣言していない引数」が書かれてしまう。
+                if !declared.contains(&lgid) {
+                    return ty;
+                }
                 if let Some(assigned) = subst.get(&lgid) {
                     return Ty::new(assigned.kind.clone(), ty.span);
                 }
@@ -1845,7 +2089,18 @@ impl<'a> TyCtx<'a> {
         // trait 越しのメソッド解決は「その関数が置かれているモジュールで
         // どの trait が import されているか」で決まるので、
         // シグニチャの span からモジュールを引いて持ち回る。
-        let mut fctx = FnTyCtx::new(self, fn_signature.rty.clone(), fn_signature.span.module());
+        let genarg_bounds: HashMap<LocalGenDefId, Vec<TraitCond>> = fn_signature
+            .all_genargs()
+            .filter(|g| !g.bounds.is_empty())
+            .map(|g| (g.def_id, g.bounds.clone()))
+            .collect();
+
+        let mut fctx = FnTyCtx::new(
+            self,
+            fn_signature.rty.clone(),
+            fn_signature.span.module(),
+            genarg_bounds,
+        );
 
         // シグネチャに現れる型は codegen が型注釈として出力するため、
         // 外部パッケージのものは import が必要になる。
@@ -1897,6 +2152,11 @@ impl<'a> TyCtx<'a> {
                 rty: Box::new(fctx.rty),
             });
         };
+
+        // 積んでおいた制限の宿題を解く。
+        //
+        // 呼び出し位置ではまだ型変数だったものが、ここでは決まっている。
+        fctx.solve_obligations()?;
 
         // 記録した型に残っている型変数を、最後にまとめて解く。
         let expr_tys = fctx
@@ -2064,5 +2324,26 @@ impl<'a> TyCtx<'a> {
         }
 
         Ok(())
+    }
+}
+
+/// 型に現れるローカルなジェネリック引数を集める。
+fn collect_loc_gens(ty: &Ty, out: &mut HashSet<LocalGenDefId>) {
+    match &ty.kind {
+        TyKind::LocGen(lgid) => {
+            out.insert(*lgid);
+        }
+        TyKind::Defined(dt) => {
+            for g in &dt.genargs {
+                collect_loc_gens(g, out);
+            }
+        }
+        TyKind::Fn(fty) => {
+            for a in &fty.args {
+                collect_loc_gens(a, out);
+            }
+            collect_loc_gens(&fty.rty, out);
+        }
+        _ => {}
     }
 }

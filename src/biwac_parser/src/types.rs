@@ -148,10 +148,15 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
     /// ジェネリック型引数宣言は、そのスコープで始めて現れるジェネリック型の宣言であり、
     /// その引数列には<identifier>しか含まれない。
     /// ジェネリック型を具体化するときのジェネリック型引数の代入列とは別の意味合いである。
+    // "[" ( <identifier> ( ":" <typ> ( "&&" <typ> )* )? ","? )* "]"
+    //
+    // 制限 (`T: Gyao && Conv[Int]`) は trait でなければならないが、
+    // 書かれ方は型とまったく同じなので、ここでは型として読む。
+    // trait であることの検査は名前解決が行う。
     pub(crate) fn opt_consume_generic_argument_declaration<I>(
         &mut self,
     ) -> Result<Option<GenArgsDecl<I>>, ParseError<'src>> {
-        let mut genargs = vec![];
+        let mod_id = self.mod_id;
         let begin = if let Some(t) = self.peek()
             && matches!(t.kind, TkKind::MarkLBracket)
         {
@@ -162,56 +167,54 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             return Ok(None);
         };
 
-        loop {
-            if let Some(t) = self.peek()
-                && let TkKind::MarkRBracket = t.kind
-            {
+        let mut genargs: Vec<GenArgDeclItem<I>> = vec![];
+
+        let end = loop {
+            let t = self.peek().ok_or(ParseError::InvalidEOF {
+                mod_id,
+                expecteds: vec![TkKindName::MarkRBracket],
+            })?;
+            if let TkKind::MarkRBracket = t.kind {
                 let end = t.span.clone();
                 self.next();
+                break end;
+            }
 
-                return Ok(Some(GenArgsDecl {
-                    genargs: genargs
-                        .into_iter()
-                        .map(|id| GenArgDeclItem::<I> {
-                            id,
-                            def_id: OnceCell::<I>::new(),
-                        })
-                        .collect(),
-                    span: Span::merge(&begin, &end),
-                }));
-            } else {
-                genargs.push(self.consume_identifier()?);
+            let id = self.consume_identifier()?;
 
-                if let Some(t) = self.next() {
-                    if let TkKind::MarkRBracket = t.kind {
-                        let end = t.span.clone();
-
-                        return Ok(Some(GenArgsDecl {
-                            genargs: genargs
-                                .into_iter()
-                                .map(|id| GenArgDeclItem::<I> {
-                                    id,
-                                    def_id: OnceCell::<I>::new(),
-                                })
-                                .collect(),
-                            span: Span::merge(&begin, &end),
-                        }));
-                    } else if let TkKind::MarkComma = t.kind {
-                        continue;
-                    } else {
-                        return Err(ParseError::InvalidToken {
-                            expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
-                            found: t.clone(),
-                        });
+            let mut bounds = vec![];
+            if self
+                .consume_next_if_match(vec![TkKindName::MarkColon])
+                .is_some()
+            {
+                loop {
+                    bounds.push(self.consume_type_representaion()?);
+                    if self
+                        .consume_next_if_match(vec![TkKindName::MarkAndAnd])
+                        .is_none()
+                    {
+                        break;
                     }
-                } else {
-                    return Err(ParseError::InvalidEOF {
-                        mod_id: self.mod_id,
-                        expecteds: vec![TkKindName::MarkRBracket, TkKindName::MarkComma],
-                    });
                 }
             }
-        }
+
+            genargs.push(GenArgDeclItem::<I> {
+                id,
+                def_id: OnceCell::<I>::new(),
+                bounds,
+            });
+
+            let t =
+                self.must_consume_next(vec![TkKindName::MarkComma, TkKindName::MarkRBracket])?;
+            if let TkKind::MarkRBracket = t.kind {
+                break t.span.clone();
+            }
+        };
+
+        Ok(Some(GenArgsDecl {
+            genargs,
+            span: Span::merge(&begin, &end),
+        }))
     }
 
     /// Optionaly consumes tokens and parses to get generic arguments.

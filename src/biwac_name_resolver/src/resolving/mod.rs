@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use biwac_base::{IdentInterner, InternedIdent, ModId};
 use biwac_hir::TyTraitImpl;
 use biwac_package_loader::{LoadedModule, Pkg};
-use biwac_span::{TraitDefId, TyDefId};
+use biwac_span::{TraitAssocDefId, TraitDefId, TyDefId};
 
 use crate::{
     ModuleNameTree, NameTree, ResolveError, ResolveErrorHandler, TyNameTree,
@@ -51,6 +51,7 @@ pub(crate) fn resolve_in_self_package(
     // 表はここで完成している。
     // `def_collector` は下で可変借用するので、複製を取って持ち回る。
     let trait_impls = def_collector.impl_collector.trait_impls.clone();
+    let trait_items = def_collector.trait_items.clone();
     let mut trait_scopes: HashMap<ModId, Vec<TraitDefId>> = HashMap::new();
 
     resolve_in_module(
@@ -63,6 +64,7 @@ pub(crate) fn resolve_in_self_package(
         &mod_index,
         interner,
         &trait_impls,
+        &trait_items,
         &mut trait_scopes,
     )?;
 
@@ -80,6 +82,7 @@ fn resolve_in_module(
     mod_index: &HashMap<ModId, &ModuleNameTree>,
     interner: &IdentInterner,
     trait_impls: &HashMap<TyDefId, Vec<TyTraitImpl>>,
+    trait_items: &HashMap<TraitDefId, Vec<(InternedIdent, TraitAssocDefId)>>,
     trait_scopes: &mut HashMap<ModId, Vec<TraitDefId>>,
 ) -> Result<(), Vec<ResolveError>> {
     let ctx = ModuleResolveCtx::new(
@@ -91,7 +94,7 @@ fn resolve_in_module(
         mod_index,
         interner,
     )?
-    .with_trait_impls(trait_impls);
+    .with_trait_impls(trait_impls, trait_items);
 
     let mut errors = Vec::new();
 
@@ -145,6 +148,7 @@ fn resolve_in_module(
                     mod_index,
                     interner,
                     trait_impls,
+                    trait_items,
                     trait_scopes,
                 )
                 .handle(&mut errors);

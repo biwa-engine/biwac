@@ -220,6 +220,7 @@ pub(crate) fn pre_lex<'src>(
                             ('-', '>') => Some(TkKind::MarkArrow),
                             ('=', '>') => Some(TkKind::MarkFatArrow),
                             (':', ':') => Some(TkKind::MarkDoubleColon),
+                            ('&', '&') => Some(TkKind::MarkAndAnd),
                             _ => None,
                         }
                     {

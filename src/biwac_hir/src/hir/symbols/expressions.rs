@@ -4,7 +4,7 @@ use biwac_ast::{
     BinOperator, BoolLiteral, FloatLiteral, IntegerLiteral, StringLiteral, UnOperator, VariantShape,
 };
 use biwac_base::InternedIdent;
-use biwac_span::{Span, TyDefId, ValDefId, VarId, VariantDefId};
+use biwac_span::{Span, TraitAssocDefId, TyDefId, ValDefId, VarId, VariantDefId};
 
 use crate::{Ident, Stmt, Ty};
 
@@ -289,6 +289,23 @@ pub enum Callee {
         def_id: ValDefId,
         self_ty: Ty,
     },
+    /// trait 越しで、まだ実装が決まっていない呼び出し (`T::guee(..)`)。
+    ///
+    /// `self_ty` は呼び出し位置に書かれた型で、`TyKind::LocGen` である。
+    /// 実装は単相化で決まる。
+    TraitAssoc {
+        assoc: TraitAssocDefId,
+        self_ty: Ty,
+    },
+}
+
+/// メソッド呼び出しの解決先。
+#[derive(Debug, Clone, Copy)]
+pub enum MethodTarget {
+    /// 実装が確定している。
+    Direct(ValDefId),
+    /// レシーバがジェネリック引数なので、実装は単相化で決まる。
+    Trait(TraitAssocDefId),
 }
 
 #[derive(Debug, Clone)]
@@ -304,7 +321,8 @@ pub struct MethodCall {
     pub method: Ident,
     pub args: Vec<Expr>,
     pub span: Span,
-    pub def_id: OnceCell<ValDefId>,
+    /// 型推論が埋める解決先。
+    pub target: OnceCell<MethodTarget>,
 }
 
 #[derive(Debug, Clone)]

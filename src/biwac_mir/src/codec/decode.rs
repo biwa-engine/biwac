@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use biwac_base::{IdentInterner, InternedIdent, PackageId, PackageName};
 use biwac_hash::Hash64;
 use biwac_hir::{DefinedTy, FnTy, Ty, TyKind};
-use biwac_span::{DefId, GenDefId, LocalGenDefId, PackageLocalDefId, Span, TyDefId, ValDefId};
+use biwac_span::{
+    DefId, GenDefId, LocalGenDefId, PackageLocalDefId, Span, TraitAssocDefId, TyDefId, ValDefId,
+};
 
 use crate::codec::{BIWAC_MIR_FORMAT_VERSION, DecodedMir, MirDecodeError};
 use crate::{
@@ -611,11 +613,27 @@ impl Decoder<'_> {
                         let genargs = self.genargs_ref(toks.get(5).copied().unwrap_or(""))?;
                         (Callee::Direct { def_id, genargs }, 6)
                     }
+                    Some("t") => {
+                        let assoc = TraitAssocDefId::new(self.parse_sym(toks.get(4))?);
+                        let self_ty = self.ty_ref(toks.get(5).copied().unwrap_or(""))?;
+                        let genargs = self.genargs_ref(toks.get(6).copied().unwrap_or(""))?;
+                        (
+                            Callee::TraitAssoc {
+                                assoc,
+                                self_ty,
+                                genargs,
+                            },
+                            7,
+                        )
+                    }
                     Some("i") => {
                         let op = self.parse_operand(toks.get(4).copied().unwrap_or(""))?;
                         (Callee::Indirect(op), 5)
                     }
-                    _ => return self.err("call must be `d` (direct) or `i` (indirect)"),
+                    _ => {
+                        return self
+                            .err("call must be `d` (direct), `t` (trait assoc) or `i` (indirect)");
+                    }
                 };
 
                 let mut args = Vec::new();

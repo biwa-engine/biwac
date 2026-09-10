@@ -669,6 +669,24 @@ fn load_analyze_and_codegen_single_package(
 
     match options.target {
         Target::TypeScript => {
+            // TypeScript は tier 2 で、ジェネリクスの trait 制限に未対応である。
+            //
+            // ジェネリクスを保ったまま 1 回だけ出力する設計なので、
+            // 実行時に型引数が残らず、`T::guee()` の呼び先を決められない。
+            // 対応するには witness (辞書) を引数で渡す仕組みが要る
+            // (`docs/trait.md` の第 3 段)。
+            //
+            // 黙って壊れたものを出さないよう、codegen の手前で止める。
+            // MIR は TypeScript でも組み立てているので、ここで見られる。
+            let unsupported: Vec<TraitBoundOnTypeScript> = trait_calls_in(&mir)
+                .into_iter()
+                .map(|span| TraitBoundOnTypeScript { span })
+                .collect();
+            if !unsupported.is_empty() {
+                print_errors(&unsupported, interner, &srcs, metadata);
+                return Err(());
+            }
+
             // codegen も lang item を使う。
             // novel statement を std の関数呼び出しに展開するため。
             // 外部パッケージのメタデータはシンボル名のマングリングに使う
@@ -975,6 +993,48 @@ fn check_attributes(
 }
 
 /// 収集済みのエラーをまとめて表示する。
+/// TypeScript ターゲットが扱えない、実装が単相化まで決まらない呼び出し。
+struct TraitBoundOnTypeScript {
+    span: biwac_span::Span,
+}
+
+impl biwac_base::BiwacError for TraitBoundOnTypeScript {
+    fn print_error_message(&self, ctx: &biwac_base::ErrorContext) {
+        ctx.diagnostic("The TypeScript target does not support trait bounds on generics yet.")
+            .label(
+                biwac_base::DiagSpan::new(self.span.module(), self.span.begin(), self.span.end()),
+                "the implementation cannot be chosen here",
+            )
+            .note(
+                "TypeScript keeps generics instead of monomorphizing, \
+                 so the type argument is gone at run time; \
+                 build for the wasm target, or avoid the bound",
+            )
+            .print();
+    }
+}
+
+/// 実装がまだ決まっていない呼び出しの位置を集める。
+fn trait_calls_in(mir: &biwac_mir::Mir) -> Vec<biwac_span::Span> {
+    let mut out = Vec::new();
+    for item in mir.items.values() {
+        let biwac_mir::MirItem::Body(body) = item else {
+            continue;
+        };
+        for block in &body.blocks {
+            if let biwac_mir::TerminatorKind::Call {
+                callee: biwac_mir::Callee::TraitAssoc { .. },
+                ..
+            } = &block.term.kind
+            {
+                out.push(block.term.span.clone());
+            }
+        }
+    }
+    out.sort_by_key(|s| s.begin());
+    out
+}
+
 fn print_errors<E: biwac_base::BiwacError>(
     errors: &[E],
     interner: &biwac_base::IdentInterner,
@@ -1369,8 +1429,12 @@ mod tests {
         //
         // `scene main` -> `foo()` は `Pair::new(l, z)` と `Pair::new(x, ...)` を呼び、
         // 前者は [Line, Int]、後者は [Int, Int] になる。
+        // 制限つきのジェネリクス (`Wrapper[T: Level]` など) も
+        // 満たす型ごとに実体化される。
+        //
         // 名前を引く経路をテストに持ち込みたくないので、
         // 「2 つ以上の実体を持つ def_id」として見る。
+        // いくつあるかはフィクスチャ次第なので、性質だけを見る。
         let mut by_def: std::collections::HashMap<biwac_span::ValDefId, Vec<&biwac_mir::GenArgs>> =
             std::collections::HashMap::new();
         for inst in &mono.instances {
@@ -1380,18 +1444,23 @@ mod tests {
                 .push(&inst.key.args);
         }
         let multi: Vec<_> = by_def.iter().filter(|(_, v)| v.len() > 1).collect();
-        assert_eq!(
-            multi.len(),
-            1,
-            "exactly one function (Pair::new) should have several instances, got {:?}",
-            multi
-                .iter()
-                .map(|(k, v)| (k.value(), v.len()))
-                .collect::<Vec<_>>()
+        assert!(
+            !multi.is_empty(),
+            "a generic function should have several instances"
         );
-        let (_, args) = multi[0];
-        assert_eq!(args.len(), 2, "Pair::new should have two instances");
-        assert_ne!(args[0], args[1], "the two instances must differ");
+        for (def_id, args) in &multi {
+            // 同じ引数列の実体が 2 つできていたら、実体化の鍵が壊れている。
+            for (i, a) in args.iter().enumerate() {
+                for b in &args[i + 1..] {
+                    assert_ne!(
+                        a,
+                        b,
+                        "val#{} has two instances with the same generic arguments",
+                        def_id.value()
+                    );
+                }
+            }
+        }
 
         // どの実体にもジェネリック型が残っていないこと。
         for inst in &mono.instances {

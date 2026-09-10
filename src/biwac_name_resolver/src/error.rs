@@ -204,6 +204,14 @@ pub enum ResolveError {
         candidates: Vec<TraitDefId>,
     },
 
+    /// 型定義のジェネリック引数に制限が書かれた。
+    ///
+    /// 使い道がディスパッチではなく検査だけなので、まだ入れていない
+    /// (`docs/trait.md` の第 3 段)。
+    TraitBoundOnTypeDefUnsupported {
+        span: Span,
+    },
+
     /// 実装はあるが、その trait が import されていない。
     TraitNotInScope {
         segment: PathSegment,
@@ -254,6 +262,7 @@ fn def_id_kind_name(kind: &DefIdKind) -> &'static str {
         DefIdKind::Gen(_) | DefIdKind::LocalGen(_) => "a generic parameter",
         DefIdKind::Var(_) => "a variable",
         DefIdKind::Trait(_) => "a trait",
+        DefIdKind::TraitAssoc(_) => "a trait item",
     }
 }
 
@@ -610,6 +619,16 @@ impl BiwacError for ResolveError {
                 } else {
                     diag.sub_label(at(decl_span), "declared here").print();
                 }
+            }
+
+            Self::TraitBoundOnTypeDefUnsupported { span } => {
+                ctx.diagnostic("A trait bound cannot be written on a type definition yet.")
+                    .label(at(span), "this bound is not supported here")
+                    .note(
+                        "bounds are supported on `fn` and `impl` generic parameters; \
+                         on a type definition they would only be checked, never dispatched on",
+                    )
+                    .print();
             }
 
             Self::TraitAssocNotFound { segment } => {

@@ -219,7 +219,7 @@ pub(crate) fn lower_primary(
                 method: Ident::from(mc.method.clone()),
                 args,
                 span: mc.span.clone(),
-                def_id: OnceCell::new(),
+                target: OnceCell::new(),
             }))
         }
 
@@ -291,6 +291,11 @@ fn lower_callee(path: &biwac_ast::Path, errors: &mut Vec<ResolveError>) -> Optio
             None => Some(Callee::Fn(vid)),
         },
         Ok(DefIdKind::Var(vid)) => Some(Callee::Var(vid)),
+        // `T::guee(..)`。実装は単相化まで決まらない。
+        Ok(DefIdKind::TraitAssoc(assoc)) => Some(Callee::TraitAssoc {
+            assoc,
+            self_ty: genarg_self_ty(path)?,
+        }),
         Ok(DefIdKind::Ty(tid)) => {
             errors.push(ResolveError::ValueNotFoundTypeFound {
                 path: Box::new(path.clone()),
@@ -339,6 +344,15 @@ fn assoc_fn_self_ty(path: &biwac_ast::Path) -> Option<Ty> {
         }),
         owner.span(),
     ))
+}
+
+/// `T::guee(..)` の `T` をジェネリック引数の型として取り出す。
+fn genarg_self_ty(path: &biwac_ast::Path) -> Option<Ty> {
+    let owner = path.segments.first()?;
+    let Some(PathSegmentResolution::Ok(DefIdKind::LocalGen(lgid))) = owner.resolved_id.get() else {
+        return None;
+    };
+    Some(Ty::new(TyKind::LocGen(*lgid), owner.span()))
 }
 
 fn lower_literal(

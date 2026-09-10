@@ -296,6 +296,10 @@ pub(crate) fn ty_def_id_kind_from_path(path: &Path) -> Result<TyDefIdKind, Resol
             path: Box::new(path.clone()),
             def_id,
         }),
+        // trait の項目は値である。
+        DefIdKind::TraitAssoc(_) => Err(ResolveError::PathResolutionFailed {
+            path: Box::new(path.clone()),
+        }),
         DefIdKind::Var(var_id) => Err(ResolveError::TypeNotFoundVariableFound {
             path: Box::new(path.clone()),
             var_id,

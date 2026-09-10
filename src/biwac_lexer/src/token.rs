@@ -57,6 +57,7 @@ pub enum TkKind<'src> {
     MarkSlash,                // /
     MarkPercent,              // %
     MarkAmpersand,            // &
+    MarkAndAnd,               // &&
     MarkLesser,               // <
     MarkGreater,              // >
     MarkLesEq,                // <=
@@ -117,6 +118,7 @@ impl TkKind<'_> {
             Self::MarkSlash => "/".to_string(),
             Self::MarkPercent => "%".to_string(),
             Self::MarkAmpersand => "&".to_string(),
+            Self::MarkAndAnd => "&&".to_string(),
             Self::MarkLesser => "<".to_string(),
             Self::MarkGreater => ">".to_string(),
             Self::MarkLesEq => "<=".to_string(),
@@ -178,6 +180,7 @@ pub enum TkKindName {
     MarkSlash,       // /
     MarkPercent,     // %
     MarkAmpersand,   // &
+    MarkAndAnd,      // &&
     MarkLesser,      // <
     MarkGreater,     // >
     MarkLesEq,       // <=
@@ -238,6 +241,7 @@ impl TkKind<'_> {
             Self::MarkSlash => TkKindName::MarkSlash,   // /
             Self::MarkPercent => TkKindName::MarkPercent, // %
             Self::MarkAmpersand => TkKindName::MarkAmpersand, // &
+            Self::MarkAndAnd => TkKindName::MarkAndAnd, // &&
             Self::MarkLesser => TkKindName::MarkLesser, // <
             Self::MarkGreater => TkKindName::MarkGreater, // >
             Self::MarkLesEq => TkKindName::MarkLesEq,   // <=
@@ -300,6 +304,7 @@ impl TkKindName {
             Self::MarkSlash => "/".to_string(),
             Self::MarkPercent => "%".to_string(),
             Self::MarkAmpersand => "&".to_string(),
+            Self::MarkAndAnd => "&&".to_string(),
             Self::MarkLesser => "<".to_string(),
             Self::MarkGreater => ">".to_string(),
             Self::MarkLesEq => "<=".to_string(),

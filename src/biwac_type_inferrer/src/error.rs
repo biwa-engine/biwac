@@ -79,6 +79,13 @@ pub enum TyError {
         method: Box<Ident>,
     },
 
+    /// ジェネリック引数に付いた制限が満たされていない。
+    TraitBoundNotSatisfied {
+        ty: Box<Ty>,
+        trait_def_id: biwac_span::TraitDefId,
+        span: Span,
+    },
+
     /// バリアントの書き方が宣言と食い違う
     /// (`Rgb(Int)` を `Rgb { .. }` で作るなど)。
     VariantShapeMismatched {
@@ -430,6 +437,15 @@ impl BiwacError for TyErrorReport {
                 .print();
             }
 
+            TyError::TraitBoundNotSatisfied { ty, span, .. } => {
+                let ty = names.render(&ty.kind);
+
+                ctx.diagnostic(format!("`{ty}` does not satisfy the required trait."))
+                    .label(at(span), format!("`{ty}` is used here"))
+                    .note("the generic parameter it is assigned to declares a trait bound")
+                    .print();
+            }
+
             TyError::AmbiguousMethod { ty, method } => {
                 let name = ident_str(&method.id);
                 let ty = names.render(&ty.kind);
@@ -543,6 +559,7 @@ pub(crate) fn error_tys(error: &TyError) -> Vec<&Ty> {
         | TyError::MethodNotFound { ty, .. }
         | TyError::MethodNotInScope { ty, .. }
         | TyError::AmbiguousMethod { ty, .. }
+        | TyError::TraitBoundNotSatisfied { ty, .. }
         | TyError::OccursCheckFailed { ty, .. } => vec![ty],
 
         TyError::TypeConfliced { t1, t2 } => vec![t1, t2],

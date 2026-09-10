@@ -32,6 +32,8 @@ pub struct TyCtx<'a> {
     /// 外部パッケージ分は get_ty_impl で struct を遅延ロードした際に追加。
     /// get_value_definition から assoc fn を引く際に使用する。
     pub(super) ext_assoc_val_map: RefCell<HashMap<ValDefId, (TyDefId, InternedIdent)>>,
+    /// 外部パッケージの trait 宣言の遅延キャッシュ。同上。
+    pub(super) ext_trait_cache: RefCell<HashMap<TraitDefId, Box<biwac_hir::TraitDef>>>,
 }
 
 impl<'a> TyCtx<'a> {
@@ -48,6 +50,7 @@ impl<'a> TyCtx<'a> {
             interner: RefCell::new(interner),
             ext_ty_cache: RefCell::new(HashMap::new()),
             ext_assoc_val_map: RefCell::new(HashMap::new()),
+            ext_trait_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -126,9 +129,9 @@ impl<'a> TyCtx<'a> {
         let interner = self.interner.borrow();
 
         let push_signature = |sig: &FnSignature, out: &mut HashMap<u64, String>| {
-            for (ident, def_id) in &sig.genargs {
-                if let Some(name) = interner.get_str(&ident.id) {
-                    out.insert(def_id.value(), name.to_string());
+            for g in &sig.genargs {
+                if let Some(name) = interner.get_str(&g.name.id) {
+                    out.insert(g.def_id.value(), name.to_string());
                 }
             }
         };
@@ -285,6 +288,60 @@ impl<'a> TyCtx<'a> {
         Some((owner, enum_def.variants.get(owner.index as usize)?.clone()))
     }
 
+    /// trait の宣言を引く。外部パッケージは遅延ロードしてキャッシュする。
+    pub(super) fn get_trait_def(&self, def_id: &TraitDefId) -> Option<&biwac_hir::TraitDef> {
+        if def_id.pkg().is_self() {
+            return self.hir.traits.get(def_id);
+        }
+
+        {
+            let cache = self.ext_trait_cache.borrow();
+            if let Some(b) = cache.get(def_id) {
+                // SAFETY: `ext_ty_cache` と同じ理由。
+                // Box はヒープ番地が安定しており、append-only で削除が無い。
+                return Some(unsafe { &*(b.as_ref() as *const biwac_hir::TraitDef) });
+            }
+        }
+
+        let pkg_id = def_id.pkg();
+        let dep = self.find_ext_dep(pkg_id)?;
+        let trait_def = {
+            let mut ig = self.interner.borrow_mut();
+            dep.get_ext_trait_def(def_id.local_idx(), pkg_id, &mut ig)?
+        };
+
+        let mut cache = self.ext_trait_cache.borrow_mut();
+        let b = cache.entry(*def_id).or_insert_with(|| Box::new(trait_def));
+        // SAFETY: 同上
+        Some(unsafe { &*(b.as_ref() as *const biwac_hir::TraitDef) })
+    }
+
+    /// trait の項目の宣言を引く。
+    pub(super) fn get_trait_item(
+        &self,
+        assoc: &biwac_span::TraitAssocDefId,
+    ) -> Option<(&biwac_hir::TraitDef, &biwac_hir::TraitItemDef)> {
+        let owner = match self.hir.trait_assoc_owners.get(assoc) {
+            Some(owner) => *owner,
+            None => {
+                // 外部パッケージ。項目のシンボルから親 trait を引く。
+                let dep = self.find_ext_dep(assoc.pkg())?;
+                let (trait_sym, index) = dep.trait_assoc_owner(assoc.local_idx())?;
+                biwac_hir::TraitAssocOwner {
+                    trait_def_id: TraitDefId::new(biwac_span::DefId::new(
+                        assoc.pkg(),
+                        biwac_span::PackageLocalDefId::new(trait_sym),
+                    )),
+                    index,
+                }
+            }
+        };
+
+        let trait_def = self.get_trait_def(&owner.trait_def_id)?;
+        let item = trait_def.items.get(owner.index as usize)?;
+        Some((trait_def, item))
+    }
+
     /// enum の定義を引く。
     pub(super) fn get_enum_definition(&self, def_id: &TyDefId) -> Option<&EnumDef> {
         match self.get_type_definition(def_id)? {
@@ -371,10 +428,15 @@ impl<'a> TyCtx<'a> {
     }
 
     /// 1 つのモジュールに閉じた [`TraitEnv`] を作る。
-    pub(super) fn trait_env(&self, module: ModId) -> ModuleTraitEnv<'_, 'a> {
+    pub(super) fn trait_env(
+        &self,
+        module: ModId,
+        bounds: HashMap<LocalGenDefId, Vec<biwac_hir::TraitCond>>,
+    ) -> ModuleTraitEnv<'_, 'a> {
         ModuleTraitEnv {
             tctx: self,
             in_scope: self.traits_in_scope(module),
+            bounds,
         }
     }
 
@@ -383,16 +445,23 @@ impl<'a> TyCtx<'a> {
     /// まず直接の impl を探し、見つからなかったときに初めて trait を探す。
     /// `module` は呼び出し元の関数が置かれているモジュールで、
     /// どの trait がスコープにあるかを決める。
-    pub(super) fn get_method_def_id(
+    #[allow(clippy::type_complexity)]
+    pub(super) fn get_method_target(
         &self,
         ty: &Ty,
         method: &Ident,
         module: ModId,
-    ) -> Result<ValDefId, TyError> {
+        bounds: &HashMap<LocalGenDefId, Vec<biwac_hir::TraitCond>>,
+    ) -> Result<biwac_hir::MethodTarget, TyError> {
         let not_found = || TyError::MethodNotFound {
             ty: Box::new(ty.clone()),
             method: Box::new(method.clone()),
         };
+
+        // ジェネリック引数には直接の impl が無い。制限から探す。
+        if matches!(ty.kind, TyKind::LocGen(_) | TyKind::Gen(_)) {
+            return self.solve_method_by_trait(ty, method, module, bounds);
+        }
 
         let ty_def_id = ty.kind.def_id().ok_or_else(not_found)?;
 
@@ -426,8 +495,8 @@ impl<'a> TyCtx<'a> {
         }
 
         match matched.as_slice() {
-            [id] => Ok(*id),
-            [] => self.solve_method_by_trait(ty, method, module),
+            [id] => Ok(biwac_hir::MethodTarget::Direct(*id)),
+            [] => self.solve_method_by_trait(ty, method, module, bounds),
             _ => panic!("compiler bug: duplicated associated implementation registered"),
         }
     }
@@ -437,10 +506,12 @@ impl<'a> TyCtx<'a> {
         ty: &Ty,
         method: &Ident,
         module: ModId,
-    ) -> Result<ValDefId, TyError> {
-        let env = self.trait_env(module);
+        bounds: &HashMap<LocalGenDefId, Vec<biwac_hir::TraitCond>>,
+    ) -> Result<biwac_hir::MethodTarget, TyError> {
+        let env = self.trait_env(module, bounds.clone());
         match biwac_trait_solver::solve_method(&ty.kind, method.id, &env) {
-            Ok(Solved::Impl(def_id)) => Ok(def_id),
+            Ok(Solved::Impl(def_id)) => Ok(biwac_hir::MethodTarget::Direct(def_id)),
+            Ok(Solved::Deferred { assoc, .. }) => Ok(biwac_hir::MethodTarget::Trait(assoc)),
             Err(TraitSolveError::NotInScope { .. }) => Err(TyError::MethodNotInScope {
                 ty: Box::new(ty.clone()),
                 method: Box::new(method.clone()),
@@ -466,6 +537,23 @@ impl<'a> TyCtx<'a> {
 pub(super) struct ModuleTraitEnv<'tctx, 'a> {
     tctx: &'tctx TyCtx<'a>,
     in_scope: Vec<TraitDefId>,
+    /// いま推論している関数から見えるジェネリック引数の制限。
+    bounds: HashMap<LocalGenDefId, Vec<biwac_hir::TraitCond>>,
+}
+
+impl ModuleTraitEnv<'_, '_> {
+    /// 型の種類から trait impl を引く。プリミティブ型も扱う。
+    pub(super) fn trait_impls_of_kind(&self, kind: &TyKind) -> Vec<TyTraitImpl> {
+        let def_id = match kind {
+            TyKind::Defined(dt) => dt.def_id,
+            TyKind::Int => TyDefId::INT_TY_DEF_ID,
+            TyKind::Float => TyDefId::FLOAT_TY_DEF_ID,
+            TyKind::Bool => TyDefId::BOOL_TY_DEF_ID,
+            TyKind::Void => TyDefId::VOID_TY_DEF_ID,
+            _ => return Vec::new(),
+        };
+        self.trait_impls_of(def_id)
+    }
 }
 
 impl TraitEnv for ModuleTraitEnv<'_, '_> {
@@ -496,6 +584,19 @@ impl TraitEnv for ModuleTraitEnv<'_, '_> {
     fn traits_in_scope(&self) -> &[TraitDefId] {
         &self.in_scope
     }
+
+    fn trait_item(
+        &self,
+        trait_def_id: TraitDefId,
+        name: InternedIdent,
+    ) -> Option<biwac_span::TraitAssocDefId> {
+        let trait_def = self.tctx.get_trait_def(&trait_def_id)?;
+        trait_def.item(&name).map(|(_, item)| item.def_id)
+    }
+
+    fn bounds_of_local_gen(&self, def_id: LocalGenDefId) -> Vec<biwac_hir::TraitCond> {
+        self.bounds.get(&def_id).cloned().unwrap_or_default()
+    }
 }
 
 pub struct FnTyCtx<'tctx, 'a> {
@@ -503,6 +604,14 @@ pub struct FnTyCtx<'tctx, 'a> {
     /// いま推論している関数が置かれているモジュール。
     /// trait 越しのメソッド解決で、どの trait がスコープにあるかを決める。
     pub(super) module: ModId,
+    /// いま推論している関数から見えるジェネリック引数の制限。
+    /// impl ブロックのぶんと関数自身のぶんの和である。
+    pub(super) genarg_bounds: HashMap<LocalGenDefId, Vec<biwac_hir::TraitCond>>,
+    /// 呼び出し位置で積まれた「この型がこの trait を満たすこと」という宿題。
+    ///
+    /// 呼び出しの時点では割り当てがまだ型変数のことがあるので、
+    /// 本体を推論し終えてからまとめて解く。
+    pub(super) obligations: Vec<Obligation>,
     next_tv: usize,
     pub(super) substitutions: HashMap<TyVar, Ty>,
     pub(super) vars: HashMap<VarId, Ty>,
@@ -514,6 +623,17 @@ pub struct FnTyCtx<'tctx, 'a> {
     pub(super) rty: Ty,
 }
 
+/// 呼び出し位置で積まれた制限の宿題。
+pub(super) struct Obligation {
+    /// 呼び先のジェネリック引数に割り当てられた型。
+    /// 本体を推論し終えてから `resolve_ty` を通す。
+    pub(super) ty: Ty,
+    /// 満たさなければならない制限。
+    pub(super) cond: biwac_hir::TraitCond,
+    /// 呼び出し位置。診断の下線に使う。
+    pub(super) span: biwac_span::Span,
+}
+
 // ある関数に対して型推論をした結果得られる型情報
 pub(super) struct TyInfo {
     pub(super) expr_tys: HashMap<ExprId, Ty>,
@@ -522,10 +642,17 @@ pub(super) struct TyInfo {
 }
 
 impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
-    pub(super) fn new(tctx: &'tctx TyCtx<'a>, rty: Ty, module: ModId) -> Self {
+    pub(super) fn new(
+        tctx: &'tctx TyCtx<'a>,
+        rty: Ty,
+        module: ModId,
+        genarg_bounds: HashMap<LocalGenDefId, Vec<biwac_hir::TraitCond>>,
+    ) -> Self {
         Self {
             tctx,
             module,
+            genarg_bounds,
+            obligations: Vec::new(),
             next_tv: 0,
             substitutions: HashMap::new(),
             vars: HashMap::new(),

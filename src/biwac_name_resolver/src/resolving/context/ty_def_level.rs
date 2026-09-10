@@ -66,6 +66,13 @@ impl<'ctx, C: ResolveCtx> TyDefResolveCtx<'ctx, C> {
 
         if let Some(genargs_decl) = genargs_decl {
             for item in &genargs_decl.genargs {
+                // 型定義のジェネリック引数への制限は未対応 (第 3 段)。
+                for bound in &item.bounds {
+                    errors.push(ResolveError::TraitBoundOnTypeDefUnsupported {
+                        span: bound.span.clone(),
+                    });
+                }
+
                 let def_id = if let Some(def_id) = item.def_id.get() {
                     *def_id
                 } else {

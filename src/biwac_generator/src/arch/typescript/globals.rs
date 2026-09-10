@@ -219,20 +219,21 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                     ctx.allocator,
                 )),
                 type_parameters: if !self.signature.genargs.is_empty()
-                    || !self.impl_genargs.is_empty()
+                    || !self.signature.impl_genargs.is_empty()
                 {
                     Some(oxc_allocator::Box::new_in(
                         oxc_ast::ast::TSTypeParameterDeclaration {
                             span: span(),
                             params: oxc_allocator::Vec::from_iter_in(
-                                self.impl_genargs
+                                self.signature
+                                    .impl_genargs
                                     .iter()
-                                    .map(|(_, lgid)| oxc_ast::ast::TSTypeParameter {
+                                    .map(|g| oxc_ast::ast::TSTypeParameter {
                                         span: span(),
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                ctx.allocator.alloc_str(&lgid.mangled(ctx)),
+                                                ctx.allocator.alloc_str(&g.def_id.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -242,7 +243,8 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for FnDef {
                                         out: false,
                                         r#const: false,
                                     })
-                                    .chain(self.signature.genargs.iter().map(|(_, lgid)| {
+                                    .chain(self.signature.genargs.iter().map(|g| {
+                                        let lgid = &g.def_id;
                                         oxc_ast::ast::TSTypeParameter {
                                             span: span(),
                                             name: oxc_ast::ast::BindingIdentifier {
@@ -389,20 +391,21 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                     ctx.allocator,
                 )),
                 type_parameters: if !self.signature.genargs.is_empty()
-                    || !self.impl_genargs.is_empty()
+                    || !self.signature.impl_genargs.is_empty()
                 {
                     Some(oxc_allocator::Box::new_in(
                         oxc_ast::ast::TSTypeParameterDeclaration {
                             span: span(),
                             params: oxc_allocator::Vec::from_iter_in(
-                                self.impl_genargs
+                                self.signature
+                                    .impl_genargs
                                     .iter()
-                                    .map(|(_, lgid)| oxc_ast::ast::TSTypeParameter {
+                                    .map(|g| oxc_ast::ast::TSTypeParameter {
                                         span: span(),
                                         name: oxc_ast::ast::BindingIdentifier {
                                             span: span(),
                                             name: oxc_span::Ident::new_const(
-                                                ctx.allocator.alloc_str(&lgid.mangled(ctx)),
+                                                ctx.allocator.alloc_str(&g.def_id.mangled(ctx)),
                                             ),
                                             symbol_id: Cell::new(None),
                                         },
@@ -412,7 +415,8 @@ impl<'a> AsOxcGlobal<'a, oxc_ast::ast::Statement<'a>> for NativeFnDef {
                                         out: false,
                                         r#const: false,
                                     })
-                                    .chain(self.signature.genargs.iter().map(|(_, lgid)| {
+                                    .chain(self.signature.genargs.iter().map(|g| {
+                                        let lgid = &g.def_id;
                                         oxc_ast::ast::TSTypeParameter {
                                             span: span(),
                                             name: oxc_ast::ast::BindingIdentifier {

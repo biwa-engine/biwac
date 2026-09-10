@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use biwac_base::ModPath;
-use biwac_span::{GenDefId, LocalGenDefId, TyDefId, ValDefId, VariantDefId};
+use biwac_span::{GenDefId, LocalGenDefId, TraitAssocDefId, TyDefId, ValDefId, VariantDefId};
 
 /// パッケージローカルな DefId と、`.biwameta` 上のシンボル索引の対応。
 ///
@@ -22,6 +22,7 @@ pub struct SymbolIndexMap {
     ty: HashMap<TyDefId, u32>,
     val: HashMap<ValDefId, u32>,
     variant: HashMap<VariantDefId, u32>,
+    trait_assoc: HashMap<TraitAssocDefId, u32>,
     /// 型定義のジェネリック引数 → (所属シンボルの索引, 序数)
     ty_genarg: HashMap<GenDefId, (u32, u32)>,
     /// (所属する関数のシンボル索引, ローカルジェネリック引数) → 序数
@@ -56,6 +57,10 @@ impl SymbolIndexMap {
         self.variant.get(def_id).copied()
     }
 
+    pub fn trait_assoc(&self, def_id: &TraitAssocDefId) -> Option<u32> {
+        self.trait_assoc.get(def_id).copied()
+    }
+
     /// (所属シンボルの索引, 序数)
     pub fn ty_genarg(&self, def_id: &GenDefId) -> Option<(u32, u32)> {
         self.ty_genarg.get(def_id).copied()
@@ -80,6 +85,10 @@ impl SymbolIndexMap {
 
     pub(crate) fn insert_variant(&mut self, def_id: VariantDefId, sym_idx: u32) {
         self.variant.insert(def_id, sym_idx);
+    }
+
+    pub(crate) fn insert_trait_assoc(&mut self, def_id: TraitAssocDefId, sym_idx: u32) {
+        self.trait_assoc.insert(def_id, sym_idx);
     }
 
     pub(crate) fn insert_ty_genarg(&mut self, def_id: GenDefId, owner: u32, ordinal: u32) {
