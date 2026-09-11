@@ -175,8 +175,20 @@ struct MyGameCharacters {}
 
 type MyGame = std::game::Game[MyGameCharacters, MyGameState];
 
+// 埋め込み式で出す値。
+fn greet_name() -> std::types::string::String {
+  greeter::greet("Biwa")
+}
+
 scene main(g: MyGame) -> MyGame {{
   Hello, World!
+
+  // `$` 埋め込み式。生テキストと式が 1 行の中で混ざる。
+  こんにちは $(greet_name()) さん。>>
+  関数呼び出しの形も $greet_name() 書ける。
+  メソッドチェーンも $("a".concat("b")) 使える。
+  括弧を含む文字列でも壊れない: $("(".concat(")"))
+  バックスラッシュで書いた記号はそのまま出る: 100\$
   #let x = native_add(1, 2)
   #if x > 2 {
     Nice!

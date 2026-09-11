@@ -168,6 +168,10 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                     ),
                 )],
             ),
+            Stmt::NovelWriteExpr(write) => {
+                let arg = write.expr.as_oxc_local(ctx, fctx);
+                novel_call(ctx, LangItem::Write, [oxc_ast::ast::Argument::from(arg)])
+            }
             Stmt::NovelWait(_) => novel_call(ctx, LangItem::Wait, []),
         }
     }

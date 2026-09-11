@@ -11,6 +11,7 @@ impl<C: LocalResolveCtx> LocalNameResolve<C> for biwac_ast::NovelStmt {
             biwac_ast::NovelStmt::VarDecl(var_decl) => var_decl.resolve(ctx),
             biwac_ast::NovelStmt::Assign(assign) => assign.resolve(ctx),
             biwac_ast::NovelStmt::NovelWrite(msg) => msg.resolve(ctx),
+            biwac_ast::NovelStmt::NovelWriteExpr(msg) => msg.expr.resolve(ctx),
             biwac_ast::NovelStmt::NovelWait(wait) => wait.resolve(ctx),
             biwac_ast::NovelStmt::NovelEndScene(end) => end.expr.resolve(ctx),
         }

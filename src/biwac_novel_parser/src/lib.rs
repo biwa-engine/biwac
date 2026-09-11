@@ -3,6 +3,9 @@ mod symbols;
 mod token;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use error::NovelParseError;
 pub use token::NovelSourceStream;
 

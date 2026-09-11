@@ -35,6 +35,24 @@ pub enum NovelParseError {
     StringLiteralNotClosed {
         span: Span,
     },
+
+    /// `$` の後ろが埋め込み式の形になっていない。
+    EmbeddedExpressionExpected {
+        span: Span,
+    },
+
+    /// 埋め込み式の括弧が同じ行で閉じていない。
+    EmbeddedExpressionNotClosed {
+        span: Span,
+    },
+
+    /// 埋め込み式が呼び出しで終わっていない。
+    ///
+    /// どこまでが式でどこからが地の文かを決められないため、
+    /// `$` の形は必ず `)` で終わらなければならない。
+    EmbeddedExpressionMustEndWithCall {
+        span: Span,
+    },
 }
 
 impl BiwacError for NovelParseError {
@@ -129,6 +147,68 @@ impl BiwacError for NovelParseError {
                             .with_color(Color::Red),
                     )
                     .with_note("a string literal in a scene block must be closed on the same line")
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::EmbeddedExpressionExpected { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("`$` must be followed by an embedded expression.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("an identifier or `(` is expected here")
+                            .with_color(Color::Red),
+                    )
+                    .with_note(
+                        "write `$(expr)` or `$name(..)`; to put a literal `$` in the text, write `\\$`",
+                    )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::EmbeddedExpressionNotClosed { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("Closing `)` expected, but not found.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("this is never closed")
+                            .with_color(Color::Red),
+                    )
+                    .with_note("an embedded expression must be closed on the same line")
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+            Self::EmbeddedExpressionMustEndWithCall { span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message("An embedded expression must end with a call.")
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("this does not end with `)`")
+                            .with_color(Color::Red),
+                    )
+                    .with_note(
+                        "otherwise the end of the expression cannot be told from the text \
+                         that follows; write `$(player.hp)` instead of `$player.hp`",
+                    )
                     .finish()
                     .print((file_name.as_str(), Source::from(&modsrc.src)))
                     .unwrap();

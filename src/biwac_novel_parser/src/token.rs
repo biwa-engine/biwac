@@ -221,6 +221,46 @@ impl<'src> NovelSourceStream<'src> {
         )
     }
 
+    /// 元のソースの `[begin, end)` に対する span。
+    pub(crate) fn span_of(&self, begin: usize, end: usize) -> Span {
+        Span::new(
+            self.span.module(),
+            self.span.begin() + begin,
+            self.span.begin() + end,
+        )
+    }
+
+    /// scene の DSL 本文そのもの。
+    pub(crate) fn src(&self) -> &'src str {
+        self.src
+    }
+
+    /// 埋め込み式を読むあいだ、行の範囲をその式に狭める。
+    ///
+    /// 戻り値は元の行の状態で、読み終えたら
+    /// [`Self::restore_line_after_embedded_expression`] に渡して戻す。
+    pub(crate) fn take_line_for_embedded_expression(
+        &mut self,
+        begin: usize,
+        end: usize,
+    ) -> (NovelLineHandler, Option<NCodeTokenOption<NCodeToken>>) {
+        let saved_line = std::mem::replace(
+            &mut self.current_line,
+            NovelLineHandler::new(begin, end, NovelLineKind::GeneralCommand),
+        );
+        let saved_peek = self.peeked.take();
+        (saved_line, saved_peek)
+    }
+
+    pub(crate) fn restore_line_after_embedded_expression(
+        &mut self,
+        saved: (NovelLineHandler, Option<NCodeTokenOption<NCodeToken>>),
+    ) {
+        let (line, peek) = saved;
+        self.current_line = line;
+        self.peeked = peek;
+    }
+
     pub(crate) fn indent_depth(&self) -> usize {
         self.nest_depth * BIWAC_NOVEL_INDENT_STEP_DEPTH
     }

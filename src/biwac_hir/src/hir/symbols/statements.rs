@@ -76,6 +76,13 @@ pub struct NovelWriteStmt {
 }
 
 #[derive(Debug, Clone)]
+pub struct NovelWriteExprStmt {
+    /// 出す値を決める式。
+    pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct NovelWaitStmt {
     pub span: Span,
 }
@@ -91,5 +98,7 @@ pub enum Stmt {
     VarDecl(VarDecl),
     Assign(AssignStmt),
     NovelWrite(NovelWriteStmt),
+    /// `$...` の埋め込み式。
+    NovelWriteExpr(NovelWriteExprStmt),
     NovelWait(NovelWaitStmt),
 }

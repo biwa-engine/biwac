@@ -1,8 +1,9 @@
 mod end_scene;
 mod if_stmt;
+mod raw_novel;
 mod vardecl;
 
-use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelMessage, NovelStmt, NovelWait};
+use biwac_ast::{AssignStmt, ExprStmt, Exprs, NovelStmt};
 use biwac_span::Span;
 
 use crate::{
@@ -11,7 +12,7 @@ use crate::{
 };
 
 /// ノベルテキスト中の待ちコマンド。
-const WAIT_COMMAND: &str = ">>";
+pub(super) const WAIT_COMMAND: &str = ">>";
 
 pub(crate) enum ParsedNovelStmt {
     // novel mode の範囲の末尾に来ている場合は EndOfRange を返すため、
@@ -26,62 +27,7 @@ impl<'src> NovelSourceStream<'src> {
         match self.next_line() {
             NovelLineOption::Some(line_handler) => {
                 match line_handler.kind() {
-                    NovelLineKind::RawNovel => {
-                        // TODO:
-                        // - 埋め込み式 $(expr) をパース
-
-                        let line = self.line_str(&line_handler);
-                        let span = self.line_span(&line_handler);
-
-                        // wait コマンド `>>`。
-                        //
-                        // 行がこれだけなら待つだけ、
-                        // 本文の後ろに付いていればその行を書いてから待つ。
-                        match line.trim_end().strip_suffix(WAIT_COMMAND) {
-                            Some(before) if before.trim().is_empty() => {
-                                Ok(ParsedNovelStmt::Stmts {
-                                    stmts: vec![NovelStmt::NovelWait(NovelWait {
-                                        span: Span::new(
-                                            span.module(),
-                                            span.begin() + before.len(),
-                                            span.end(),
-                                        ),
-                                    })],
-                                })
-                            }
-                            Some(before) => {
-                                // `>>` だけを取り除く。字下げと行末の改行は本文の一部として残す。
-                                let cut = line.rfind(WAIT_COMMAND).expect("suffix was found");
-                                let msg = format!(
-                                    "{}{}",
-                                    &line[..cut],
-                                    &line[cut + WAIT_COMMAND.len()..]
-                                );
-
-                                Ok(ParsedNovelStmt::Stmts {
-                                    stmts: vec![
-                                        NovelStmt::NovelWrite(NovelMessage {
-                                            msg,
-                                            span: span.clone(),
-                                        }),
-                                        NovelStmt::NovelWait(NovelWait {
-                                            span: Span::new(
-                                                span.module(),
-                                                span.begin() + before.len(),
-                                                span.end(),
-                                            ),
-                                        }),
-                                    ],
-                                })
-                            }
-                            None => Ok(ParsedNovelStmt::Stmts {
-                                stmts: vec![NovelStmt::NovelWrite(NovelMessage {
-                                    msg: line.to_string(),
-                                    span,
-                                })],
-                            }),
-                        }
-                    }
+                    NovelLineKind::RawNovel => self.consume_raw_novel_line(line_handler),
                     NovelLineKind::GeneralCommand => match self.peek_token()? {
                         NCodeTokenOption::Some(t) => match t.kind {
                             NCodeTkKind::KwIf => {

@@ -1904,6 +1904,14 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                 Ok(None)
             }
+            // `$...` の埋め込み式。
+            // 式の型が展開先の引数と噛み合うかをここで見る。
+            Stmt::NovelWriteExpr(write) => {
+                let ty = self.infer_expr(&write.expr)?;
+                self.check_novel_call(LangItem::Write, &[ty], &write.span)?;
+
+                Ok(None)
+            }
             Stmt::NovelWait(wait) => {
                 self.check_novel_call(LangItem::Wait, &[], &wait.span)?;
 

@@ -31,12 +31,12 @@ impl NovelLineHandler {
     }
 
     #[inline]
-    pub(super) fn begin_idx(&self) -> usize {
+    pub(crate) fn begin_idx(&self) -> usize {
         self.begin_idx
     }
 
     #[inline]
-    pub(super) fn end_idx(&self) -> usize {
+    pub(crate) fn end_idx(&self) -> usize {
         self.end_idx
     }
 

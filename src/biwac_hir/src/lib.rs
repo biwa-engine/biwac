@@ -23,7 +23,8 @@ pub use crate::hir::{
         },
         statements::{
             AssignStmt, BlockStmt, DecledVar, ExprStmt, IfStmt, MatchStmt, MatchStmtArm,
-            NovelWaitStmt, NovelWriteStmt, ReturnStmt, Stmt, VarDecl, WhileStmt,
+            NovelWaitStmt, NovelWriteExprStmt, NovelWriteStmt, ReturnStmt, Stmt, VarDecl,
+            WhileStmt,
         },
     },
     types::{DefinedTy, FnTy, InferTy, Ty, TyKind, TyVar},

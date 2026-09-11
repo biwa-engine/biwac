@@ -131,6 +131,14 @@ fn lower_novel_stmt(
             span: msg.span.clone(),
         })),
 
+        NovelStmt::NovelWriteExpr(msg) => {
+            let expr = lower_expr(ctx, &msg.expr, errors)?;
+            Some(Stmt::NovelWriteExpr(biwac_hir::NovelWriteExprStmt {
+                expr,
+                span: msg.span.clone(),
+            }))
+        }
+
         NovelStmt::NovelWait(wait) => Some(Stmt::NovelWait(NovelWaitStmt {
             span: wait.span.clone(),
         })),

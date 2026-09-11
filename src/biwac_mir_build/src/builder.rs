@@ -455,6 +455,11 @@ impl<'a> BodyBuilder<'a> {
                     w.span.clone(),
                 )
             }
+            // `$...` の埋め込み式。出す値が式で決まる点だけが違う。
+            Stmt::NovelWriteExpr(w) => {
+                let (bb, operand) = self.lower_operand(bb, &w.expr);
+                self.lower_syscall(bb, LangItem::Write, vec![operand], w.span.clone())
+            }
             Stmt::NovelWait(w) => {
                 self.lower_syscall(bb, LangItem::Wait, Vec::new(), w.span.clone())
             }
