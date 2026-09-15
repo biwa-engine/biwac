@@ -11,7 +11,6 @@ mod builder;
 
 use biwac_base::PackageId;
 use biwac_hir::{AssocValDefKind, Hir, ValDefKind};
-use biwac_lang_item::LangItemTable;
 use biwac_mir::Mir;
 use biwac_span::ValDefId;
 
@@ -20,7 +19,7 @@ use biwac_span::ValDefId;
 /// `pkg_id` はこのパッケージの [`PackageId`]。
 /// メモリ上のシンボルの `def_id.pkg()` は HIR と同じく `SELF` のままだが、
 /// ディスクに書くときに要るのでここで受け取っておく。
-pub fn build(hir: &Hir, lang_items: &LangItemTable, pkg_id: PackageId) -> Mir {
+pub fn build(hir: &Hir, pkg_id: PackageId) -> Mir {
     let mut mir = Mir::new(hir.pkg_name.clone(), pkg_id);
 
     // 先にシンボルを集めて **ValDefId 順に並べてから** 落とす。
@@ -73,16 +72,12 @@ pub fn build(hir: &Hir, lang_items: &LangItemTable, pkg_id: PackageId) -> Mir {
 
     for (def_id, source) in symbols {
         let item = match source {
-            Source::Val(ValDefKind::Fn(f)) => {
-                builder::build_fn(lang_items, &mut mir.strings, def_id, f)
-            }
+            Source::Val(ValDefKind::Fn(f)) => builder::build_fn(&mut mir.strings, def_id, f),
             Source::Val(ValDefKind::NovelScene(s)) => {
-                builder::build_scene(lang_items, &mut mir.strings, def_id, s)
+                builder::build_scene(&mut mir.strings, def_id, s)
             }
             Source::Val(ValDefKind::Native(n)) => builder::build_native_fn(def_id, n),
-            Source::Assoc(AssocValDefKind::Fn(f)) => {
-                builder::build_fn(lang_items, &mut mir.strings, def_id, f)
-            }
+            Source::Assoc(AssocValDefKind::Fn(f)) => builder::build_fn(&mut mir.strings, def_id, f),
             Source::Assoc(AssocValDefKind::NativeFn(n)) => builder::build_native_fn(def_id, n),
         };
         mir.items.insert(def_id, item);

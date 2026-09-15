@@ -37,6 +37,17 @@ impl ExprLowerCtx {
         id
     }
 
+    /// primary を式にする。id はここで採番する。
+    ///
+    /// novel statement の展開のように、
+    /// ソースに対応する AST が無い式を組み立てるときに使う。
+    pub(crate) fn expr(&mut self, primary: Primary) -> Expr {
+        Expr {
+            expr: ExprVal::Primary(primary),
+            id: self.alloc_expr_id(),
+        }
+    }
+
     pub(crate) fn declare_var(&mut self, id: VarId, var: DecledVar) {
         if var.id.id == biwac_base::InternedIdent::SELF {
             self.self_var_id = Some(id);

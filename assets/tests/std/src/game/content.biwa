@@ -1,0 +1,46 @@
+// Message Window に出力される内容物。
+//
+// テキスト以外のメディア (画像など) も取りうるので、
+// `Message` ではなく `Content` と呼んでいる。
+// 設計は `docs/content-api.md` を参照。
+
+import package::types::string::String;
+import package::convert::Into;
+import package::game::Game;
+
+enum Content {
+  Text(TextContent),
+}
+
+struct TextContent {
+  text: String,
+}
+
+// `impl[T] T: Into[T] { .. }` が書けるようになったら要らなくなる
+// (blanket impl は入れていない)。
+impl Content: Into[Content] {
+  fn into(self) -> Content { self }
+}
+
+impl String: Into[Content] {
+  fn into(self) -> Content {
+    Content::Text(TextContent { text = self })
+  }
+}
+
+// ---- lang item APIs for compiler ----
+//
+// scene の生テキストと `$` の埋め込み式、`>>` の展開先である。
+// コンパイラのみが呼び出すことを想定しており、
+// ゲーム開発者やサードパーティが直接呼ぶことは想定していない。
+
+[[lang="content_push"]]
+fn content_push[C: Into[Content], T, U](game: Game[T, U], content: C) {
+  let c: Content = content.into();
+  game.window.message_window.push_content(c);
+}
+
+[[lang="content_flush_and_wait"]]
+fn content_flush_and_wait[T, U](game: Game[T, U]) {
+  game.window.wait();
+}

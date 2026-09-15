@@ -630,7 +630,6 @@ fn load_analyze_and_codegen_single_package(
     // (ある日 wasm を建てようとしたら依存の MIR が無い、ということになる)。
     let (mir_hash, mir) = persist_mir(
         &hir,
-        &lang_items,
         interner,
         &symbol_index,
         svh,
@@ -696,7 +695,6 @@ fn load_analyze_and_codegen_single_package(
                 interner,
                 &srcs,
                 &ext_pkgs_for_ty,
-                &lang_items,
                 &well_known_scenes,
             );
 
@@ -726,10 +724,11 @@ fn load_analyze_and_codegen_single_package(
                 let mangler =
                     biwac_generator::mangle::Mangler::new(&hir, interner, &srcs, &ext_pkgs_for_ty);
 
-                let wat = biwac_generator::arch::wasm::emit(&mono, &mangler).map_err(|e| {
-                    eprintln!("Error: wasm code generation failed: {e}");
-                    biwac_base::print_error_finish_message(1);
-                })?;
+                let wat = biwac_generator::arch::wasm::emit(&mono, &mangler, &well_known_scenes)
+                    .map_err(|e| {
+                        eprintln!("Error: wasm code generation failed: {e}");
+                        biwac_base::print_error_finish_message(1);
+                    })?;
 
                 // .wat は成果物として残す。デバッグではこちらを読む。
                 let wat_path = target_dir(&build_dir_path, options.target)
@@ -772,7 +771,6 @@ fn load_analyze_and_codegen_single_package(
 /// `.biwamir` も同じ空間で書かなければ噛み合わない。
 fn persist_mir(
     hir: &biwac_hir::Hir,
-    lang_items: &biwac_lang_item::LangItemTable,
     interner: &biwac_base::IdentInterner,
     symbol_index: &SymbolIndexMap,
     meta_svh: Hash64,
@@ -781,7 +779,7 @@ fn persist_mir(
     metadata: &biwac_base::MetadataHolder,
 ) -> Result<(Hash64, biwac_mir::Mir), ()> {
     let pkg_id = self_package_id(&metadata.metadata);
-    let mut mir = biwac_mir_build::build(hir, lang_items, pkg_id);
+    let mut mir = biwac_mir_build::build(hir, pkg_id);
 
     let errors = biwac_mir::validate(&mir);
     if !errors.is_empty() {
@@ -843,12 +841,12 @@ fn monomorphize_program(
     own: &biwac_mir::Mir,
     ext_pkgs: &[(PackageId, Arc<DepMetadata>)],
     dep_mirs: &[(PackageId, biwac_mir::Mir)],
-    well_known_scenes: &biwac_scene::WellKnownScenes,
+    well_known_scenes: &biwac_scene::WellKnownSymbols,
     interner: &mut IdentInterner,
 ) -> Result<biwac_mir::MonoMir, ()> {
     // 根はランタイムが名前で呼ぶ scene だけである。
     // そこから辿れない関数は成果物に入らない (到達性による除去がここで効く)。
-    let roots: Vec<biwac_span::ValDefId> = biwac_scene::WellKnownScene::ALL
+    let roots: Vec<biwac_span::ValDefId> = biwac_scene::WellKnownSymbol::ALL
         .iter()
         .filter_map(|s| well_known_scenes.get(*s))
         .collect();

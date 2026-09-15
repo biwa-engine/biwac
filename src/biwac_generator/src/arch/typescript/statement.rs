@@ -1,8 +1,6 @@
 use std::cell::Cell;
 
 use biwac_hir::{Primary, Stmt};
-use biwac_lang_item::LangItem;
-use oxc_allocator::FromIn;
 
 use crate::arch::typescript::{AsOxc, AsOxcLocal, Mangled, span, yield_expr};
 
@@ -148,75 +146,27 @@ impl<'a> AsOxcLocal<'a, oxc_ast::ast::Statement<'a>> for Stmt {
                    ctx.allocator,
                 ))
             }
-            // scene 内の novel statement は lang item の関数呼び出しに展開する。
+            // novel statement は lowering の時点で lang item の呼び出し式になっている。
             //
-            // どの関数に落とすかはコンパイラだけが知っており、
-            // ユーザは名前でこれらを呼ぶことを想定されていない。
-            // 呼び出し先の import は型推論時に deps_recorder へ記録済み。
-            Stmt::NovelWrite(write) => novel_call(
-                ctx,
-                LangItem::Write,
-                [oxc_ast::ast::Argument::StringLiteral(
-                    oxc_allocator::Box::new_in(
-                        oxc_ast::ast::StringLiteral {
-                            span: span(),
-                            value: oxc_ast::ast::Atom::from_in(write.msg.as_str(), ctx.allocator),
-                            raw: None,
-                            lone_surrogates: false,
-                        },
-                        ctx.allocator,
-                    ),
-                )],
-            ),
-            Stmt::NovelWriteExpr(write) => {
-                let arg = write.expr.as_oxc_local(ctx, fctx);
-                novel_call(ctx, LangItem::Write, [oxc_ast::ast::Argument::from(arg)])
-            }
-            Stmt::NovelWait(_) => novel_call(ctx, LangItem::Wait, []),
-        }
-    }
-}
-
-/// novel statement を syscall の発行に展開する。
-///
-/// lang item の関数 (std) が syscall の記述子を組み立て、
-/// それを `yield` することでエンジン (kernel) に制御が渡る。
-/// レジスタに引数を積むのが std、syscall 命令が `yield` にあたる。
-/// 中断できるのは generator である scene の中だけなので、
-/// この展開が現れるのも scene の中だけである。
-fn novel_call<'a, const N: usize>(
-    ctx: &'a super::AstBuildCtx<'a>,
-    item: LangItem,
-    args: [oxc_ast::ast::Argument<'a>; N],
-) -> oxc_ast::ast::Statement<'a> {
-    oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
-        oxc_ast::ast::ExpressionStatement {
-            span: span(),
-            expression: yield_expr(
-                oxc_ast::ast::Expression::CallExpression(oxc_allocator::Box::new_in(
-                    oxc_ast::ast::CallExpression {
+            // ここでやるのは `yield` を被せることだけである。
+            // 中断できるのは generator である scene の中だけで、
+            // その位置を決めるのはコンパイラである。
+            //
+            // NOTE: この形は再検討が要る。`yield` に載るのは
+            // 「syscall の記述子」であることを前提にしているが、
+            // `content_push` は記述子を返さない普通の関数である。
+            // TypeScript ターゲットは制限つきジェネリクスにも未対応で
+            // 当面建たないので、`docs/trait.md` の第 3 段とあわせて直す。
+            Stmt::NovelSyscall(syscall) => {
+                let call = syscall.call.as_oxc_local(ctx, fctx);
+                oxc_ast::ast::Statement::ExpressionStatement(oxc_allocator::Box::new_in(
+                    oxc_ast::ast::ExpressionStatement {
                         span: span(),
-                        callee: oxc_ast::ast::Expression::Identifier(oxc_allocator::Box::new_in(
-                            oxc_ast::ast::IdentifierReference {
-                                span: span(),
-                                name: oxc_span::Ident::new_const(
-                                    ctx.allocator.alloc_str(&ctx.lang_item_fn_mangled(item)),
-                                ),
-                                reference_id: Cell::new(None),
-                            },
-                            ctx.allocator,
-                        )),
-                        type_arguments: None,
-                        arguments: oxc_allocator::Vec::from_iter_in(args, ctx.allocator),
-                        optional: false,
-                        pure: false,
+                        expression: yield_expr(call, false, ctx.allocator),
                     },
                     ctx.allocator,
-                )),
-                false,
-                ctx.allocator,
-            ),
-        },
-        ctx.allocator,
-    ))
+                ))
+            }
+        }
+    }
 }

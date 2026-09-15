@@ -69,21 +69,15 @@ pub struct AssignStmt {
 
 // novel-specific statements
 
+/// novel statement が展開された syscall の発行。
+///
+/// 中身は普通の呼び出し式である。それでも statement として残しているのは、
+/// **どこで中断しうるか**をコード生成が知る必要があるからである。
+/// 中断できるのは scene の中だけで、その位置を決めるのはコンパイラである
+/// (`docs/execution-model.md` を参照)。
 #[derive(Debug, Clone)]
-pub struct NovelWriteStmt {
-    pub msg: String,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct NovelWriteExprStmt {
-    /// 出す値を決める式。
-    pub expr: Expr,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct NovelWaitStmt {
+pub struct NovelSyscallStmt {
+    pub call: Expr,
     pub span: Span,
 }
 
@@ -97,8 +91,6 @@ pub enum Stmt {
     While(WhileStmt),
     VarDecl(VarDecl),
     Assign(AssignStmt),
-    NovelWrite(NovelWriteStmt),
-    /// `$...` の埋め込み式。
-    NovelWriteExpr(NovelWriteExprStmt),
-    NovelWait(NovelWaitStmt),
+    /// novel statement (生テキスト・`$` の埋め込み式・`>>`) の展開先。
+    NovelSyscall(NovelSyscallStmt),
 }

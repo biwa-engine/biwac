@@ -17,10 +17,7 @@ pub use symbols::{
         StructDef, TraitDef, TraitItemArgs, TraitItemDecl, TypeAlias, TypeDef, VariantDecl,
         VariantFieldsDecl, VariantShape,
     },
-    novel::{
-        NovelBlockStmt, NovelEndSceneStmt, NovelExprMessage, NovelIfStmt, NovelMessage, NovelStmt,
-        NovelWait,
-    },
+    novel::{NovelBlockStmt, NovelContent, NovelEndSceneStmt, NovelFlush, NovelIfStmt, NovelStmt},
     statements::{
         AssignStmt, BlockStmt, ExprStmt, IfStmt, MatchStmt, MatchStmtArm, ReturnStmt, Stmt,
         VarDecl, WhileStmt,

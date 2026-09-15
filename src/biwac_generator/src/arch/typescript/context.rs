@@ -4,7 +4,6 @@ use std::sync::Arc;
 use biwac_base::{IdentInterner, InternedIdent, PackageId, SourceHolder};
 use biwac_dependency_metadata::DepMetadata;
 use biwac_hir::{ExprId, Hir, Ty, ValDefKind};
-use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_span::{TyDefId, ValDefId, VarId};
 
 use crate::mangle::Mangler;
@@ -13,9 +12,6 @@ pub(super) struct AstBuildCtx<'a> {
     hir: &'a Hir,
     /// シンボル名の生成。ターゲットに依存しないので共有している。
     mangle: Mangler<'a>,
-    /// lang item テーブル。
-    /// novel statement を std の関数呼び出しに展開する際に使う。
-    lang_items: &'a LangItemTable,
     pub(super) allocator: &'a oxc_allocator::Allocator,
 }
 
@@ -25,13 +21,11 @@ impl<'a> AstBuildCtx<'a> {
         interner: &'a IdentInterner,
         srcs: &'a SourceHolder,
         ext_pkgs: &'a [(PackageId, Arc<DepMetadata>)],
-        lang_items: &'a LangItemTable,
         allocator: &'a oxc_allocator::Allocator,
     ) -> Self {
         Self {
             hir,
             mangle: Mangler::new(hir, interner, srcs, ext_pkgs),
-            lang_items,
             allocator,
         }
     }
@@ -72,21 +66,6 @@ impl<'a> AstBuildCtx<'a> {
     /// メタデータに種別を載せる必要がある。
     pub(super) fn is_scene(&self, def_id: &ValDefId) -> bool {
         matches!(self.hir.vals.get(def_id), Some(ValDefKind::NovelScene(_)))
-    }
-
-    /// lang item の関数のマングル済み名を返す。
-    ///
-    /// 型検査を通っていれば必ず解決できる
-    /// (型推論が同じ lang item を require 済み)。
-    pub(super) fn lang_item_fn_mangled(&self, item: LangItem) -> String {
-        let def_id = self.lang_items.get(&item).unwrap_or_else(|| {
-            panic!(
-                "compiler bug: lang item `{}` is missing at codegen",
-                item.key()
-            )
-        });
-
-        self.get_value_mangled(&ValDefId::new(def_id))
     }
 }
 

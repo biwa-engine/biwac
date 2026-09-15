@@ -1,9 +1,12 @@
 use biwac_base::{IdentInterner, ModId, PackageKind};
-use biwac_hir::{FnSignature, Hir, NovelSceneDef, Ty, TyKind, ValDefKind};
+use biwac_hir::{FnSignature, Hir, Ty, TyKind, ValDefKind};
 use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_span::TyDefId;
 
-use crate::{SceneError, SceneRequirement, SignatureProblem, WellKnownScene, WellKnownScenes};
+use crate::{
+    SceneError, SceneRequirement, SignatureProblem, WellKnownKind, WellKnownSymbol,
+    WellKnownSymbols,
+};
 
 /// scene の規約を検査し、既知 scene の解決結果を返す。
 ///
@@ -18,9 +21,9 @@ pub fn check(
     pkg_kind: PackageKind,
     root_mod_id: ModId,
     interner: &IdentInterner,
-) -> Result<WellKnownScenes, Vec<SceneError>> {
+) -> Result<WellKnownSymbols, Vec<SceneError>> {
     let mut errors = Vec::new();
-    let mut found = WellKnownScenes::new();
+    let mut found = WellKnownSymbols::new();
 
     // lang item `game` が無いパッケージ (std をビルドする前など) では
     // シグネチャを照合しようがないので検査を諦める。
@@ -32,33 +35,56 @@ pub fn check(
             continue;
         }
 
-        let ValDefKind::NovelScene(scene) = val else {
-            continue;
-        };
-
-        if let Some(game_ty) = game_ty {
-            check_signature(scene, game_ty, interner, &mut errors);
+        // scene はすべて `(Game[..]) -> Game[..]` でなければならない。
+        if let (ValDefKind::NovelScene(scene), Some(game_ty)) = (val, game_ty) {
+            check_signature(
+                &scene.signature,
+                &scene.name,
+                WellKnownKind::Scene,
+                game_ty,
+                interner,
+                &mut errors,
+            );
         }
 
         // ルートモジュールに書かれた既知の名前だけがランタイムから呼ばれる。
-        if scene.name.span.module() != root_mod_id {
+        let (name_ident, kind) = match val {
+            ValDefKind::NovelScene(s) => (&s.name, WellKnownKind::Scene),
+            ValDefKind::Fn(f) => (&f.name, WellKnownKind::Fn),
+            ValDefKind::Native(f) => (&f.name, WellKnownKind::Fn),
+        };
+        if name_ident.span.module() != root_mod_id {
             continue;
         }
-        let Some(name) = interner.get_str(&scene.name.id) else {
+        let Some(name) = interner.get_str(&name_ident.id) else {
             continue;
         };
-        if let Some(well_known) = WellKnownScene::from_name(name) {
-            found.set(well_known, *def_id);
+        let Some(well_known) = WellKnownSymbol::from_name(name) else {
+            continue;
+        };
+        if well_known.kind() != kind {
+            // 種別が違うものは登録しない。
+            // 下の「必須なのに無い」の検査が理由を添えて報告する。
+            continue;
         }
+
+        // scene 以外の既知シンボルはここでシグニチャを見る。
+        if kind == WellKnownKind::Fn
+            && let (ValDefKind::Fn(f), Some(game_ty)) = (val, game_ty)
+        {
+            check_signature(&f.signature, &f.name, kind, game_ty, interner, &mut errors);
+        }
+
+        found.set(well_known, *def_id);
     }
 
     // エントリポイントを持つのは playable package だけ。
     // library package では既知の名前も普通の scene として扱う。
     if !pkg_kind.is_playable() {
-        return finish(WellKnownScenes::new(), errors);
+        return finish(WellKnownSymbols::new(), errors);
     }
 
-    for &well_known in WellKnownScene::ALL {
+    for &well_known in WellKnownSymbol::ALL {
         if well_known.requirement() != SceneRequirement::RequiredInPlayable {
             continue;
         }
@@ -68,7 +94,7 @@ pub fn check(
 
         // 同名の値が scene でない形で定義されていないかを見て、
         // 「無い」のか「scene でない」のかを区別して報告する。
-        match non_scene_val_named(hir, well_known.name(), root_mod_id, interner) {
+        match val_named_with_other_kind(hir, well_known, root_mod_id, interner) {
             Some(span) => errors.push(SceneError::EntryPointNotScene {
                 scene: well_known,
                 span,
@@ -81,9 +107,9 @@ pub fn check(
 }
 
 fn finish(
-    found: WellKnownScenes,
+    found: WellKnownSymbols,
     errors: Vec<SceneError>,
-) -> Result<WellKnownScenes, Vec<SceneError>> {
+) -> Result<WellKnownSymbols, Vec<SceneError>> {
     if errors.is_empty() {
         Ok(found)
     } else {
@@ -91,22 +117,28 @@ fn finish(
     }
 }
 
-/// scene は `(Game[..]) -> Game[..]` でなければならない。
+/// ランタイムが呼ぶシンボルのシグニチャを検査する。
+///
+/// - scene は `(Game[..]) -> Game[..]`
+/// - `on_new_game` のような関数は `() -> Game[..]`
+///
 /// ジェネリック引数に何が入るかは問わない。
 fn check_signature(
-    scene: &NovelSceneDef,
+    sig: &FnSignature,
+    name_ident: &biwac_hir::Ident,
+    kind: WellKnownKind,
     game_ty: TyDefId,
     interner: &IdentInterner,
     errors: &mut Vec<SceneError>,
 ) {
-    let sig: &FnSignature = &scene.signature;
-    let name = interner.get_str(&scene.name.id).unwrap_or("").to_string();
+    let name = interner.get_str(&name_ident.id).unwrap_or("").to_string();
 
     let mut push = |reason| {
         errors.push(SceneError::InvalidSceneSignature {
             scene: name.clone(),
+            kind,
             reason,
-            span: scene.name.span.clone(),
+            span: name_ident.span.clone(),
         })
     };
 
@@ -114,13 +146,22 @@ fn check_signature(
         push(SignatureProblem::HasReceiver);
     }
 
-    match sig.args.as_slice() {
-        [arg] => {
+    let expected = match kind {
+        WellKnownKind::Scene => 1,
+        WellKnownKind::Fn => 0,
+    };
+
+    match (kind, sig.args.as_slice()) {
+        (WellKnownKind::Scene, [arg]) => {
             if !is_game(&arg.ty, game_ty) {
                 push(SignatureProblem::ArgNotGame);
             }
         }
-        args => push(SignatureProblem::ArgCount { found: args.len() }),
+        (WellKnownKind::Fn, []) => {}
+        (_, args) => push(SignatureProblem::ArgCount {
+            found: args.len(),
+            expected,
+        }),
     }
 
     if !is_game(&sig.rty, game_ty) {
@@ -132,10 +173,12 @@ fn is_game(ty: &Ty, game_ty: TyDefId) -> bool {
     matches!(&ty.kind, TyKind::Defined(dt) if dt.def_id == game_ty)
 }
 
-/// ルートモジュールに `name` という名前の scene 以外の値があればその span を返す。
-fn non_scene_val_named(
+/// ルートモジュールに同じ名前の値があるが、期待した種別でない場合にその span を返す。
+///
+/// 「無い」のか「種別が違う」のかを分けて報告するために使う。
+fn val_named_with_other_kind(
     hir: &Hir,
-    name: &str,
+    well_known: WellKnownSymbol,
     root_mod_id: ModId,
     interner: &IdentInterner,
 ) -> Option<biwac_span::Span> {
@@ -143,13 +186,17 @@ fn non_scene_val_named(
         .iter()
         .filter(|(def_id, _)| def_id.pkg().is_self())
         .find_map(|(_, val)| {
-            let ident = match val {
-                ValDefKind::Fn(f) => &f.name,
-                ValDefKind::Native(f) => &f.name,
-                ValDefKind::NovelScene(_) => return None,
+            let (ident, kind) = match val {
+                ValDefKind::Fn(f) => (&f.name, WellKnownKind::Fn),
+                ValDefKind::Native(f) => (&f.name, WellKnownKind::Fn),
+                ValDefKind::NovelScene(s) => (&s.name, WellKnownKind::Scene),
             };
+            if kind == well_known.kind() {
+                return None;
+            }
 
-            (ident.span.module() == root_mod_id && interner.get_str(&ident.id) == Some(name))
-                .then(|| ident.span.clone())
+            (ident.span.module() == root_mod_id
+                && interner.get_str(&ident.id) == Some(well_known.name()))
+            .then(|| ident.span.clone())
         })
 }

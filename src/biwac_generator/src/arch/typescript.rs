@@ -23,6 +23,10 @@ use crate::arch::typescript::{
 // どの scene がエントリポイントかを決める biwac_scene 側はこの名前を知らない。
 const ENTRYPOINT_NAME: &str = "__biwa_entrypoint";
 
+// 最初の `Game` を組み立てる関数。ランタイムはこれを呼んでから
+// エントリポイントに渡す (`docs/content-api.md` を参照)。
+const NEW_GAME_NAME: &str = "__biwa_on_new_game";
+
 pub fn generate(
     hir: &Hir,
     interner: &IdentInterner,
@@ -31,11 +35,10 @@ pub fn generate(
         biwac_base::PackageId,
         std::sync::Arc<biwac_dependency_metadata::DepMetadata>,
     )],
-    lang_items: &biwac_lang_item::LangItemTable,
-    well_known_scenes: &biwac_scene::WellKnownScenes,
+    well_known: &biwac_scene::WellKnownSymbols,
 ) -> String {
     let allocator = oxc_allocator::Allocator::default();
-    let ctx = AstBuildCtx::new(hir, interner, srcs, ext_pkgs, lang_items, &allocator);
+    let ctx = AstBuildCtx::new(hir, interner, srcs, ext_pkgs, &allocator);
 
     // ライフタイムが長い必要がある
     let native_tys = hir
@@ -241,12 +244,17 @@ pub fn generate(
     // エントリポイントは通常どおりマングル名で出力したうえで、
     // ランタイムが知っている名前へ別名 export する。
     // こうすると biwa コード内から呼ぶ経路 (マングル名参照) がそのまま動く。
-    if let Some(def_id) = well_known_scenes.get(biwac_scene::WellKnownScene::Main) {
-        body.push(export_alias(
-            &ctx.get_value_mangled(&def_id),
-            ENTRYPOINT_NAME,
-            &allocator,
-        ));
+    for (symbol, export_name) in [
+        (biwac_scene::WellKnownSymbol::Main, ENTRYPOINT_NAME),
+        (biwac_scene::WellKnownSymbol::OnNewGame, NEW_GAME_NAME),
+    ] {
+        if let Some(def_id) = well_known.get(symbol) {
+            body.push(export_alias(
+                &ctx.get_value_mangled(&def_id),
+                export_name,
+                &allocator,
+            ));
+        }
     }
 
     let oxc_ast = oxc_ast::ast::Program {

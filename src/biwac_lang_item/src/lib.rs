@@ -325,6 +325,14 @@ lang_item_table!(
     // scene 内の novel statement が展開される先。
     // エンドユーザやサードパーティに直接呼ばれることを想定しておらず、
     // コンパイラのみが知っている API である。
-    Write,     "write",     LangItemKind::Fn, LangItemGenericRequirement::None;
-    Wait,      "wait",      LangItemKind::Fn, LangItemGenericRequirement::None;
+    //
+    // 生テキストも `$` の埋め込み式も `content_push` に落ちる。
+    // 引数は (game, content) で、ジェネリック引数は
+    //   C: 積む値の型 (`Into[Content]` を満たすこと)
+    //   T, U: `Game[T, U]` の型引数
+    // の 3 つである。
+    ContentPush, "content_push", LangItemKind::Fn, LangItemGenericRequirement::Exact(3);
+    // `>>` の展開先。引数は (game) で、ジェネリック引数は `Game[T, U]` の 2 つ。
+    ContentFlushAndWait, "content_flush_and_wait",
+        LangItemKind::Fn, LangItemGenericRequirement::Exact(2);
 );

@@ -149,6 +149,7 @@ impl NameResolver {
             trait_scopes,
             &external_packages,
             interner,
+            &lang_items,
         )?;
 
         Ok(ResolveOutput { hir, lang_items })

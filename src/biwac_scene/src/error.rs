@@ -1,27 +1,31 @@
 use biwac_span::Span;
 
-use crate::WellKnownScene;
+use crate::WellKnownSymbol;
 
 #[derive(Debug)]
 pub enum SceneError {
-    /// scene のシグネチャが `(Game[..]) -> Game[..]` になっていない。
+    /// ランタイムが呼ぶシンボルのシグネチャが期待と違う。
+    ///
+    /// scene は `(Game[..]) -> Game[..]`、
+    /// `on_new_game` のような関数は `() -> Game[..]` である。
     InvalidSceneSignature {
         scene: String,
+        kind: crate::WellKnownKind,
         reason: SignatureProblem,
         span: Span,
     },
 
-    /// playable package にエントリポイントが無い。
-    MissingEntryPoint { scene: WellKnownScene },
+    /// playable package に必須のシンボルが無い。
+    MissingEntryPoint { scene: WellKnownSymbol },
 
-    /// エントリポイントの名前は使われているが scene ではない。
-    EntryPointNotScene { scene: WellKnownScene, span: Span },
+    /// 名前は使われているが、期待した種別 (scene / 関数) ではない。
+    EntryPointNotScene { scene: WellKnownSymbol, span: Span },
 }
 
 #[derive(Debug)]
 pub enum SignatureProblem {
-    /// 引数の個数が 1 でない。
-    ArgCount { found: usize },
+    /// 引数の個数が期待と違う。
+    ArgCount { found: usize, expected: usize },
 
     /// 引数の型が lang item `game` ではない。
     ArgNotGame,
@@ -45,27 +49,37 @@ impl SceneError {
 
     pub fn message(&self) -> String {
         match self {
-            Self::InvalidSceneSignature { scene, reason, .. } => {
+            Self::InvalidSceneSignature {
+                scene,
+                kind,
+                reason,
+                ..
+            } => {
                 let detail = match reason {
-                    SignatureProblem::ArgCount { found } => {
-                        format!("it takes {found} argument(s)")
+                    SignatureProblem::ArgCount { found, expected } => {
+                        format!("it takes {found} argument(s) instead of {expected}")
                     }
                     SignatureProblem::ArgNotGame => "its argument is not a `Game`".to_string(),
                     SignatureProblem::ReturnNotGame => "it does not return a `Game`".to_string(),
                     SignatureProblem::HasReceiver => "it takes a receiver".to_string(),
                 };
 
-                format!(
-                    "scene `{scene}` must take exactly one `Game` and return a `Game`, but {detail}"
-                )
+                let expected = match kind {
+                    crate::WellKnownKind::Scene => "take exactly one `Game` and return a `Game`",
+                    crate::WellKnownKind::Fn => "take no argument and return a `Game`",
+                };
+
+                format!("`{scene}` must {expected}, but {detail}")
             }
             Self::MissingEntryPoint { scene } => format!(
-                "this playable package has no entrypoint: define `scene {}` in the root module",
+                "this playable package must define {} `{}` in the root module",
+                scene.kind().describe(),
                 scene.name()
             ),
             Self::EntryPointNotScene { scene, .. } => format!(
-                "`{}` is the entrypoint of a playable package, so it must be a scene",
-                scene.name()
+                "the runtime calls `{}` directly, so it must be {}",
+                scene.name(),
+                scene.kind().describe()
             ),
         }
     }

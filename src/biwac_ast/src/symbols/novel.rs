@@ -8,31 +8,32 @@ pub enum NovelStmt {
     If(NovelIfStmt),
     VarDecl(VarDecl),
     Assign(AssignStmt),
-    NovelWrite(NovelMessage),
-    /// `$...` の埋め込み式。
-    ///
-    /// 生テキストと同じく Message Window への出力になるが、
-    /// 出す値が式で決まる点だけが違う。
-    NovelWriteExpr(NovelExprMessage),
-    NovelWait(NovelWait),
+    /// Message Window に積む内容。生テキストか `$` の埋め込み式。
+    ContentPush(NovelContent),
+    /// `>>`。積んだ内容をまとめて出し、クリックを待つ。
+    ContentFlushAndWait(NovelFlush),
     NovelEndScene(NovelEndSceneStmt),
 }
 
+/// Message Window に積む 1 つの内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NovelMessage {
-    pub msg: String,
-    pub span: Span,
+pub enum NovelContent {
+    /// 行に直接書かれたテキスト。
+    Text { text: String, span: Span },
+    /// `$...` の埋め込み式。
+    Expr { expr: Exprs, span: Span },
+}
+
+impl NovelContent {
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Text { span, .. } | Self::Expr { span, .. } => span,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NovelExprMessage {
-    pub expr: Exprs,
-    /// `$` から式の終わりまで。
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NovelWait {
+pub struct NovelFlush {
     pub span: Span,
 }
 

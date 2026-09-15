@@ -1893,76 +1893,15 @@ impl<'tctx, 'a> FnTyCtx<'tctx, 'a> {
 
                 Ok(None)
             }
-            // scene 内の novel statement は、
-            // コンパイラのみが知っている lang item の関数呼び出しとして扱う。
-            // ユーザはこの関数を名前で呼ぶことを想定されていない。
-            Stmt::NovelWrite(write) => {
-                let msg = self
-                    .tctx
-                    .lang_item_ty(LangItem::String, write.span.clone())?;
-                self.check_novel_call(LangItem::Write, &[msg], &write.span)?;
-
-                Ok(None)
-            }
-            // `$...` の埋め込み式。
-            // 式の型が展開先の引数と噛み合うかをここで見る。
-            Stmt::NovelWriteExpr(write) => {
-                let ty = self.infer_expr(&write.expr)?;
-                self.check_novel_call(LangItem::Write, &[ty], &write.span)?;
-
-                Ok(None)
-            }
-            Stmt::NovelWait(wait) => {
-                self.check_novel_call(LangItem::Wait, &[], &wait.span)?;
+            // novel statement は lowering の時点で
+            // lang item の呼び出し式になっている。
+            // 制限つきジェネリクスの検査も含め、普通の呼び出しとして推論する。
+            Stmt::NovelSyscall(syscall) => {
+                self.infer_expr(&syscall.call)?;
 
                 Ok(None)
             }
         }
-    }
-
-    /// novel statement が展開される先の lang item 関数を、
-    /// 実引数の型と突き合わせる。
-    ///
-    /// 呼び出し式そのものは HIR にまだ存在せず (Stmt::NovelWrite のまま)、
-    /// codegen が lang item を引いて実際の呼び出しを生成する。
-    /// ここでは「その関数が存在し、想定した引数を取る」ことだけを確かめる。
-    fn check_novel_call(&mut self, item: LangItem, args: &[Ty], _span: &Span) -> TyResult<()> {
-        let def_id = self.tctx.require_val(item)?;
-
-        // codegen はこの関数の呼び出しを出力するので import が必要になる。
-        self.tctx
-            .hir
-            .deps_recorder
-            .borrow_mut()
-            .depends_on_val(&def_id);
-
-        // 署名が引けないのは依存メタデータが壊れている場合のみ。
-        let callee = self
-            .tctx
-            .get_value_ty(&def_id)
-            .ok_or(TyError::MissingLangItem { item })?;
-
-        // 戻り値には触らない。
-        //
-        // TypeScript では syscall の記述子を返し、scene がそれを yield して
-        // エンジンに制御を渡す。wasm ではエンジン呼び出しがそのまま
-        // ホスト関数の呼び出しになるので、返すものが無い。
-        // arch ごとに native が選ばれるためシグニチャが違ってよく、
-        // ここで戻り値を固定してはいけない。
-        //
-        // どちらにせよ novel statement は結果を捨てるので、
-        // 「その関数が存在し、想定した引数を取る」ことだけを確かめれば足りる。
-        let TyKind::Fn(callee_fty) = callee.kind else {
-            return Err(TyError::MissingLangItem { item });
-        };
-        if callee_fty.args.len() != args.len() {
-            return Err(TyError::MissingLangItem { item });
-        }
-        for (declared, actual) in callee_fty.args.into_iter().zip(args.iter().cloned()) {
-            self.unify(declared, actual)?;
-        }
-
-        Ok(())
     }
 
     fn infer_block_stmt(&mut self, block: &BlockStmt) -> TyResult<Option<Ty>> {

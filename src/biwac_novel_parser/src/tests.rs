@@ -24,9 +24,13 @@ fn shape(src: &str) -> Vec<String> {
         .expect("should parse")
         .into_iter()
         .filter_map(|s| match s {
-            NovelStmt::NovelWrite(m) => Some(format!("text({})", m.msg)),
-            NovelStmt::NovelWriteExpr(_) => Some("expr".to_string()),
-            NovelStmt::NovelWait(_) => Some("wait".to_string()),
+            NovelStmt::ContentPush(biwac_ast::NovelContent::Text { text, .. }) => {
+                Some(format!("text({text})"))
+            }
+            NovelStmt::ContentPush(biwac_ast::NovelContent::Expr { .. }) => {
+                Some("expr".to_string())
+            }
+            NovelStmt::ContentFlushAndWait(_) => Some("wait".to_string()),
             _ => None,
         })
         .collect()

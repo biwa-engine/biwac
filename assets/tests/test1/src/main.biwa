@@ -175,6 +175,20 @@ struct MyGameCharacters {}
 
 type MyGame = std::game::Game[MyGameCharacters, MyGameState];
 
+// 最初の `Game` を組み立てる。
+//
+// ランタイムがゲーム開始時にこれを呼び、返ってきた値を `scene main` に渡す。
+// `Game` は開発者が決める値 (characters / states / config) を含むので、
+// ランタイムには組み立てられない。
+fn on_new_game() -> MyGame {
+  std::game::Game {
+    name = "test1",
+    characters = MyGameCharacters {},
+    states = MyGameState {},
+    window = std::game::window::Window::new(),
+  }
+}
+
 // 埋め込み式で出す値。
 fn greet_name() -> std::types::string::String {
   greeter::greet("Biwa")

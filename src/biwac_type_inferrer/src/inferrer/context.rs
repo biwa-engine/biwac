@@ -176,15 +176,6 @@ impl<'a> TyCtx<'a> {
             .ok_or(TyError::MissingLangItem { item })
     }
 
-    /// 値 (関数) の lang item の DefId を引く。
-    pub(super) fn require_val(&self, item: LangItem) -> Result<ValDefId, TyError> {
-        debug_assert_eq!(item.kind(), LangItemKind::Fn);
-        self.lang_items
-            .get(&item)
-            .map(ValDefId::new)
-            .ok_or(TyError::MissingLangItem { item })
-    }
-
     /// lang item で指定された型を `Ty` として組み立てる。
     ///
     /// ジェネリクスを取らない lang item 型 (`string` など) 専用。
@@ -348,10 +339,6 @@ impl<'a> TyCtx<'a> {
             TyDefKind::Enum(enum_def) => Some(enum_def),
             _ => None,
         }
-    }
-
-    pub(super) fn get_value_ty(&self, def_id: &ValDefId) -> Option<Ty> {
-        self.get_value_signature(def_id).map(|s| s.as_ty())
     }
 
     /// シンボルのシグニチャ。

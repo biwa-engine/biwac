@@ -14,7 +14,6 @@ use biwac_hir::{
     FnSignature, Literal, NativeFnDef, NovelSceneDef, Pattern, PatternFields, Primary, Stmt, Ty,
     TyKind, VarIdKind, VariantCtorFields,
 };
-use biwac_lang_item::{LangItem, LangItemTable};
 use biwac_mir::{
     AggregateKind, BasicBlock, BasicBlockData, BinOp, Body, Callee, Const, GenArgs, Local,
     LocalDecl, MirItem, NativeItem, Operand, Place, PlaceElem, Rvalue, StatementKind, StringPool,
@@ -22,17 +21,11 @@ use biwac_mir::{
 };
 use biwac_span::{Span, ValDefId, VarId};
 
-pub(crate) fn build_fn(
-    lang_items: &LangItemTable,
-    strings: &mut StringPool,
-    def_id: ValDefId,
-    f: &FnDef,
-) -> MirItem {
+pub(crate) fn build_fn(strings: &mut StringPool, def_id: ValDefId, f: &FnDef) -> MirItem {
     let genargs = f.signature.all_genargs().map(|g| g.def_id).collect();
 
     MirItem::Body(
         BodyBuilder::new(
-            lang_items,
             strings,
             &f.expr_tys,
             &f.var_tys,
@@ -44,7 +37,6 @@ pub(crate) fn build_fn(
 }
 
 pub(crate) fn build_scene(
-    lang_items: &LangItemTable,
     strings: &mut StringPool,
     def_id: ValDefId,
     s: &NovelSceneDef,
@@ -55,7 +47,6 @@ pub(crate) fn build_scene(
 
     MirItem::Body(
         BodyBuilder::new(
-            lang_items,
             strings,
             &s.expr_tys,
             &s.var_tys,
@@ -80,7 +71,6 @@ pub(crate) fn build_native_fn(def_id: ValDefId, n: &NativeFnDef) -> MirItem {
 }
 
 struct BodyBuilder<'a> {
-    lang_items: &'a LangItemTable,
     strings: &'a mut StringPool,
 
     expr_tys: &'a HashMap<ExprId, Ty>,
@@ -100,7 +90,6 @@ struct BodyBuilder<'a> {
 
 impl<'a> BodyBuilder<'a> {
     fn new(
-        lang_items: &'a LangItemTable,
         strings: &'a mut StringPool,
         expr_tys: &'a HashMap<ExprId, Ty>,
         var_tys: &'a HashMap<VarId, Ty>,
@@ -108,7 +97,6 @@ impl<'a> BodyBuilder<'a> {
         vars: &'a HashMap<VarId, DecledVar>,
     ) -> Self {
         Self {
-            lang_items,
             strings,
             expr_tys,
             var_tys,
@@ -440,69 +428,16 @@ impl<'a> BodyBuilder<'a> {
                 exit_bb
             }
 
-            // novel 文はエンジンへのシステムコールの発行である。
+            // novel 文は lowering の時点で普通の呼び出し式になっている。
             //
-            // 発行の仕方は「lang item の関数を呼ぶ」だけで、
-            // 呼んだ先が同期的にブロックするのか、積んで即座に返るのかは
-            // エンジン側の都合であってゲスト側のコードには現れない。
-            // したがって MIR にも中断は現れず、普通の呼び出しになる。
-            Stmt::NovelWrite(w) => {
-                let msg = self.strings.intern(&w.msg);
-                self.lower_syscall(
-                    bb,
-                    LangItem::Write,
-                    vec![Operand::Const(Const::Str(msg))],
-                    w.span.clone(),
-                )
-            }
-            // `$...` の埋め込み式。出す値が式で決まる点だけが違う。
-            Stmt::NovelWriteExpr(w) => {
-                let (bb, operand) = self.lower_operand(bb, &w.expr);
-                self.lower_syscall(bb, LangItem::Write, vec![operand], w.span.clone())
-            }
-            Stmt::NovelWait(w) => {
-                self.lower_syscall(bb, LangItem::Wait, Vec::new(), w.span.clone())
+            // それでも statement として残っているのは、
+            // どこで中断しうるかをコード生成が知る必要があるからである
+            // (`docs/execution-model.md` を参照)。MIR には中断は現れない。
+            Stmt::NovelSyscall(syscall) => {
+                let (bb, _) = self.lower_operand(bb, &syscall.call);
+                bb
             }
         }
-    }
-
-    fn lower_syscall(
-        &mut self,
-        bb: BasicBlock,
-        item: LangItem,
-        args: Vec<Operand>,
-        span: Span,
-    ) -> BasicBlock {
-        let def_id = ValDefId::new(self.lang_items.get(&item).unwrap_or_else(|| {
-            panic!(
-                "compiler bug: lang item `{}` is missing at MIR building",
-                item.key()
-            )
-        }));
-
-        // 結果は捨てる。捨てる先にも場所が要るので Void の一時変数を作る。
-        //
-        // 呼び先が値を返すかどうかはターゲットによって違う
-        // (TypeScript は syscall の記述子を返し、wasm は何も返さない)。
-        // ここで型を決め打ちにできないので、
-        // 「Void の場所への代入は値を捨てる」という約束にしてある。
-        let dest = self.new_temp(Ty::new(TyKind::Void, span.clone()), span.clone());
-
-        let next = self.new_block();
-        self.terminate(
-            bb,
-            TerminatorKind::Call {
-                callee: Callee::Direct {
-                    def_id,
-                    genargs: Vec::new(),
-                },
-                args,
-                dest,
-                target: next,
-            },
-            span,
-        );
-        next
     }
 
     // ---- 場所 ----

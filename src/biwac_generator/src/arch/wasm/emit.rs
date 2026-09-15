@@ -54,6 +54,9 @@ const STRING_CONST_IMPORT: &str = r#"(import "biwa:runtime" "string_const"
 /// TypeScript バックエンドと同じ規約である。
 const ENTRYPOINT_NAME: &str = "__biwa_entrypoint";
 
+/// 最初の `Game` を組み立てる関数。TypeScript と同じ規約である。
+const NEW_GAME_NAME: &str = "__biwa_on_new_game";
+
 #[derive(Debug)]
 pub enum WasmError {
     /// エントリポイントが無い。
@@ -82,13 +85,19 @@ impl std::fmt::Display for WasmError {
 }
 
 /// 単相化されたプログラム全体から WAT を作る。
-pub fn emit(mono: &MonoMir, mangler: &Mangler) -> Result<String, WasmError> {
-    Emitter::new(mono, mangler).run()
+pub fn emit(
+    mono: &MonoMir,
+    mangler: &Mangler,
+    well_known: &biwac_scene::WellKnownSymbols,
+) -> Result<String, WasmError> {
+    Emitter::new(mono, mangler, well_known).run()
 }
 
 struct Emitter<'a> {
     mono: &'a MonoMir,
     mangler: &'a Mangler<'a>,
+    /// ランタイムが名前で呼ぶシンボル。export を出すのに使う。
+    well_known: &'a biwac_scene::WellKnownSymbols,
     /// 実体 → wasm の関数名。
     fn_names: HashMap<InstanceKey, String>,
     /// 具体型 → wasm の型名 (struct と enum の親型)。
@@ -107,7 +116,11 @@ struct Emitter<'a> {
 const ENUM_TAG_FIELD: &str = "$__tag";
 
 impl<'a> Emitter<'a> {
-    fn new(mono: &'a MonoMir, mangler: &'a Mangler<'a>) -> Self {
+    fn new(
+        mono: &'a MonoMir,
+        mangler: &'a Mangler<'a>,
+        well_known: &'a biwac_scene::WellKnownSymbols,
+    ) -> Self {
         // 名前は実体の索引を添えて一意にする。
         // 同じシンボルでもジェネリック引数が違えば別の関数になるためである。
         let fn_names = mono
@@ -158,6 +171,7 @@ impl<'a> Emitter<'a> {
         Self {
             mono,
             mangler,
+            well_known,
             fn_names,
             ty_names,
             variant_ty_names,
@@ -264,9 +278,16 @@ impl<'a> Emitter<'a> {
             out.push('\n');
         }
 
-        // --- エントリポイント ---
+        // --- ランタイムが名前で呼ぶもの ---
         let entry_name = &self.fn_names[&self.mono.instances[entry].key];
         let _ = writeln!(out, "  (export \"{ENTRYPOINT_NAME}\" (func ${entry_name}))");
+
+        if let Some(def_id) = self.well_known.get(biwac_scene::WellKnownSymbol::OnNewGame)
+            && let Some(inst) = self.mono.instances.iter().find(|i| i.key.def_id == def_id)
+        {
+            let name = &self.fn_names[&inst.key];
+            let _ = writeln!(out, "  (export \"{NEW_GAME_NAME}\" (func ${name}))");
+        }
 
         out.push_str(")\n");
         Ok(out)

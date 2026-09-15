@@ -210,8 +210,7 @@ fn expand_stmt(stmt: &mut Stmt, aliases: &HashMap<TyDefId, TypeAliasDef>) {
             expand_primary(&mut a.dst, aliases);
             expand_expr(&mut a.src, aliases);
         }
-        Stmt::NovelWriteExpr(w) => expand_expr(&mut w.expr, aliases),
-        Stmt::NovelWrite(_) | Stmt::NovelWait(_) => {}
+        Stmt::NovelSyscall(s) => expand_expr(&mut s.call, aliases),
     }
 }
 

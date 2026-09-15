@@ -10,7 +10,7 @@
 //!
 //! 設計は `docs/content-api.md` を参照。
 
-use biwac_ast::{NovelExprMessage, NovelMessage, NovelStmt, NovelWait};
+use biwac_ast::{NovelContent, NovelFlush, NovelStmt};
 use biwac_span::Span;
 
 use crate::{NovelLineHandler, NovelParseError, NovelSourceStream, token::NCodeTokenOption};
@@ -43,7 +43,7 @@ impl<'src> NovelSourceStream<'src> {
         let (ranges, wait) = match line.trim_end().strip_suffix(WAIT_COMMAND) {
             Some(before) => {
                 let cut = line.rfind(WAIT_COMMAND).expect("suffix was found");
-                let wait = NovelStmt::NovelWait(NovelWait {
+                let wait = NovelStmt::ContentFlushAndWait(NovelFlush {
                     span: Span::new(span.module(), span.begin() + before.len(), span.end()),
                 });
 
@@ -133,7 +133,7 @@ impl<'src> NovelSourceStream<'src> {
             let expr_end = self.embedded_expr_end(expr_begin, end)?;
             let expr = self.consume_embedded_expression(expr_begin, expr_end)?;
 
-            out.push(NovelStmt::NovelWriteExpr(NovelExprMessage {
+            out.push(NovelStmt::ContentPush(NovelContent::Expr {
                 expr,
                 span: self.span_of(i, expr_end),
             }));
@@ -279,8 +279,8 @@ fn push_text(out: &mut Vec<NovelStmt>, text: &mut String, span: Span) {
     if text.is_empty() {
         return;
     }
-    out.push(NovelStmt::NovelWrite(NovelMessage {
-        msg: std::mem::take(text),
+    out.push(NovelStmt::ContentPush(NovelContent::Text {
+        text: std::mem::take(text),
         span,
     }));
 }

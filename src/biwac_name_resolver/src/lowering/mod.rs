@@ -25,6 +25,7 @@ pub(crate) fn lower(
     trait_scopes: HashMap<ModId, Vec<TraitDefId>>,
     ext_pkgs: &[biwac_dependency_metadata::ExternalPackage],
     interner: &mut biwac_base::IdentInterner,
+    lang_items: &biwac_lang_item::LangItemTable,
 ) -> Result<Hir, Vec<ResolveError>> {
     let mut errors = Vec::new();
 
@@ -59,7 +60,7 @@ pub(crate) fn lower(
     globals::check_trait_impls(&tys, &traits, ext_pkgs, interner, &mut errors);
 
     // Pass 3: lower all values (fns, impls, novel scenes, native code).
-    let vals = lower_module_vals(&pkg.root_module, &mut errors)
+    let vals = lower_module_vals(&pkg.root_module, lang_items, &mut errors)
         .into_iter()
         .map(|(def_id, val)| (def_id, val))
         .collect();
@@ -138,6 +139,7 @@ fn lower_impl_blocks(
 
 fn lower_module_vals(
     module: &LoadedModule,
+    lang_items: &biwac_lang_item::LangItemTable,
     errors: &mut Vec<ResolveError>,
 ) -> Vec<(ValDefId, ValDefKind)> {
     let mut vals = Vec::new();
@@ -151,7 +153,7 @@ fn lower_module_vals(
                 vals.push(globals::lower_native_fn_def(fn_def, vec![], errors));
             }
             biwac_ast::Globals::NovelScene(scene_def) => {
-                vals.push(novel::lower_novel_scene(scene_def, errors));
+                vals.push(novel::lower_novel_scene(scene_def, lang_items, errors));
             }
             // trait の項目は本体を持たないので値にはならない。
             biwac_ast::Globals::TypeDef(_)
@@ -163,7 +165,7 @@ fn lower_module_vals(
         }
     }
     for (_, child) in module.children_ordered() {
-        vals.extend(lower_module_vals(child, errors));
+        vals.extend(lower_module_vals(child, lang_items, errors));
     }
 
     vals

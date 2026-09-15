@@ -5,6 +5,9 @@ import package::types::string::String;
 import package::game::font::Font;
 import package::game::image::Image;
 import package::types::option::Option;
+import package::game::content::Content;
+import package::game::base_engine::write;
+import package::game::base_engine::wait;
 
 struct Window {
   canvas: Canvas,
@@ -17,6 +20,11 @@ impl Window {
       canvas = Canvas{},
       message_window = MessageWindow{},
     }
+  }
+
+  // クリックが来るまでシーンを止める。
+  fn wait(self) {
+    wait();
   }
   
   [[native(arch="typescript")]]
@@ -59,6 +67,16 @@ impl Canvas {
 }
 
 struct MessageWindow {}
+
+impl MessageWindow {
+  fn push_content(self, content: Content) {
+    match content {
+      Content::Text(text) => {
+        write(text.text);
+      }
+    }
+  }
+}
 
 impl MessageWindow {
   [[native(arch="typescript")]]
