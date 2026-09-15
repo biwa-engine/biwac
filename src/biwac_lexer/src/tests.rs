@@ -1,7 +1,7 @@
 use biwac_base::{IdentInterner, ModId};
 use biwac_span::Span;
 
-use crate::TkKind;
+use crate::{TkKind, TokenizeError, lex};
 
 #[test]
 fn test1() {
@@ -55,7 +55,7 @@ fn foo() {
 
     assert_eq!(TkKind::MarkAssign, tokens[12].kind);
 
-    assert_eq!(TkKind::LiteralString("string"), tokens[13].kind);
+    assert_eq!(TkKind::LiteralString("string".to_string()), tokens[13].kind);
     assert_eq!(Span::new(modu, 58, 66), tokens[13].span);
 
     assert_eq!(TkKind::MarkSemiColon, tokens[14].kind);
@@ -132,4 +132,38 @@ fn token_at_the_end_of_a_region() {
 
     assert_eq!(4, tokens.len());
     assert_eq!(TkKind::Ident(interner.get_or_insert("y")), tokens[3].kind);
+}
+
+/// エスケープの展開。対応表は `biwac_base` にあり、
+/// ノベル DSL の字句解析と共有している。
+#[test]
+fn string_literal_escapes() {
+    let mut interner = IdentInterner::new();
+    let modu = ModId::new_in_self(0);
+
+    let lex_one = |interner: &mut IdentInterner, src: &str| {
+        let tokens = lex(interner, modu, src).expect("should lex");
+        match &tokens[0].kind {
+            TkKind::LiteralString(s) => s.clone(),
+            other => panic!("not a string literal: {other:?}"),
+        }
+    };
+
+    assert_eq!(lex_one(&mut interner, r#""a\"b""#), "a\"b");
+    assert_eq!(lex_one(&mut interner, r#""a\\b""#), "a\\b");
+    assert_eq!(lex_one(&mut interner, r#""a\nb""#), "a\nb");
+    assert_eq!(lex_one(&mut interner, r#""a\tb""#), "a\tb");
+    // 文字列の中の `//` はコメントではない。
+    assert_eq!(
+        lex_one(&mut interner, r#""// not a comment""#),
+        "// not a comment"
+    );
+    // `'` は囲みに使わないのでそのまま書ける。
+    assert_eq!(lex_one(&mut interner, r#""it's fine""#), "it's fine");
+
+    // 決めていない形は黙って通さない。
+    assert!(matches!(
+        lex(&mut interner, modu, r#""\u{1F600}""#),
+        Err(TokenizeError::UnknownEscape { found: 'u', .. })
+    ));
 }

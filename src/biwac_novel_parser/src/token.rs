@@ -432,29 +432,44 @@ impl<'src> NovelSourceStream<'src> {
                     _ => (NCodeTkKind::MarkNot, 1),
                 },
 
-                // `"` 始まりなら、行内で閉じる文字列リテラルでなければならない
-                // NOTE: 通常コード側の字句解析 (biwac_lexer) と同様、
-                // エスケープシーケンスは未対応である
+                // `"` 始まりなら、行内で閉じる文字列リテラルでなければならない。
+                //
+                // エスケープの対応表は `biwac_base` にあり、
+                // 通常コード側の字句解析 (biwac_lexer) と共有している。
+                // 同じ文字列が両方で同じ意味にならなければならない。
                 '"' => {
-                    let mut token_len = 1; // 開き `"` の分
-                    let mut val = String::new();
-                    let mut closed = false;
-
-                    for c in remain_chars.by_ref() {
-                        token_len += c.len_utf8();
-
-                        if c == '"' {
-                            closed = true;
-                            break;
-                        }
-
-                        val.push(c);
-                    }
-
-                    if !closed {
+                    let body_begin = peeking_begin_idx + 1;
+                    let Some(body_len) = biwac_base::string_body_end(&self.src[body_begin..])
+                    else {
                         return Err(NovelParseError::StringLiteralNotClosed {
                             span: self.span_from(peeking_begin_idx, 1),
                         });
+                    };
+
+                    let body = &self.src[body_begin..body_begin + body_len];
+                    let val = biwac_base::unescape(body).map_err(|e| match e {
+                        biwac_base::EscapeError::Unknown { offset, found } => {
+                            NovelParseError::UnknownEscape {
+                                found,
+                                span: self.span_from(body_begin + offset, 2),
+                            }
+                        }
+                        biwac_base::EscapeError::Trailing { offset } => {
+                            NovelParseError::UnknownEscape {
+                                found: '"',
+                                span: self.span_from(body_begin + offset, 1),
+                            }
+                        }
+                    })?;
+
+                    // 開き `"` + 中身 + 閉じ `"`。
+                    let token_len = body_len + 2;
+                    // 中身は自前で読んだので、イテレータもそこまで進める。
+                    for _ in self.src[peeking_begin_idx..peeking_begin_idx + token_len]
+                        .chars()
+                        .skip(1)
+                    {
+                        remain_chars.next();
                     }
 
                     (NCodeTkKind::LiteralString(val), token_len)

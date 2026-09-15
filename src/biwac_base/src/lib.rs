@@ -1,4 +1,5 @@
 mod error;
+mod escape;
 mod ident;
 mod module;
 mod package;
@@ -8,6 +9,7 @@ mod target;
 pub use error::{
     BiwacError, DiagSpan, Diagnostic, ErrorContext, ErrorHolder, print_error_finish_message,
 };
+pub use escape::{EscapeError, known_escapes, string_body_end, unescape, unescape_char};
 pub use ident::{IdentInterner, InternedIdent};
 pub use module::ModPath;
 pub use package::{

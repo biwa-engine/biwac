@@ -1,6 +1,7 @@
 use biwac_span::Span;
 
 use crate::NovelSourceStream;
+use crate::scan::{LineMode, find_line_comment};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NovelLineKind {
@@ -155,10 +156,17 @@ impl<'src> NovelSourceStream<'src> {
                     }
                 };
 
-                // 行の種類によらず、 `//` で行コメント開始
-                // TODO: RawNovel なら `\//` または `\/\/` はコメントアウトのエスケープ
-                let next_line = match trimmed_next_line.split_once("//") {
-                    Some((before_comment, _)) => before_comment.trim_end(),
+                // 行の種類によらず、 `//` で行コメント開始。
+                //
+                // どこからがコメントかは行を頭から走査して決める
+                // (`crate::scan`)。文字列の中の `//` はコメントではないし、
+                // 地の文の `"` はそもそも文字列を開かない。
+                let mode = match kind {
+                    NovelLineKind::RawNovel => LineMode::Novel,
+                    _ => LineMode::Code,
+                };
+                let next_line = match find_line_comment(trimmed_next_line, mode) {
+                    Some(at) => trimmed_next_line[..at].trim_end(),
                     None => trimmed_next_line,
                 };
                 let line_handler = NovelLineHandler::new(
@@ -186,8 +194,9 @@ impl<'src> NovelSourceStream<'src> {
             let start_trimmed_line = raw_next_line.trim_start();
             let start_trimmed_len = raw_next_line.len() - start_trimmed_line.len();
 
-            let next_line = match start_trimmed_line.split_once("//") {
-                Some((before_comment, _)) => before_comment.trim_end(),
+            // 継続行は必ずコード行である。
+            let next_line = match find_line_comment(start_trimmed_line, LineMode::Code) {
+                Some(at) => start_trimmed_line[..at].trim_end(),
                 None => start_trimmed_line.trim_end(),
             };
 

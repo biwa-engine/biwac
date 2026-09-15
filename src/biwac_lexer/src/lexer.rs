@@ -76,9 +76,11 @@ pub(crate) fn divide_regions(mod_id: ModId, src: &str) -> Result<Vec<SrcRegion>,
             c => {
                 if !inner_dsl && !inner_line_comment {
                     if inner_quoted {
-                        // TODO: if backslach appear, start escape
-                        // if &l[idx..idx + 1] == "\\" {}
-                        if c == '\"' {
+                        // エスケープされた文字は中身を見ない。
+                        // 飛ばさないと `"\""` の 2 つ目の `"` で閉じてしまう。
+                        if c == '\\' {
+                            char_indices_iter.next();
+                        } else if c == '\"' {
                             // end of string literal
                             inner_quoted = false;
                             regions.push(SrcRegion {

@@ -13,6 +13,7 @@
 use biwac_ast::{NovelContent, NovelFlush, NovelStmt};
 use biwac_span::Span;
 
+use crate::scan::{self, ScanError};
 use crate::{NovelLineHandler, NovelParseError, NovelSourceStream, token::NCodeTokenOption};
 
 use super::{ParsedNovelStmt, WAIT_COMMAND};
@@ -147,100 +148,21 @@ impl<'src> NovelSourceStream<'src> {
 
     /// `$` の直後 `begin` から、埋め込み式の終端を返す。
     ///
-    /// 文法はどちらの形も `)` で終わる。
-    /// 自由テキストの中で範囲を決められるのはこの性質のおかげである。
-    ///
-    /// ```ebnf
-    /// <embeded-expression> ::= `$` `(` <expression> `)`
-    ///   | `$` <identifier> ( <argument-list> | <member-access-or-method-calling>* <method-calling> )
-    /// ```
+    /// 走査そのものは [`crate::scan`] が持つ。行コメントの切り出しも
+    /// 同じ走査を使うので、ここでは診断に直すだけである。
     fn embedded_expr_end(&self, begin: usize, limit: usize) -> Result<usize, NovelParseError> {
-        let src = self.src();
-
-        let not_expr = || NovelParseError::EmbeddedExpressionExpected {
-            span: self.span_of(begin, (begin + 1).min(limit)),
-        };
-
-        let mut i = begin;
-        let mut ends_with_call;
-
-        match src[i..limit].chars().next() {
-            Some('(') => {
-                i = self.balanced_paren_end(i, limit)?;
-                // `$(expr)` はそれだけで完結する。
-                ends_with_call = true;
-            }
-            Some(c) if is_ident_start(c) => {
-                i = ident_end(src, i, limit);
-                if src[i..limit].starts_with('(') {
-                    i = self.balanced_paren_end(i, limit)?;
-                    ends_with_call = true;
-                } else {
-                    ends_with_call = false;
+        scan::embedded_expr_end(self.src(), begin, limit).map_err(|e| match e {
+            ScanError::NotAnExpression { at } => NovelParseError::EmbeddedExpressionExpected {
+                span: self.span_of(at, (at + 1).min(limit)),
+            },
+            ScanError::UnclosedParen { at } => NovelParseError::EmbeddedExpressionNotClosed {
+                span: self.span_of(at, limit),
+            },
+            ScanError::NotEndingWithCall { begin, end } => {
+                NovelParseError::EmbeddedExpressionMustEndWithCall {
+                    span: self.span_of(begin, end),
                 }
             }
-            _ => return Err(not_expr()),
-        }
-
-        // メンバアクセスとメソッドチェーン。
-        while src[i..limit].starts_with('.') {
-            i += 1;
-            let next = ident_end(src, i, limit);
-            if next == i {
-                return Err(not_expr());
-            }
-            i = next;
-
-            if src[i..limit].starts_with('(') {
-                i = self.balanced_paren_end(i, limit)?;
-                ends_with_call = true;
-            } else {
-                ends_with_call = false;
-            }
-        }
-
-        // 連なりの最後は必ず呼び出しでなければならない。
-        // そうでないと、どこまでが式でどこからがテキストかを決められない。
-        if !ends_with_call {
-            return Err(NovelParseError::EmbeddedExpressionMustEndWithCall {
-                span: self.span_of(begin, i),
-            });
-        }
-
-        Ok(i)
-    }
-
-    /// `(` から対応する `)` の次の位置を返す。
-    ///
-    /// 文字列リテラルの中の括弧は数えない。
-    /// これを忘れると `$foo(")")` で範囲が壊れる。
-    fn balanced_paren_end(&self, begin: usize, limit: usize) -> Result<usize, NovelParseError> {
-        let mut depth = 0usize;
-        let mut in_string = false;
-
-        for (off, c) in self.src()[begin..limit].char_indices() {
-            if in_string {
-                if c == '"' {
-                    in_string = false;
-                }
-                continue;
-            }
-
-            match c {
-                '"' => in_string = true,
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Ok(begin + off + c.len_utf8());
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        Err(NovelParseError::EmbeddedExpressionNotClosed {
-            span: self.span_of(begin, limit),
         })
     }
 
@@ -283,29 +205,4 @@ fn push_text(out: &mut Vec<NovelStmt>, text: &mut String, span: Span) {
         text: std::mem::take(text),
         span,
     }));
-}
-
-fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
-}
-
-fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
-}
-
-/// `begin` から続く識別子の終わり。識別子でなければ `begin` を返す。
-fn ident_end(src: &str, begin: usize, limit: usize) -> usize {
-    let mut i = begin;
-    for (off, c) in src[begin..limit].char_indices() {
-        let ok = if off == 0 {
-            is_ident_start(c)
-        } else {
-            is_ident_continue(c)
-        };
-        if !ok {
-            break;
-        }
-        i = begin + off + c.len_utf8();
-    }
-    i
 }

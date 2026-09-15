@@ -43,10 +43,10 @@ impl<'t, 'src, 'i> TokenStream<'t, 'src, 'i> {
             expecteds: expecteds.clone(),
         })?;
 
-        match t.kind {
+        match &t.kind {
             TkKind::LiteralInteger(val) => Ok(AttrValue::Integer(IntegerLiteral {
                 span: t.span.clone(),
-                val,
+                val: *val,
             })),
             TkKind::LiteralString(str) => Ok(AttrValue::String(StringLiteral {
                 span: t.span.clone(),

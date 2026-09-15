@@ -114,3 +114,88 @@ fn broken_forms_are_rejected() {
         Err(NovelParseError::EmbeddedExpressionExpected { .. })
     ));
 }
+
+// ---- 行コメントと文字列 ----
+//
+// どこからがコメントかは行を頭から走査して決める (`crate::scan`)。
+// 状態を持たずに最初の `//` で切ると、文字列の中で割れる。
+
+#[test]
+fn a_comment_marker_inside_an_embedded_string_is_not_a_comment() {
+    assert_eq!(
+        vec!["expr", "text(\n)"],
+        shape("$gray(\"// コメントも書けるよ\")\n")
+    );
+}
+
+#[test]
+fn a_real_comment_after_an_embedded_string_still_ends_the_line() {
+    assert_eq!(vec!["expr"], shape("$gray(\"// not\") // ここはコメント\n"));
+}
+
+#[test]
+fn a_quote_in_prose_does_not_open_a_string() {
+    // 地の文の `"` はただの文字である。文字列と見てしまうと、
+    // 後ろの `//` がコメントだと分からなくなる。
+    assert_eq!(
+        vec!["text(彼は \"そうだ\" と言った)"],
+        shape("彼は \"そうだ\" と言った // コメント\n")
+    );
+}
+
+#[test]
+fn a_comment_marker_inside_a_command_string_is_not_a_comment() {
+    // `#` 行は行全体がコードなので、文字列の中だけが守られる。
+    assert_eq!(vec!["text(ok\n)"], shape("#let x = \"//\"\nok\n"));
+}
+
+// ---- 文字列リテラルのエスケープ ----
+
+/// 埋め込み式の中に 1 つだけある文字列リテラルの値を取り出す。
+fn embedded_string(src: &str) -> String {
+    use biwac_ast::{Exprs, Literal, Primary};
+
+    for stmt in parse(src).expect("should parse") {
+        let NovelStmt::ContentPush(biwac_ast::NovelContent::Expr { expr, .. }) = stmt else {
+            continue;
+        };
+        let Exprs::Primary(Primary::FnCall(call)) = expr else {
+            continue;
+        };
+        if let Some(Exprs::Primary(Primary::Literal(Literal::String(s)))) = call.args.first() {
+            return s.val.clone();
+        }
+    }
+    panic!("no string literal in an embedded expression: {src:?}");
+}
+
+#[test]
+fn escapes_are_expanded_in_an_embedded_string() {
+    // `"` を含む文字列が書けるようになった。
+    assert_eq!(embedded_string("$gray(\"a\\\"b\")\n"), "a\"b");
+    // 対応表は biwac_base にあり、通常コード側の字句解析と共有している。
+    assert_eq!(embedded_string("$gray(\"a\\nb\")\n"), "a\nb");
+    assert_eq!(embedded_string("$gray(\"a\\\\b\")\n"), "a\\b");
+    assert_eq!(embedded_string("$gray(\"a\\tb\")\n"), "a\tb");
+    // `//` も `'` もそのまま書ける。
+    assert_eq!(embedded_string("$gray(\"// it's\")\n"), "// it's");
+}
+
+#[test]
+fn an_escaped_quote_does_not_end_the_embedded_expression() {
+    // `\"` で閉じてしまうと、式の範囲が手前で切れて地の文に漏れる。
+    assert_eq!(
+        vec!["expr", "text( です。\n)"],
+        shape("$gray(\"a\\\"b\") です。\n")
+    );
+}
+
+#[test]
+fn an_unknown_escape_is_rejected() {
+    // 黙って `\` を残すと、あとから `\u` のような形を足したときに
+    // 既存のコードの意味が変わってしまう。
+    assert!(matches!(
+        parse("$gray(\"\\u{1F600}\")\n"),
+        Err(NovelParseError::UnknownEscape { found: 'u', .. })
+    ));
+}

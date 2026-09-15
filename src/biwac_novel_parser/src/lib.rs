@@ -1,4 +1,5 @@
 mod error;
+mod scan;
 mod symbols;
 mod token;
 mod types;

@@ -32,6 +32,15 @@ pub enum TokenizeError {
     InvalidNumberLiteral {
         span: Span,
     },
+
+    /// 文字列リテラルの中の `\` に、知らない文字が続いている。
+    ///
+    /// 黙って `\` を残さないのは、あとから `\u` のような形を足したときに
+    /// 既存のコードの意味が変わってしまうからである。
+    UnknownEscape {
+        found: char,
+        span: Span,
+    },
 }
 
 impl BiwacError for TokenizeError {
@@ -51,6 +60,29 @@ impl BiwacError for TokenizeError {
                             .with_message("`\"` expected")
                             .with_color(Color::Red),
                     )
+                    .finish()
+                    .print((file_name.as_str(), Source::from(&modsrc.src)))
+                    .unwrap();
+            }
+
+            Self::UnknownEscape { found, span } => {
+                let modsrc = ctx.srcs.mods.get(&span.module()).unwrap();
+
+                let file_name = modsrc.modu.file_name();
+                let begin = modsrc.char_offset(span.begin());
+                let end = modsrc.char_offset(span.end());
+
+                Report::build(ReportKind::Error, (file_name.as_str(), begin..end))
+                    .with_message(format!("unknown escape `\\{found}` in a string literal"))
+                    .with_label(
+                        Label::new((file_name.as_str(), begin..end))
+                            .with_message("not an escape")
+                            .with_color(Color::Red),
+                    )
+                    .with_note(format!(
+                        "biwa understands {}; write `\\\\` for a backslash itself",
+                        biwac_base::known_escapes()
+                    ))
                     .finish()
                     .print((file_name.as_str(), Source::from(&modsrc.src)))
                     .unwrap();

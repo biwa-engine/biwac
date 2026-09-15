@@ -17,62 +17,66 @@ pub enum TkVal {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TkKind<'src> {
-    Ident(InternedIdent),     // identifier
-    LiteralInteger(u64),      // integer literal
-    LiteralFloat(f64),        // integer literal
-    LiteralString(&'src str), // string literal
-    KwBoolTrue,               // bool literal `TRUE`
-    KwBoolFalse,              // bool literal `FALSE`
-    KwImport,                 // import
-    KwPackage,                // package
-    KwFn,                     // fn
-    KwType,                   // type
-    KwLet,                    // let
-    KwIf,                     // if
-    KwElse,                   // else
-    KwWhile,                  // while
-    KwReturn,                 // return
-    KwUint,                   // Uint (reserved word of type)
-    KwInt,                    // Int (reserved word of type)
-    KwFloat,                  // Float (reserved word of type)
-    KwBool,                   // Bool (reserved word of type)
-    KwStruct,                 // struct (reserved word of type)
-    KwEnum,                   // enum (reserved word of type)
-    KwMatch,                  // match
-    KwUnderscore,             // _ (wildcard pattern)
-    KwImpl,                   // impl (reserved word of implementation for type)
-    KwTrait,                  // trait (reserved word of type behavior)
-    KwSelfTyp,                // Self (reserved word of type)
-    KwSelfVar,                // self (reserved word of method value)
-    KwScene,                  // scene (reserved word of novel scene)
-    MarkLPare,                // (
-    MarkRPare,                // )
-    MarkLBrace,               // {
-    MarkRBrace,               // }
-    MarkLBracket,             // [
-    MarkRBracket,             // ]
-    MarkPlus,                 // +
-    MarkMinus,                // -
-    MarkAsterisk,             // *
-    MarkSlash,                // /
-    MarkPercent,              // %
-    MarkAmpersand,            // &
-    MarkAndAnd,               // &&
-    MarkLesser,               // <
-    MarkGreater,              // >
-    MarkLesEq,                // <=
-    MarkGrtEq,                // >=
-    MarkEqual,                // ==
-    MarkNotEq,                // !=
-    MarkAssign,               // =
-    MarkComma,                // ,
-    MarkDot,                  // .
-    MarkArrow,                // ->
-    MarkFatArrow,             // =>
-    MarkColon,                // :
-    MarkSemiColon,            // ;
-    MarkDoubleColon,          // ::
-    DslLiteral(&'src str),    // DSL
+    Ident(InternedIdent), // identifier
+    LiteralInteger(u64),  // integer literal
+    LiteralFloat(f64),    // integer literal
+    /// 文字列リテラル。**エスケープを展開したあとの値**である。
+    ///
+    /// 整数や小数と同じく、トークンが持つのは書かれ方ではなく値である。
+    /// 元の綴りが要るときは span から取る。
+    LiteralString(String),
+    KwBoolTrue,            // bool literal `TRUE`
+    KwBoolFalse,           // bool literal `FALSE`
+    KwImport,              // import
+    KwPackage,             // package
+    KwFn,                  // fn
+    KwType,                // type
+    KwLet,                 // let
+    KwIf,                  // if
+    KwElse,                // else
+    KwWhile,               // while
+    KwReturn,              // return
+    KwUint,                // Uint (reserved word of type)
+    KwInt,                 // Int (reserved word of type)
+    KwFloat,               // Float (reserved word of type)
+    KwBool,                // Bool (reserved word of type)
+    KwStruct,              // struct (reserved word of type)
+    KwEnum,                // enum (reserved word of type)
+    KwMatch,               // match
+    KwUnderscore,          // _ (wildcard pattern)
+    KwImpl,                // impl (reserved word of implementation for type)
+    KwTrait,               // trait (reserved word of type behavior)
+    KwSelfTyp,             // Self (reserved word of type)
+    KwSelfVar,             // self (reserved word of method value)
+    KwScene,               // scene (reserved word of novel scene)
+    MarkLPare,             // (
+    MarkRPare,             // )
+    MarkLBrace,            // {
+    MarkRBrace,            // }
+    MarkLBracket,          // [
+    MarkRBracket,          // ]
+    MarkPlus,              // +
+    MarkMinus,             // -
+    MarkAsterisk,          // *
+    MarkSlash,             // /
+    MarkPercent,           // %
+    MarkAmpersand,         // &
+    MarkAndAnd,            // &&
+    MarkLesser,            // <
+    MarkGreater,           // >
+    MarkLesEq,             // <=
+    MarkGrtEq,             // >=
+    MarkEqual,             // ==
+    MarkNotEq,             // !=
+    MarkAssign,            // =
+    MarkComma,             // ,
+    MarkDot,               // .
+    MarkArrow,             // ->
+    MarkFatArrow,          // =>
+    MarkColon,             // :
+    MarkSemiColon,         // ;
+    MarkDoubleColon,       // ::
+    DslLiteral(&'src str), // DSL
 }
 
 impl TkKind<'_> {
