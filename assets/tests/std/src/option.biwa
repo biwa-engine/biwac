@@ -1,0 +1,37 @@
+// Option[T] 型
+//
+// enum で書かれている。以前は「TypeScript では `T | null`、
+// wasm では `anyref`」という native 表現だったが、
+// その方式では `Option[Int]` や `Option[String]` が書けなかった
+// (wasm の anyref に入るのは WasmGC の参照型だけで、
+//  Int や externref は入らないため)。
+//
+// enum なら payload が生の型のまま入るので、その制限は無い。
+enum Option[T] {
+  None,
+  Some(T),
+}
+
+impl[T] Option[T] {
+  fn is_some(self) -> Bool {
+    match self {
+      Option::Some(_) => TRUE,
+      Option::None => FALSE,
+    }
+  }
+
+  fn is_none(self) -> Bool {
+    match self {
+      Option::Some(_) => FALSE,
+      Option::None => TRUE,
+    }
+  }
+
+  // 中身を取り出す。None なら失敗する。
+  fn unwrap(self) -> T {
+    match self {
+      Option::Some(value) => value,
+      Option::None => package::panic::abort(),
+    }
+  }
+}

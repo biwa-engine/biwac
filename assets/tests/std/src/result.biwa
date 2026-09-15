@@ -1,0 +1,31 @@
+// Result[V, E] 型
+//
+// enum で表現されており、成功または失敗の結果を表す。
+enum Result[V, E] {
+  Err(E),
+  Ok(V),
+}
+
+impl[V, E] Result[V, E] {
+  fn is_ok(self) -> Bool {
+    match self {
+      Result::Ok(_) => TRUE,
+      Result::Err(_) => FALSE,
+    }
+  }
+  
+  fn is_err(self) -> Bool {
+    match self {
+      Result::Ok(_) => FALSE,
+      Result::Err(_) => TRUE,
+    }
+  }
+
+  // 中身を取り出す。Err なら失敗する。
+  fn unwrap(self) -> V {
+    match self {
+      Result::Ok(value) => value,
+      Result::Err(_) => package::panic::abort(),
+    }
+  }
+}

@@ -14,7 +14,18 @@
 // 実際のエンジン実装 (`.biwa_runtime/src/engine/...`) へ解決される。
 [[native(arch="typescript")]]
 {{
-  import { createImage } from "@biwa/engine/api/image";
+  import {
+    addTransition,
+    allocObjectId,
+    createObject,
+    deleteObject,
+    startTransitions,
+  } from "@biwa/engine/api/object";
+  import {
+    clearContent,
+    flushContent,
+    pushContentText,
+  } from "@biwa/engine/api/message";
   import { Sys, type BiwaSyscall } from "@biwa/engine/vm/syscall";
 }}
 
@@ -29,16 +40,39 @@
 // したがって typescript 版と違い syscall の記述子を返さない。
 [[native(arch="wasm")]]
 {{
-  (import "biwa:engine" "sys_write" (func $sys_write (param externref)))
+  (import "biwa:engine" "sys_content_push_text"
+    (func $sys_content_push_text
+      (param externref f32 i32 f32 i32 i32 i32 i32 i32)))
+  (import "biwa:engine" "sys_content_flush" (func $sys_content_flush))
+  (import "biwa:engine" "sys_content_clear" (func $sys_content_clear))
   (import "biwa:engine" "sys_wait" (func $sys_wait))
-  (import "biwa:engine" "sys_create_image" (func $sys_create_image (param externref i32 i32)))
+  (import "biwa:engine" "sys_create_object"
+    (func $sys_create_object
+      (param externref i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "biwa:engine" "sys_delete_object" (func $sys_delete_object (param i32 i32)))
+  (import "biwa:engine" "sys_add_transition"
+    (func $sys_add_transition (param i32 i32 i32 i32 i32 i32)))
+  (import "biwa:engine" "sys_start_transitions" (func $sys_start_transitions (param i32)))
+  (import "biwa:engine" "sys_await_transitions" (func $sys_await_transitions))
+  (import "biwa:engine" "sys_sleep" (func $sys_sleep (param i32)))
   (import "biwa:engine" "sys_string_concat"
     (func $sys_string_concat (param externref externref) (result externref)))
+  (import "biwa:engine" "sys_int_to_string"
+    (func $sys_int_to_string (param i32) (result externref)))
+  (import "biwa:engine" "sys_float_to_string"
+    (func $sys_float_to_string (param f32) (result externref)))
+  (import "biwa:engine" "sys_vec_new" (func $sys_vec_new (result externref)))
+  (import "biwa:engine" "sys_vec_of" (func $sys_vec_of (param anyref) (result externref)))
+  (import "biwa:engine" "sys_vec_push" (func $sys_vec_push (param externref anyref)))
+  (import "biwa:engine" "sys_vec_len" (func $sys_vec_len (param externref) (result i32)))
+  (import "biwa:engine" "sys_vec_get"
+    (func $sys_vec_get (param externref i32) (result anyref)))
   (import "biwa:engine" "sys_map_insert" (func $sys_map_insert (param externref anyref anyref)))
   (import "biwa:engine" "sys_map_get" (func $sys_map_get (param externref anyref) (result anyref)))
 }}
 
-import package::types::string::String;
+import package::string::String;
+import package::game::window::Size;
 
 // syscall の記述子。中身はエンジンとの規約であり、Biwa 側からは不透明。
 [[lang="syscall"]]
@@ -59,42 +93,223 @@ type Syscall = {{
   i32
 }};
 
-// 中断しない syscall。積んで即座に返る。
+// --- canvas オブジェクト ---------------------------------------------------
+//
+// 座標は canvas の中央が原点で、x は右が正、y は**上が正**である。
+// 位置と回転はどちらも画像の中心を基準にする。
+// パラメータの番号 (param) と遷移の種類 (kind) はエンジンとの取り決めで、
+// 一覧は engine の `src/engine/api/transition.ts` にある。
+// 設計は `docs/media-object-model.md` を参照。
+
+// オブジェクトを canvas に置き、その id を返す。
+//
+// `path` はパッケージの `assets/` を基準とした相対パスである。
+// `w` / `h` が負なら「指定しない」で、画像の元のサイズから決まる。
+// 片方だけ正ならアスペクトを保つ。
+//
+// 読み込みは非同期だが、この呼び出しは待たない。
+// 読み込みに失敗しても id は返る (ゲーム側にできることが無いため)。
 [[native(arch="typescript")]]
-fn create_image(path: String, x: Int, y: Int) {{
-  createImage(path, x, y, {
-    dx: (_) => 0,
-    dy: (_) => 0,
-  });
+fn sys_create_object(
+  path: String, layer: Uint,
+  x: Int, y: Int, w: Int, h: Int, alpha: Int, theta: Int,
+) -> Uint {{
+  const id = allocObjectId();
+  createObject(id, path, layer, x, y, w, h, alpha, theta);
+  return id;
 }}
 
 [[native(arch="wasm")]]
-fn create_image(path: String, x: Int, y: Int) {{
+fn sys_create_object(
+  path: String, layer: Uint,
+  x: Int, y: Int, w: Int, h: Int, alpha: Int, theta: Int,
+) -> Uint {{
   local.get 0
   local.get 1
   local.get 2
-  call $sys_create_image
+  local.get 3
+  local.get 4
+  local.get 5
+  local.get 6
+  local.get 7
+  call $sys_create_object
 }}
 
-// scene 内で直接記述されたテキスト (novel statement) の展開先。
-// コンパイラのみが呼び出すことを想定しており、
-// ゲーム開発者やサードパーティが直接呼ぶことは想定していない。
+struct X {
+  x: Size,
+}
+
+impl X {
+  fn vw(vw: Float) -> Self {
+    Self { x = Size::Vw(vw) }
+  }
+}
+
+struct Y {
+  y: Size,
+}
+
+impl Y {
+  fn vh(vh: Float) -> Self {
+    Self { y = Size::Vh(vh) }
+  }
+}
+
+fn create_object(
+  path: String, layer: Uint,
+  x: Int, y: Int, w: Int, h: Int, alpha: Int, theta: Int,
+) -> Uint {
+  sys_create_object(path, layer, x, y, w, h, alpha, theta)
+}
+
+// `after` ミリ秒後にオブジェクトを消す。
+//
+// 完全に透明にしただけでは資源は解放されない。
+// 消えるアニメーションを出したあとは、その終わりに合わせてこれを呼ぶ。
 [[native(arch="typescript")]]
-fn write(msg: String) -> Syscall {{
-  return { sys: Sys.Write, args: [msg] };
+fn delete_object(id: Uint, after: Uint) {{
+  deleteObject(id, after);
 }}
 
-// arch ごとに native が選ばれるので、シグニチャがターゲット間で違ってよい。
-// wasm では記述子を返す必要が無いので戻り値なしにする。
 [[native(arch="wasm")]]
-fn write(msg: String) {{
+fn delete_object(id: Uint, after: Uint) {{
   local.get 0
-  call $sys_write
+  local.get 1
+  call $sys_delete_object
 }}
 
-// novel statement の待ち (クリック待ち) の展開先。
-// write と同じくコンパイラのみが呼び出す。
+// 次の `start_transitions` に備えて遷移を積む。積むだけで何も起きない。
+//
+// `value` は一度限りの遷移では目標値、周期的な遷移では振幅。
+// `after` は発火からの遅れ、`duration` は遷移時間 (周期系では周期)。
+[[native(arch="typescript")]]
+fn add_transition(id: Uint, param: Uint, kind: Uint, value: Int, after: Uint, duration: Uint) {{
+  addTransition(id, param, kind, value, after, duration);
+}}
+
+[[native(arch="wasm")]]
+fn add_transition(id: Uint, param: Uint, kind: Uint, value: Int, after: Uint, duration: Uint) {{
+  local.get 0
+  local.get 1
+  local.get 2
+  local.get 3
+  local.get 4
+  local.get 5
+  call $sys_add_transition
+}}
+
+// 積まれた遷移を発火する。オブジェクトを跨いで一斉に始まる。
+//
+// 置き換わるのは積まれた遷移が触れているパラメータだけなので、
+// 別のオブジェクトや別のパラメータで走っているアニメーションは壊れない。
+//
+// `sync` が 0 でなければ、この演出はテキストの進行と結びつく。
+// クリックはまずこれを完了させ、`await_transitions` が待つ対象にもなる。
+[[native(arch="typescript")]]
+fn start_transitions(sync: Uint) {{
+  startTransitions(sync);
+}}
+
+[[native(arch="wasm")]]
+fn start_transitions(sync: Uint) {{
+  local.get 0
+  call $sys_start_transitions
+}}
+
+// sync 印の演出がすべて終わるまでシーンを止める。
+//
+// NOTE: wasm ターゲット専用である。TypeScript ターゲットで `yield` を置けるのは
+// 今のところ novel statement の展開先だけで、任意の呼び出しを中断させる手段が
+// コンパイラに無い。
+[[native(arch="wasm")]]
+fn await_transitions() {{
+  call $sys_await_transitions
+}}
+
+// エンジン時計の上で指定時間シーンを止める (ポーズ中は進まない)。
+// `await_transitions` と同じく wasm ターゲット専用。
+[[native(arch="wasm")]]
+fn sleep(ms: Uint) {{
+  local.get 0
+  call $sys_sleep
+}}
+
+// --- ノベルテキスト --------------------------------------------------------
+//
+// Content API (`std::game::content`) の下にある低レベルの API である。
+// **設定はすべて std 側で解決済み**で、ここに来るのは絶対値だけである
+// (`docs/content-api.md` の決めたこと 3)。エンジンは設定を持たない。
+
+// Content を 1 つ積む。まだ描画しない。
+//
+// - `speed` は秒間何文字出るか
+// - `size_unit` は 0 = vw, 1 = vh。`size_value` はその単位に対する値
+//   (`Size` は enum なので、wasm の引数に載せるために 2 つに割っている)
+// - `weight` は 100 〜 900
+// - 色は `r` / `g` / `b` / `a` の 4 つに割って渡す。
+//   1 語に詰めないのは、biwa にビット演算が無く、
+//   算術で詰めると `a` が i32 の符号を跨ぐためである
+[[native(arch="typescript")]]
+fn sys_content_push_text(
+  text: String, speed: Float,
+  size_unit: Uint, size_value: Float,
+  weight: Uint,
+  r: Uint, g: Uint, b: Uint, a: Uint,
+) {{
+  pushContentText(text, speed, size_unit, size_value, weight, r, g, b, a);
+}}
+
+[[native(arch="wasm")]]
+fn sys_content_push_text(
+  text: String, speed: Float,
+  size_unit: Uint, size_value: Float,
+  weight: Uint,
+  r: Uint, g: Uint, b: Uint, a: Uint,
+) {{
+  local.get 0
+  local.get 1
+  local.get 2
+  local.get 3
+  local.get 4
+  local.get 5
+  local.get 6
+  local.get 7
+  local.get 8
+  call $sys_content_push_text
+}}
+
+// 積まれた content をまとめて出し始める。
+[[native(arch="typescript")]]
+fn sys_content_flush() {{
+  flushContent();
+}}
+
+[[native(arch="wasm")]]
+fn sys_content_flush() {{
+  call $sys_content_flush
+}}
+
+// 枠を空にする。
+//
+// **エンジンは自分の判断でクリアしない。** いつ消えるかを決めるのは std である
+// (決めたこと 2)。待っても消したくない API を将来足すときに、
+// 変更がエンジンまで波及しないようにするための切り分けである。
+[[native(arch="typescript")]]
+fn sys_content_clear() {{
+  clearContent();
+}}
+
+[[native(arch="wasm")]]
+fn sys_content_clear() {{
+  call $sys_content_clear
+}}
+
+// クリックが来るまで待つ。
 // エンジンはクリックが来るまで scene を再開しない。
+//
+// NOTE: TypeScript ターゲットでは動かない。記述子を返しても、
+// これを呼ぶ `content_flush_and_wait` は普通の関数なので
+// コンパイラが `yield` を置かない (`docs/content-api.md` の段 2 を参照)。
 [[native(arch="typescript")]]
 fn wait() -> Syscall {{
   return { sys: Sys.Wait, args: [] };
@@ -103,4 +318,31 @@ fn wait() -> Syscall {{
 [[native(arch="wasm")]]
 fn wait() {{
   call $sys_wait
+}}
+
+// --- 値の変換 --------------------------------------------------------------
+//
+// エンジン呼び出しではなく、wasm の値に対する操作である。
+// `String` の実体はホスト側にしか無いので、数値から作るのもホストに頼む。
+
+[[native(arch="typescript")]]
+fn int_to_string(val: Int) -> String {{
+  return String(val);
+}}
+
+[[native(arch="wasm")]]
+fn int_to_string(val: Int) -> String {{
+  local.get 0
+  call $sys_int_to_string
+}}
+
+[[native(arch="typescript")]]
+fn float_to_string(val: Float) -> String {{
+  return String(val);
+}}
+
+[[native(arch="wasm")]]
+fn float_to_string(val: Float) -> String {{
+  local.get 0
+  call $sys_float_to_string
 }}

@@ -1,0 +1,93 @@
+// Game に与える設定
+// configuration given to `struct Game`.
+
+import package::game::color::Color;
+import package::game::window::Size;
+import package::game::content::ContentSpeed;
+
+struct Config {
+  // 開発者によって設定されるconfig
+  // ビルド時に固定される種類の値を格納
+  dev: DeveloperConfig,
+  
+  // ユーザ(プレイヤー)によって実行時に変更されうるconfig
+  user: UserConfig,
+}
+
+struct DeveloperConfig {
+  // window の mode
+  // *Only にすると、設定していない方のモードに変更しようとするAPIが発行されても
+  // 無視される
+  mode: WindowMode,
+
+  // 開発者によって設定されるデフォルトの文字速度
+  // [text per sec]
+  default_content_speed: ContentSpeed,
+
+  // 開発者によって設定されるデフォルトの文字サイズ
+  default_content_size: Size,
+
+  // 開発者によって設定されるデフォルトの文字色
+  default_text_color: Color,
+}
+
+struct UserConfig {
+  // ユーザによって動的に設定された文字速度
+  // デフォルト値は DeveloperConfig.default_content_speed 
+  content_speed: ContentSpeed,
+  
+  // ユーザによって動的に設定された文字サイズ
+  // デフォルト値は DeveloperConfig.default_content_size 
+  content_size: Size,
+}
+
+enum WindowMode {
+  Both,
+  AdventureOnly,
+  VisualNovelOnly,
+}
+
+impl Config {
+  // 何も指定しないゲームのための設定。
+  //
+  // `Game::new()` が使う。値を変えたいゲームは
+  // `DeveloperConfig::new()` を組み立てて `Config::new()` を呼ぶ。
+  fn default() -> Self {
+    Config::new(DeveloperConfig::default())
+  }
+
+  fn new(dev: DeveloperConfig) -> Self {
+    Self {
+      dev = dev,
+      user = UserConfig {
+        content_speed = dev.default_content_speed,
+        content_size = dev.default_content_size,
+      },
+    }
+  }
+}
+
+impl DeveloperConfig {
+  fn default() -> Self {
+    Self {
+      mode = WindowMode::Both,
+      default_content_speed = ContentSpeed { text_per_sec = 5.0 },
+      default_content_size = Size::Vh(2.0),
+      default_text_color = Color::white(),
+    }
+  }
+
+  fn new(
+    mode: WindowMode,
+    default_content_speed: ContentSpeed,
+    default_content_size: Size,
+    default_text_color: Color
+  ) -> Self {
+    Self {
+      mode = mode,
+      default_content_speed = default_content_speed,
+      default_content_size = default_content_size,
+      default_text_color = default_text_color,
+    }
+  }
+}

@@ -1,15 +1,107 @@
-import package::types::option::Option;
+import package::option::Option;
+import package::option::Option::Some;
+import package::option::Option::None;
 
+// 可変長の配列。
+//
+// TypeScript では素の Array、wasm ではホスト (Worker) が持つ JS の配列である。
+// wasm の値をホスト側に置くのは、`String` や `Map` と同じ理由による
+// (可変長のコンテナを wasm 側で持つ手段がまだない)。
+//
+// 制約: wasm では要素が anyref として渡るため、
+// **要素の型は参照型 (struct) に限る**。`Vec[Int]` や `Vec[String]` は
+// バックエンドがエラーにする。
+// (`Option[T]` はこの制約から外れた。enum になったため)
 [[native(arch="typescript")]]
 type Vec[T] = {{
   Array<T>
 }};
 
-// 可変長のコンテナはホストが持つ。
 [[native(arch="wasm")]]
 type Vec[T] = {{
   externref
 }};
+
+impl[T] Vec[T] {
+  // 空のVecを生成
+  [[native(arch="typescript")]]
+  fn new() -> Self {{
+    return [];
+  }}
+
+  [[native(arch="wasm")]]
+  fn new() -> Self {{
+    call $sys_vec_new
+  }}
+
+  // 最初の 1 要素から作る。
+  //
+  // `new()` は要素の型が戻り値にしか現れないため、
+  // 文脈から決められない場所では使えない (コンパイラの制限)。
+  // 引数から要素の型が決まるこちらならどこでも書ける。
+  [[native(arch="typescript")]]
+  fn of(value: T) -> Self {{
+    return [value];
+  }}
+
+  [[native(arch="wasm")]]
+  fn of(value: T) -> Self {{
+    local.get 0
+    call $sys_vec_of
+  }}
+
+  // 値を後ろに追加
+  [[native(arch="typescript")]]
+  fn push(self, value: T) {{
+    self.push(value);
+  }}
+
+  [[native(arch="wasm")]]
+  fn push(self, value: T) {{
+    local.get 0
+    local.get 1
+    call $sys_vec_push
+  }}
+
+  // 長さを取得
+  [[native(arch="typescript")]]
+  fn len(self) -> Uint {{
+    return self.length;
+  }}
+
+  [[native(arch="wasm")]]
+  fn len(self) -> Uint {{
+    local.get 0
+    call $sys_vec_len
+  }}
+
+  // index指定した位置の値を取得。範囲外なら None。
+  //
+  // Option は enum なので、native から直接は組み立てられない。
+  // 範囲の検査と Option の構築は biwa 側で書き、
+  // native は「範囲内であることが分かっている取り出し」だけを担う。
+  fn get(self, index: Uint) -> Option[T] {
+    if index < self.len() {
+      Some(self.get_unchecked(index))
+    } else {
+      None
+    }
+  }
+
+  // 範囲を検査しない取り出し。範囲外を渡してはならない。
+  [[native(arch="typescript")]]
+  fn get_unchecked(self, index: Uint) -> T {{
+    return self[index];
+  }}
+
+  [[native(arch="wasm")]]
+  fn get_unchecked(self, index: Uint) -> T {{
+    local.get 0
+    local.get 1
+    call $sys_vec_get
+    ref.cast %ret%
+  }}
+}
 
 [[native(arch="typescript")]]
 type Map[K, V] = {{
@@ -35,22 +127,46 @@ impl[K, V] Map[K, V] {
     call $sys_map_insert
   }}
 
-  // T? ( Option[T] ) のtypescript実装では None は null として扱われる
-  // Map.prototype.get(key)は値がなければundefinedを返すので、nullに変換
-  [[native(arch="typescript")]]
-  fn get(self, key: K) -> Option[V] {{
-    let value = self.get(key);
-    if(value) {
-      return value;
+  // Option は enum なので、Vec と同じく構築は biwa 側で書く。
+  fn get(self, key: K) -> Option[V] {
+    if self.has(key) {
+      Some(self.get_unchecked(key))
     } else {
-      return null;
+      None
     }
+  }
+
+  [[native(arch="typescript")]]
+  fn has(self, key: K) -> Bool {{
+    return self.has(key);
   }}
 
   [[native(arch="wasm")]]
-  fn get(self, key: K) -> Option[V] {{
+  fn has(self, key: K) -> Bool {{
     local.get 0
     local.get 1
     call $sys_map_get
+    ref.is_null
+    i32.eqz
+  }}
+
+  // キーがあることが分かっている取り出し。
+  //
+  // `Map.prototype.get` の戻りは `V | undefined` なので、
+  // キーの存在を先に確かめてある前提で押し込む。
+  [[native(arch="typescript")]]
+  fn get_unchecked(self, key: K) -> V {{
+    // 型引数の名前はマングルされるので、native の中では書けない。
+    return self.get(key) as any;
+  }}
+
+  [[native(arch="wasm")]]
+  fn get_unchecked(self, key: K) -> V {{
+    local.get 0
+    local.get 1
+    call $sys_map_get
+    ref.cast %ret%
   }}
 }
+
+

@@ -1,8 +1,10 @@
-import package::types::string::String;
-import package::types::option::Option;
+import package::string::String;
+import package::option::Option;
 import image::Image;
+import image::CanvasObject;
 import window::Window;
 import window::Position;
+import config::Config;
 
 // 進行中のノベルゲームを表す構造体
 // C: キャラクター構造体Character[V]のみをいくつもメンバに含む構造体
@@ -18,8 +20,25 @@ struct Game[C, S] {
   characters: C,
   states: S,
   window: Window,
+
+  // 文字速度・サイズ・色などの設定。
+  //
+  // **エンジンは設定を持たない。** std がここを読んで絶対値に直してから
+  // syscall に渡す。
+  config: Config,
 }
 
+impl[C, S] Game[C, S] {
+  fn new(name: String, characters: C, states: S, config: Config) -> Self {
+    Self {
+      name = name,
+      characters = characters,
+      states = states,
+      window = Window::new(),
+      config = config,
+    }
+  }
+}
 
 // キャラクターを表す構造体
 // P: 個々のキャラクターが持つ特有のプロパティを格納するcustom properties
@@ -31,65 +50,10 @@ struct Character[P] {
   props: P,
   default_visual: Image,
   default_face: Image,
-  current_visual: Image,
-  current_face: Image,
+  current_visual: Option[CanvasObject],
+  current_face: Option[CanvasObject],
   current_position: Option[Position], // キャラクターの画面上の位置。noneならば画面上にない
-  window: Window, // Window の API を利用するために参照を内部的に保持
-}
-
-
-impl[P] Character[P] {
-  fn new(
-    window: Window,
-    name: String,
-    display_name: String,
-    props: P,
-    default_visual: Image,
-    default_face: Image,
-  ) -> Self {
-    Self {
-      name = name,
-      display_name = display_name,
-      props = props,
-      default_visual = default_visual,
-      default_face = default_face,
-      current_visual = default_visual,
-      current_face = default_face,
-      window = window,
-      current_position = Option::none(),
-    }
-  }
-
-  // 容姿を更新し表示に反映
-  fn update_visual(self, visual: Image) {
-    self.current_visual = visual;
-    // // TODO: window 更新処理
-    // match self.current_position {
-    //   Some(pos) => {
-    //     // TODO:
-    //   }
-    //   None => {}
-    // }
-  }
-
-  // 表情を更新し表示に反映
-  fn update_face(self, face: Image) {
-    self.current_face = face;
-    self.become_talker();
-  }
-
-  fn appear(self) {
-    // TODO: 画面上に登場する
-  }
-
-  fn disappear(self) {
-    // TODO: 画面上から消える
-  }
-
-  fn become_talker(self) {
-    self.window.message_window.set_talker_name(self.display_name);
-    self.window.message_window.set_talker_image(self.current_face);
-  }
+  // window: Window, // Window の API を利用するために参照を内部的に保持
 }
 
 // // ゲーム開発者は、独自定義の型でジェネリクスを埋めた具体の型についてimplする

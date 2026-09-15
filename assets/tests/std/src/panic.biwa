@@ -1,0 +1,20 @@
+// 回復できない失敗。
+//
+// biwa にはまだ例外も `!` 型も無いので、
+// 「戻らない」ことを型で表せない。
+// 戻り値の型をジェネリックにしておき、
+// 呼び出し位置が要求する型に合わせられるようにしている。
+
+// 実行を打ち切る。
+//
+// wasm では `unreachable` に落ちる (trap)。
+// TypeScript では例外を投げる。
+[[native(arch="typescript")]]
+fn abort[T]() -> T {{
+  throw new Error("[biwa] aborted");
+}}
+
+[[native(arch="wasm")]]
+fn abort[T]() -> T {{
+  unreachable
+}}

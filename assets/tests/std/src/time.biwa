@@ -1,0 +1,26 @@
+struct Duration {
+  ms: Uint,
+}
+
+impl Duration {
+  fn ms(ms: Uint) -> Self {
+    Self { ms = ms }
+  }
+  
+  fn sec(sec: Uint) -> Self {
+    Self { ms = sec * 1000 }
+  }
+  
+  fn min(min: Uint) -> Self {
+    Self { ms = min * 60 * 1000 }
+  }
+
+  fn as_ms(self) -> Uint {
+    self.ms
+  }
+
+  // trait が導入されたら + のオーバーロードにする
+  fn add(self, rhs: Duration) -> Self {
+    Self { ms = self.ms + rhs.ms }
+  }
+}

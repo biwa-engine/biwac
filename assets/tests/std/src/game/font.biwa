@@ -1,4 +1,4 @@
-import package::types::string::String;
+import package::string::String;
 
 struct Font {
   path: String,
@@ -7,5 +7,47 @@ struct Font {
 impl Font {
   fn new(path: String) -> Self {
     Self { path = path }
+  }
+}
+
+struct TextWeight {
+  weight: Uint, // such as 100, 300, 400, 500, 700, ...
+}
+
+impl TextWeight {
+  fn thin() -> Self {
+    Self { weight = 100 }
+  }
+  
+  fn extra_light() -> Self {
+    Self { weight = 200 }
+  }
+  
+  fn light() -> Self {
+    Self { weight = 300 }
+  }
+  
+  fn normal() -> Self {
+    Self { weight = 400 }
+  }
+  
+  fn medium() -> Self {
+    Self { weight = 500 }
+  }
+  
+  fn semi_bold() -> Self {
+    Self { weight = 600 }
+  }
+  
+  fn bold() -> Self {
+    Self { weight = 700 }
+  }
+  
+  fn extra_bold() -> Self {
+    Self { weight = 800 }
+  }
+  
+  fn heavy() -> Self {
+    Self { weight = 900 }
   }
 }

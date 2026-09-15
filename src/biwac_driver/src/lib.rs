@@ -1565,7 +1565,7 @@ mod tests {
         assert!(wat.starts_with("(module"), "{wat}");
         // ホスト関数の import 名は std のソースが決めている。
         assert!(
-            wat.contains("(import \"biwa:engine\" \"sys_write\""),
+            wat.contains("(import \"biwa:engine\" \"sys_content_push_text\""),
             "{wat}"
         );
         // 単相化されているので、同じ struct の複数の実体が別々の型になる。
@@ -1573,6 +1573,8 @@ mod tests {
         assert!(wat.contains("struct.new"), "{wat}");
         // エントリポイントが export される。
         assert!(wat.contains("(export \"__biwa_entrypoint\""), "{wat}");
+        // 初期 `Game` を組み立てる入口も export される。
+        assert!(wat.contains("(export \"__biwa_on_new_game\""), "{wat}");
 
         // .wasm は検証を通ったものである
         // (通っていなければ compile がエラーになっている)。

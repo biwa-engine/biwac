@@ -1,8 +1,7 @@
-// 型どうしの変換。
-//
-// `Into[T]` は Content API が使う。
-// scene に書かれた値は `String` だったり `Int` だったりするので、
-// Message Window に積む前に `Content` に揃える必要がある。
+trait From[T] {
+  fn from(value: T) -> Self;
+}
+
 trait Into[T] {
   fn into(self) -> T;
 }

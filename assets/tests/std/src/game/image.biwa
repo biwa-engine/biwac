@@ -1,5 +1,520 @@
-import package::types::string::String;
+import package::string::String;
+import package::time::Duration;
 
+// --- パラメータと遷移の種類 ------------------------------------------------
+//
+// enum が入るまでの間、番号に名前を付けておく。
+// 番号はエンジンの `src/engine/api/transition.ts` と対になっている。
+// 普段はこの下のチェーン API を使えばよく、
+// 番号を直接触るのは `CanvasObject::add_transition` を生で呼ぶときだけである。
+
+fn param_x() -> Uint { 0 }
+fn param_y() -> Uint { 1 }
+fn param_w() -> Uint { 2 }
+fn param_h() -> Uint { 3 }
+fn param_alpha() -> Uint { 4 }
+fn param_theta() -> Uint { 5 }
+
+fn kind_none() -> Uint { 0 }
+fn kind_linear() -> Uint { 1 }
+fn kind_ease_in() -> Uint { 2 }
+fn kind_ease_out() -> Uint { 3 }
+fn kind_ease_in_out() -> Uint { 4 }
+fn kind_ease_out_in() -> Uint { 5 }
+fn kind_sin() -> Uint { 16 }
+fn kind_triangle() -> Uint { 17 }
+fn kind_square() -> Uint { 18 }
+fn kind_saw() -> Uint { 19 }
+
+// --- 画像 ------------------------------------------------------------------
+
+// まだエンジン上ではロード/描画されていない画像を表す構造体。
+// 描画したキャンバス上のオブジェクトとしては CanvasObject 構造体で表す。
 struct Image {
   path: String,
+}
+
+impl Image {
+  fn new(path: String) -> Self {
+    Self { path = path }
+  }
+
+  // キャンバス上に描画する。
+  // CanvasObject を返すので、以降はそれを使ってアニメーションなどを操作する。
+  //
+  // `w` / `h` が負なら「指定しない」で、画像の元のサイズから決まる。
+  // 片方だけ正ならアスペクトを保つ。
+  fn show_in_canvas(self, layer: Uint, x: Int, y: Int, w: Int, h: Int, alpha: Int) -> CanvasObject {
+    CanvasObject::create(self, layer, x, y, w, h, alpha)
+  }
+}
+
+// --- canvas 上のオブジェクト -----------------------------------------------
+
+// エンジンに置かれたオブジェクトへのハンドル。
+//
+// 遷移はエンジン側に積まれ、`transit()` を呼ぶまで始まらない。
+// std が持っているのは 2 種類の覚え書きだけである。
+//
+// - `x`..`theta`: 積んだ遷移の目標値。つまり**アニメーション後の値**。
+//   動いている画像の「今の位置」はエンジンからは取れないので、
+//   立ち絵の差し替え (`Character::change_visual`) ではこれを使う。
+// - `*_after`: そのパラメータに積んだ遷移の合計時間。
+//   連続した遷移の開始時刻を計算するために持つ。
+struct CanvasObject {
+  id: Uint,
+  layer: Uint,
+  x: Int,
+  y: Int,
+  w: Int,
+  h: Int,
+  alpha: Int,
+  theta: Int,
+  x_after: Uint,
+  y_after: Uint,
+  w_after: Uint,
+  h_after: Uint,
+  alpha_after: Uint,
+  theta_after: Uint,
+}
+
+impl CanvasObject {
+  fn create(image: Image, layer: Uint, x: Int, y: Int, w: Int, h: Int, alpha: Int) -> Self {
+    let id = package::game::base_engine::create_object(image.path, layer, x, y, w, h, alpha, 0);
+
+    Self {
+      id = id,
+      layer = layer,
+      x = x,
+      y = y,
+      w = w,
+      h = h,
+      alpha = alpha,
+      theta = 0,
+      x_after = 0,
+      y_after = 0,
+      w_after = 0,
+      h_after = 0,
+      alpha_after = 0,
+      theta_after = 0,
+    }
+  }
+
+  // 画面上に無いことを表すダミー。
+  //
+  // エンジンの id は 1 から始まるので 0 は空きである。
+  // 立ち絵を出す前の Character でもチェーンを書けるように、
+  // 「何もしないオブジェクト」を返せるようにしてある。
+  fn absent() -> Self {
+    Self {
+      id = 0,
+      layer = 0,
+      x = 0,
+      y = 0,
+      w = 0,
+      h = 0,
+      alpha = 0,
+      theta = 0,
+      x_after = 0,
+      y_after = 0,
+      w_after = 0,
+      h_after = 0,
+      alpha_after = 0,
+      theta_after = 0,
+    }
+  }
+
+  fn is_present(self) -> Bool {
+    self.id > 0
+  }
+
+  // そのパラメータに積んだ遷移の合計時間。次に積むものの開始時刻になる。
+  fn after_of(self, param: Uint) -> Uint {
+    let after = 0;
+    if param == 0 { after = self.x_after; }
+    if param == 1 { after = self.y_after; }
+    if param == 2 { after = self.w_after; }
+    if param == 3 { after = self.h_after; }
+    if param == 4 { after = self.alpha_after; }
+    if param == 5 { after = self.theta_after; }
+    after
+  }
+
+  fn advance(self, param: Uint, ms: Uint) {
+    if param == 0 { self.x_after = self.x_after + ms; }
+    if param == 1 { self.y_after = self.y_after + ms; }
+    if param == 2 { self.w_after = self.w_after + ms; }
+    if param == 3 { self.h_after = self.h_after + ms; }
+    if param == 4 { self.alpha_after = self.alpha_after + ms; }
+    if param == 5 { self.theta_after = self.theta_after + ms; }
+  }
+
+  // 積んだ遷移の目標値を覚える。
+  fn remember(self, param: Uint, value: Int) {
+    if param == 0 { self.x = value; }
+    if param == 1 { self.y = value; }
+    if param == 2 { self.w = value; }
+    if param == 3 { self.h = value; }
+    if param == 4 { self.alpha = value; }
+    if param == 5 { self.theta = value; }
+  }
+
+  fn reset(self) {
+    self.x_after = 0;
+    self.y_after = 0;
+    self.w_after = 0;
+    self.h_after = 0;
+    self.alpha_after = 0;
+    self.theta_after = 0;
+  }
+
+  // 一度限りの遷移を積む。`transit()` を呼ぶまで始まらない。
+  //
+  // 同じパラメータに続けて積めば、前の遷移が終わったところから始まる。
+  fn add_transition(self, param: Uint, kind: Uint, value: Int, duration: Duration) -> Self {
+    if self.is_present() {
+      package::game::base_engine::add_transition(
+        self.id, param, kind, value, self.after_of(param), duration.as_ms());
+      self.advance(param, duration.as_ms());
+      self.remember(param, value);
+    }
+
+    self
+  }
+
+  // 周期的な遷移を積み、`until` 経過したところで止める。
+  //
+  // 止めるのは同じパラメータに `none` を置くことで行う。
+  // 周期系は終端を持たないので、これを置かないと次に同じパラメータを
+  // 駆動するまで揺れ続ける。
+  fn add_periodic(
+    self,
+    param: Uint,
+    kind: Uint,
+    amplitude: Int,
+    period: Duration,
+    until: Duration,
+  ) -> Self {
+    if self.is_present() {
+      let start = self.after_of(param);
+
+      package::game::base_engine::add_transition(
+        self.id, param, kind, amplitude, start, period.as_ms());
+      package::game::base_engine::add_transition(
+        self.id, param, kind_none(), 0, start + until.as_ms(), 0);
+
+      self.advance(param, until.as_ms());
+    }
+
+    self
+  }
+
+  // 止めない周期的な遷移。次に同じパラメータを駆動するまで続く。
+  fn add_periodic_forever(self, param: Uint, kind: Uint, amplitude: Int, period: Duration) -> Self {
+    if self.is_present() {
+      package::game::base_engine::add_transition(
+        self.id, param, kind, amplitude, self.after_of(param), period.as_ms());
+    }
+
+    self
+  }
+
+  // そのパラメータの遷移をその場で終わらせる。
+  fn add_stop(self, param: Uint) -> Self {
+    if self.is_present() {
+      package::game::base_engine::add_transition(
+        self.id, param, kind_none(), 0, self.after_of(param), 0);
+    }
+
+    self
+  }
+
+  // 遷移と遷移の間に間を置く。
+  fn add_sleep(self, param: Uint, duration: Duration) -> Self {
+    self.advance(param, duration.as_ms());
+
+    self
+  }
+
+  // 積んだ遷移を発火する。
+  // テキストの進行と結びつくので、クリックはまずこの演出を完了させる。
+  fn transit(self) -> Self {
+    if self.is_present() {
+      package::game::base_engine::start_transitions(1);
+      self.reset();
+    }
+
+    self
+  }
+
+  // テキストとは無関係に走らせる版。クリックでは飛ばない。
+  fn transit_free(self) -> Self {
+    if self.is_present() {
+      package::game::base_engine::start_transitions(0);
+      self.reset();
+    }
+
+    self
+  }
+
+  fn delete(self, after: Duration) {
+    if self.is_present() {
+      package::game::base_engine::delete_object(self.id, after.as_ms());
+    }
+  }
+
+  // --- チェーンの入口 ---
+  //
+  // 複数のパラメータを同じ時間で一斉に動かすときは `and()`。
+  // 1 つのパラメータを連続して動かすときは `*_then()`。
+
+  fn and(self) -> ObjectBatchChain {
+    ObjectBatchChain::new(self)
+  }
+
+  fn x_then(self) -> ObjectParamChain {
+    ObjectParamChain::new(self, param_x())
+  }
+
+  fn y_then(self) -> ObjectParamChain {
+    ObjectParamChain::new(self, param_y())
+  }
+
+  fn w_then(self) -> ObjectParamChain {
+    ObjectParamChain::new(self, param_w())
+  }
+
+  fn h_then(self) -> ObjectParamChain {
+    ObjectParamChain::new(self, param_h())
+  }
+
+  fn alpha_then(self) -> ObjectParamChain {
+    ObjectParamChain::new(self, param_alpha())
+  }
+
+  fn theta_then(self) -> ObjectParamChain {
+    ObjectParamChain::new(self, param_theta())
+  }
+}
+
+// --- 1 つのパラメータを連続して動かすチェーン -------------------------------
+//
+// 「それから」というニュアンスでメソッド名には then が付く。
+// 開始時刻は CanvasObject が覚えているので、ここでは積むだけでよい。
+
+struct ObjectParamChain {
+  obj: CanvasObject,
+  param: Uint,
+}
+
+impl ObjectParamChain {
+  fn new(obj: CanvasObject, param: Uint) -> Self {
+    Self { obj = obj, param = param }
+  }
+
+  fn linear_then(self, value: Int, duration: Duration) -> Self {
+    self.obj.add_transition(self.param, kind_linear(), value, duration);
+    self
+  }
+
+  fn easein_then(self, value: Int, duration: Duration) -> Self {
+    self.obj.add_transition(self.param, kind_ease_in(), value, duration);
+    self
+  }
+
+  fn easeout_then(self, value: Int, duration: Duration) -> Self {
+    self.obj.add_transition(self.param, kind_ease_out(), value, duration);
+    self
+  }
+
+  fn easeinout_then(self, value: Int, duration: Duration) -> Self {
+    self.obj.add_transition(self.param, kind_ease_in_out(), value, duration);
+    self
+  }
+
+  // `until` の間だけ揺らす。多くの場合は終わりを決めたいのでこちらを使う。
+  fn sin_then(self, amplitude: Int, period: Duration, until: Duration) -> Self {
+    self.obj.add_periodic(self.param, kind_sin(), amplitude, period, until);
+    self
+  }
+
+  // 止めずに揺らし続ける。次に同じパラメータを駆動するまで続く。
+  fn sin_forever(self, amplitude: Int, period: Duration) -> Self {
+    self.obj.add_periodic_forever(self.param, kind_sin(), amplitude, period);
+    self
+  }
+
+  fn stop_then(self) -> Self {
+    self.obj.add_stop(self.param);
+    self
+  }
+
+  fn sleep_then(self, duration: Duration) -> Self {
+    self.obj.add_sleep(self.param, duration);
+    self
+  }
+
+  fn animate(self) -> CanvasObject {
+    self.obj.transit()
+  }
+
+  fn animate_free(self) -> CanvasObject {
+    self.obj.transit_free()
+  }
+}
+
+// --- 複数のパラメータを一斉に動かすチェーン ---------------------------------
+//
+// 「かつ」というニュアンスでメソッド名には and が付く。
+// 時間は最後の `animate_for()` でまとめて決まるので、
+// それまでパラメータごとに 1 つずつ積んでおく。
+
+struct ParamSlot {
+  used: Bool,
+  kind: Uint,
+  value: Int,
+  // 周期系のときの周期 [ms]。0 なら一度限りの遷移。
+  period: Uint,
+}
+
+impl ParamSlot {
+  fn empty() -> Self {
+    Self { used = FALSE, kind = 0, value = 0, period = 0 }
+  }
+
+  fn once(kind: Uint, value: Int) -> Self {
+    Self { used = TRUE, kind = kind, value = value, period = 0 }
+  }
+
+  fn periodic(kind: Uint, amplitude: Int, period: Uint) -> Self {
+    Self { used = TRUE, kind = kind, value = amplitude, period = period }
+  }
+}
+
+struct ObjectBatchChain {
+  obj: CanvasObject,
+  x: ParamSlot,
+  y: ParamSlot,
+  w: ParamSlot,
+  h: ParamSlot,
+  alpha: ParamSlot,
+  theta: ParamSlot,
+}
+
+impl ObjectBatchChain {
+  fn new(obj: CanvasObject) -> Self {
+    Self {
+      obj = obj,
+      x = ParamSlot::empty(),
+      y = ParamSlot::empty(),
+      w = ParamSlot::empty(),
+      h = ParamSlot::empty(),
+      alpha = ParamSlot::empty(),
+      theta = ParamSlot::empty(),
+    }
+  }
+
+  fn set(self, param: Uint, slot: ParamSlot) -> Self {
+    if param == 0 { self.x = slot; }
+    if param == 1 { self.y = slot; }
+    if param == 2 { self.w = slot; }
+    if param == 3 { self.h = slot; }
+    if param == 4 { self.alpha = slot; }
+    if param == 5 { self.theta = slot; }
+
+    self
+  }
+
+  fn move_x_and(self, x: Int) -> Self {
+    self.set(param_x(), ParamSlot::once(kind_linear(), x))
+  }
+
+  fn move_y_and(self, y: Int) -> Self {
+    self.set(param_y(), ParamSlot::once(kind_linear(), y))
+  }
+
+  fn easein_x_and(self, x: Int) -> Self {
+    self.set(param_x(), ParamSlot::once(kind_ease_in(), x))
+  }
+
+  fn easeout_x_and(self, x: Int) -> Self {
+    self.set(param_x(), ParamSlot::once(kind_ease_out(), x))
+  }
+
+  fn easein_y_and(self, y: Int) -> Self {
+    self.set(param_y(), ParamSlot::once(kind_ease_in(), y))
+  }
+
+  fn easeout_y_and(self, y: Int) -> Self {
+    self.set(param_y(), ParamSlot::once(kind_ease_out(), y))
+  }
+
+  fn resize_w_and(self, w: Int) -> Self {
+    self.set(param_w(), ParamSlot::once(kind_linear(), w))
+  }
+
+  fn resize_h_and(self, h: Int) -> Self {
+    self.set(param_h(), ParamSlot::once(kind_linear(), h))
+  }
+
+  fn fade_to_and(self, alpha: Int) -> Self {
+    self.set(param_alpha(), ParamSlot::once(kind_linear(), alpha))
+  }
+
+  fn be_visible_and(self) -> Self {
+    self.fade_to_and(255)
+  }
+
+  fn be_invisible_and(self) -> Self {
+    self.fade_to_and(0)
+  }
+
+  fn rotate_and(self, theta: Int) -> Self {
+    self.set(param_theta(), ParamSlot::once(kind_linear(), theta))
+  }
+
+  fn sin_x_and(self, amplitude: Int, period: Duration) -> Self {
+    self.set(param_x(), ParamSlot::periodic(kind_sin(), amplitude, period.as_ms()))
+  }
+
+  fn sin_y_and(self, amplitude: Int, period: Duration) -> Self {
+    self.set(param_y(), ParamSlot::periodic(kind_sin(), amplitude, period.as_ms()))
+  }
+
+  fn sin_theta_and(self, amplitude: Int, period: Duration) -> Self {
+    self.set(param_theta(), ParamSlot::periodic(kind_sin(), amplitude, period.as_ms()))
+  }
+
+  // 積んだものを `duration` かけて一斉に動かす。
+  // 周期系はその周期で揺れ、`duration` 経ったところで止まる。
+  fn animate_for(self, duration: Duration) -> CanvasObject {
+    self.stage(duration);
+    self.obj.transit()
+  }
+
+  fn animate_free_for(self, duration: Duration) -> CanvasObject {
+    self.stage(duration);
+    self.obj.transit_free()
+  }
+
+  fn stage(self, duration: Duration) {
+    self.emit(param_x(), self.x, duration);
+    self.emit(param_y(), self.y, duration);
+    self.emit(param_w(), self.w, duration);
+    self.emit(param_h(), self.h, duration);
+    self.emit(param_alpha(), self.alpha, duration);
+    self.emit(param_theta(), self.theta, duration);
+  }
+
+  fn emit(self, param: Uint, slot: ParamSlot, duration: Duration) {
+    if slot.used {
+      if slot.period == 0 {
+        self.obj.add_transition(param, slot.kind, slot.value, duration);
+      }
+      if slot.period > 0 {
+        self.obj.add_periodic(
+          param, slot.kind, slot.value, Duration::ms(slot.period), duration);
+      }
+    }
+  }
 }

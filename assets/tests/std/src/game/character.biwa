@@ -1,0 +1,292 @@
+import package::string::String;
+import package::option::Option;
+import package::option::Option::Some;
+import package::option::Option::None;
+import package::time::Duration;
+import package::game::Character;
+import package::game::image::Image;
+import package::game::image::CanvasObject;
+import package::game::image::ObjectBatchChain;
+import package::game::image::ObjectParamChain;
+import package::game::window::Position;
+
+impl[P] Character[P] {
+  fn new(
+    name: String,
+    display_name: String,
+    props: P,
+    default_visual: Image,
+    default_face: Image,
+  ) -> Self {
+    Self {
+      name = name,
+      display_name = display_name,
+      props = props,
+      default_visual = default_visual,
+      default_face = default_face,
+      current_visual = None,
+      current_face = None,
+      current_position = None,
+    }
+  }
+
+  // 画面上の立ち絵。まだ出ていなければ「何もしないオブジェクト」を返す。
+  //
+  // こうしておくと、登場前に遷移を書いても落ちずに無視されるだけで済む。
+  fn visual(self) -> CanvasObject {
+    match self.current_visual {
+      Some(obj) => obj,
+      None => CanvasObject::absent(),
+    }
+  }
+
+  fn is_on_screen(self) -> Bool {
+    self.current_visual.is_some()
+  }
+
+  // 画面上に登場する。
+  //
+  // `w` / `h` が負なら「指定しない」で、画像の元のサイズから決まる。
+  // 透明 (alpha = 0) で出しておいて遷移で現す、という使い方をする。
+  fn appear(self, layer: Uint, x: Int, y: Int, w: Int, h: Int, alpha: Int) -> Self {
+    self.current_visual =
+      Some(self.default_visual.show_in_canvas(layer, x, y, w, h, alpha));
+    self.current_position = Some(Position { x = x, y = y });
+
+    self
+  }
+
+  // 画面上から消える。
+  fn disappear(self, after: Duration) -> Self {
+    self.visual().delete(after);
+    self.current_visual = None;
+    self.current_position = None;
+
+    self
+  }
+
+  // 立ち絵を差し替える。
+  //
+  // 動いている画像の「今の位置」はエンジンからは取れない。
+  // 代わりに std が積んだ遷移の目標値 (= アニメーション後の値) を覚えているので、
+  // そこへ新しい画像を出してから古いものを消す。
+  // 走っている遷移の途中で呼ぶと、その遷移の行き先に飛ぶことになる。
+  fn change_visual(self, visual: Image) -> Self {
+    let old = self.visual();
+
+    if old.is_present() {
+      let fresh = visual.show_in_canvas(old.layer, old.x, old.y, old.w, old.h, old.alpha);
+      old.delete(Duration::ms(0));
+      self.current_visual = Some(fresh);
+      self.default_visual = visual;
+    }
+
+    self
+  }
+
+  // --- チェーンの入口 ---
+
+  fn and(self) -> CharacterBatchChain[P] {
+    CharacterBatchChain { chara = self, inner = self.visual().and() }
+  }
+
+  fn x_then(self) -> CharacterParamChain[P] {
+    CharacterParamChain { chara = self, inner = self.visual().x_then() }
+  }
+
+  fn y_then(self) -> CharacterParamChain[P] {
+    CharacterParamChain { chara = self, inner = self.visual().y_then() }
+  }
+
+  fn w_then(self) -> CharacterParamChain[P] {
+    CharacterParamChain { chara = self, inner = self.visual().w_then() }
+  }
+
+  fn h_then(self) -> CharacterParamChain[P] {
+    CharacterParamChain { chara = self, inner = self.visual().h_then() }
+  }
+
+  fn alpha_then(self) -> CharacterParamChain[P] {
+    CharacterParamChain { chara = self, inner = self.visual().alpha_then() }
+  }
+
+  fn theta_then(self) -> CharacterParamChain[P] {
+    CharacterParamChain { chara = self, inner = self.visual().theta_then() }
+  }
+
+  // --- 1 つだけ動かす近道 ---
+  //
+  // チェーンは Character[P] を包んだものではなく素の CanvasObject のものを使う。
+  // ジェネリックな型のメソッドを、呼び出し側のジェネリック引数で呼ぶと
+  // コンパイラが落ちるためである (`docs/std-api.md` の「コンパイラ側の制限」)。
+
+  fn move_x(self, x: Int, duration: Duration) -> Self {
+    self.visual().x_then().linear_then(x, duration).animate();
+    self
+  }
+
+  fn easeout_x(self, x: Int, duration: Duration) -> Self {
+    self.visual().x_then().easeout_then(x, duration).animate();
+    self
+  }
+
+  fn fade_in(self, duration: Duration) -> Self {
+    self.visual().alpha_then().linear_then(255, duration).animate();
+    self
+  }
+
+  fn fade_out(self, duration: Duration) -> Self {
+    self.visual().alpha_then().linear_then(0, duration).animate();
+    self
+  }
+}
+
+// --- Character 用のチェーン -------------------------------------------------
+//
+// 中身は CanvasObject のチェーンそのままで、
+// 最後に Character を返すためだけに包んでいる。
+// これで `chara.and()....animate_for(d).and()...` と続けて書ける。
+
+struct CharacterBatchChain[P] {
+  chara: Character[P],
+  inner: ObjectBatchChain,
+}
+
+impl[P] CharacterBatchChain[P] {
+  fn move_x_and(self, x: Int) -> Self {
+    self.inner.move_x_and(x);
+    self
+  }
+
+  fn move_y_and(self, y: Int) -> Self {
+    self.inner.move_y_and(y);
+    self
+  }
+
+  fn easein_x_and(self, x: Int) -> Self {
+    self.inner.easein_x_and(x);
+    self
+  }
+
+  fn easeout_x_and(self, x: Int) -> Self {
+    self.inner.easeout_x_and(x);
+    self
+  }
+
+  fn easein_y_and(self, y: Int) -> Self {
+    self.inner.easein_y_and(y);
+    self
+  }
+
+  fn easeout_y_and(self, y: Int) -> Self {
+    self.inner.easeout_y_and(y);
+    self
+  }
+
+  fn resize_w_and(self, w: Int) -> Self {
+    self.inner.resize_w_and(w);
+    self
+  }
+
+  fn resize_h_and(self, h: Int) -> Self {
+    self.inner.resize_h_and(h);
+    self
+  }
+
+  fn fade_to_and(self, alpha: Int) -> Self {
+    self.inner.fade_to_and(alpha);
+    self
+  }
+
+  fn be_visible_and(self) -> Self {
+    self.inner.be_visible_and();
+    self
+  }
+
+  fn be_invisible_and(self) -> Self {
+    self.inner.be_invisible_and();
+    self
+  }
+
+  fn rotate_and(self, theta: Int) -> Self {
+    self.inner.rotate_and(theta);
+    self
+  }
+
+  fn sin_x_and(self, amplitude: Int, period: Duration) -> Self {
+    self.inner.sin_x_and(amplitude, period);
+    self
+  }
+
+  fn sin_y_and(self, amplitude: Int, period: Duration) -> Self {
+    self.inner.sin_y_and(amplitude, period);
+    self
+  }
+
+  fn animate_for(self, duration: Duration) -> Character[P] {
+    self.inner.animate_for(duration);
+    self.chara
+  }
+
+  fn animate_free_for(self, duration: Duration) -> Character[P] {
+    self.inner.animate_free_for(duration);
+    self.chara
+  }
+}
+
+struct CharacterParamChain[P] {
+  chara: Character[P],
+  inner: ObjectParamChain,
+}
+
+impl[P] CharacterParamChain[P] {
+  fn linear_then(self, value: Int, duration: Duration) -> Self {
+    self.inner.linear_then(value, duration);
+    self
+  }
+
+  fn easein_then(self, value: Int, duration: Duration) -> Self {
+    self.inner.easein_then(value, duration);
+    self
+  }
+
+  fn easeout_then(self, value: Int, duration: Duration) -> Self {
+    self.inner.easeout_then(value, duration);
+    self
+  }
+
+  fn easeinout_then(self, value: Int, duration: Duration) -> Self {
+    self.inner.easeinout_then(value, duration);
+    self
+  }
+
+  fn sin_then(self, amplitude: Int, period: Duration, until: Duration) -> Self {
+    self.inner.sin_then(amplitude, period, until);
+    self
+  }
+
+  fn sin_forever(self, amplitude: Int, period: Duration) -> Self {
+    self.inner.sin_forever(amplitude, period);
+    self
+  }
+
+  fn stop_then(self) -> Self {
+    self.inner.stop_then();
+    self
+  }
+
+  fn sleep_then(self, duration: Duration) -> Self {
+    self.inner.sleep_then(duration);
+    self
+  }
+
+  fn animate(self) -> Character[P] {
+    self.inner.animate();
+    self.chara
+  }
+
+  fn animate_free(self) -> Character[P] {
+    self.inner.animate_free();
+    self.chara
+  }
+}

@@ -6,23 +6,23 @@
 // 以前は自パッケージのシンボル表しか引けず、外部の型は黙ってシンボル 0 番に化けていた。
 
 // 引数も戻り値も std で定義された型。
-fn greet(name: std::types::string::String) -> std::types::string::String {
+fn greet(name: std::string::String) -> std::string::String {
   return name.concat("!");
 }
 
 // struct のメンバが依存パッケージの型。
 struct Greeting {
-  message: std::types::string::String,
+  message: std::string::String,
 }
 
 impl Greeting {
-  fn new(message: std::types::string::String) -> Self {
+  fn new(message: std::string::String) -> Self {
     Self {
       message = message,
     }
   }
 
-  fn message(self) -> std::types::string::String {
+  fn message(self) -> std::string::String {
     self.message
   }
 }

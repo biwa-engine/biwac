@@ -1,12 +1,15 @@
 // もっともプリミティブなAPIを提供する
 // 描画の単位はピクセル
 
-import package::types::string::String;
+import package::string::String;
+import package::option::Option;
 import package::game::font::Font;
 import package::game::image::Image;
-import package::types::option::Option;
-import package::game::content::Content;
-import package::game::base_engine::write;
+import package::game::color::Color;
+import package::game::font::TextWeight;
+import package::game::base_engine::sys_content_push_text;
+import package::game::base_engine::sys_content_flush;
+import package::game::base_engine::sys_content_clear;
 import package::game::base_engine::wait;
 
 struct Window {
@@ -26,111 +29,75 @@ impl Window {
   fn wait(self) {
     wait();
   }
-  
-  [[native(arch="typescript")]]
-  fn width(self) -> Uint {{
-    // TODO:
-    return 0;
-  }}
 
-  [[native(arch="wasm")]]
-  fn width(self) -> Uint {{
-    ;; TODO:
-    i32.const 0
-  }}
-
-  [[native(arch="typescript")]]
-  fn height(self) -> Uint {{
-    // TODO:
-    return 0;
-  }}
-
-  [[native(arch="wasm")]]
-  fn height(self) -> Uint {{
-    ;; TODO:
-    i32.const 0
-  }}
+  // fn width(self) -> Uint;
+  // fn height(self) -> Uint;
 }
 
 struct Canvas {}
 
 impl Canvas {
-  [[native(arch="typescript")]]
-  fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]) {{
-    console.log("TODO");
-  }}
-
-  [[native(arch="wasm")]]
-  fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]) {{
-    ;; TODO:
-  }}
+  // fn create_image(self, image: Image, x: Int, y: Int, width: Option[Uint], height: Option[Uint]);
 }
 
 struct MessageWindow {}
 
 impl MessageWindow {
-  fn push_content(self, content: Content) {
-    match content {
-      Content::Text(text) => {
-        write(text.text);
+  // テキストを 1 つ積む。まだ描画されない。
+  //
+  // 引数はすべて**解決済みの絶対値**である。設定を読んで
+  // ここに渡す形にするのは `std::game::content` の仕事で、
+  // Window API は設定を知らない。
+  //
+  // `Size` は enum なので、syscall には (単位, 値) の 2 つに割って渡す。
+  fn push_text(self, text: String, speed: Float, size: Size, weight: TextWeight, color: Color) {
+    match size {
+      Size::Vw(v) => {
+        sys_content_push_text(
+          text, speed, 0, v, weight.weight, color.r, color.g, color.b, color.a);
+      }
+      Size::Vh(v) => {
+        sys_content_push_text(
+          text, speed, 1, v, weight.weight, color.r, color.g, color.b, color.a);
       }
     }
   }
-}
 
-impl MessageWindow {
-  [[native(arch="typescript")]]
-  fn append(self, text: String, font: Font, size: Uint, speed: Uint) {{
-    console.log("TODO");
-  }}
+  // 積まれたものをまとめて出し始める。
+  fn flush(self) {
+    sys_content_flush();
+  }
 
-  [[native(arch="wasm")]]
-  fn append(self, text: String, font: Font, size: Uint, speed: Uint) {{
-    ;; TODO:
-  }}
-  
-  [[native(arch="typescript")]]
-  fn clear(self) {{
-    console.log("TODO");
-  }}
+  // 枠を空にする。呼ぶ時機を決めるのは std であってエンジンではない。
+  fn clear(self) {
+    sys_content_clear();
+  }
 
-  [[native(arch="wasm")]]
-  fn clear(self) {{
-    ;; TODO:
-  }}
-  
-  [[native(arch="typescript")]]
-  fn flush(self) {{
-    console.log("TODO");
-  }}
-
-  [[native(arch="wasm")]]
-  fn flush(self) {{
-    ;; TODO:
-  }}
-  
-  [[native(arch="typescript")]]
-  fn set_talker_name(self, name: String) {{
-    console.log("TODO");
-  }}
-
-  [[native(arch="wasm")]]
-  fn set_talker_name(self, name: String) {{
-    ;; TODO:
-  }}
-  
-  [[native(arch="typescript")]]
-  fn set_talker_image(self, image: Image) {{
-    console.log("TODO");
-  }}
-
-  [[native(arch="wasm")]]
-  fn set_talker_image(self, image: Image) {{
-    ;; TODO:
-  }}
+  // fn set_talker_name(self, name: String);
+  // fn set_talker_image(self, image: Image);
 }
 
 struct Position {
   x: Int,
   y: Int,
+}
+
+enum Size {
+  // All of these `Float` value must be positive.
+  Vw(Float), // 100.0 means 100 % of viewport width.
+  Vh(Float), // 100.0 means 100 % of viewport height.
+  
+  // vw, vh との相互変換が難しいため保留
+  // エンジン側に処理させる必要があるかもしれない
+  // Px(Float),
+}
+
+impl Size {
+  fn mul(self, mul: Float) -> Self {
+    match self {
+      Size::Vw(vw) => Size::Vw(vw * mul),
+      Size::Vh(vh) => Size::Vh(vh * mul),
+      // Size::Px(px) => Size::Px(px * mul),
+    }
+  }
 }

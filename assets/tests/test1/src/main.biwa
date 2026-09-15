@@ -6,6 +6,8 @@ import package::Shade::Dark;
 import collections::Vec;
 // trait 越しの関連関数・メソッドは、その trait を import していないと引けない。
 import greeter::Describe;
+import std::game::Game;
+import std::game::config::Config;
 
 type PairIntT[T] = Pair[Int, T];
 
@@ -125,11 +127,11 @@ fn enum_demo() -> Int {
 
 // 別パッケージ (std) の enum とそのバリアント。
 fn ext_enum_demo() -> Int {
-  let o = std::types::option::Option::Some(7);
+  let o = std::option::Option::Some(7);
 
   match o {
-    std::types::option::Option::Some(v) => v,
-    std::types::option::Option::None => 0,
+    std::option::Option::Some(v) => v,
+    std::option::Option::None => 0,
   }
 }
 
@@ -173,7 +175,7 @@ struct MyGameState {}
 
 struct MyGameCharacters {}
 
-type MyGame = std::game::Game[MyGameCharacters, MyGameState];
+type MyGame = Game[MyGameCharacters, MyGameState];
 
 // 最初の `Game` を組み立てる。
 //
@@ -181,16 +183,11 @@ type MyGame = std::game::Game[MyGameCharacters, MyGameState];
 // `Game` は開発者が決める値 (characters / states / config) を含むので、
 // ランタイムには組み立てられない。
 fn on_new_game() -> MyGame {
-  std::game::Game {
-    name = "test1",
-    characters = MyGameCharacters {},
-    states = MyGameState {},
-    window = std::game::window::Window::new(),
-  }
+  Game::new("test1", MyGameCharacters {}, MyGameState {}, Config::default())
 }
 
 // 埋め込み式で出す値。
-fn greet_name() -> std::types::string::String {
+fn greet_name() -> std::string::String {
   greeter::greet("Biwa")
 }
 
@@ -203,6 +200,8 @@ scene main(g: MyGame) -> MyGame {{
   メソッドチェーンも $("a".concat("b")) 使える。
   括弧を含む文字列でも壊れない: $("(".concat(")"))
   バックスラッシュで書いた記号はそのまま出る: 100\$
+  // `Into[Content]` があるので String 以外も置ける。
+  整数も $native_add(40, 2) 小数も $float_demo() 置ける。
   #let x = native_add(1, 2)
   #if x > 2 {
     Nice!

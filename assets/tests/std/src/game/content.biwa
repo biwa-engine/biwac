@@ -1,30 +1,117 @@
-// Message Window に出力される内容物。
-//
-// テキスト以外のメディア (画像など) も取りうるので、
-// `Message` ではなく `Content` と呼んでいる。
-// 設計は `docs/content-api.md` を参照。
+// Novel message area に表示される、
+// テキストを始めとした内容物を content と呼称する。
+// 取りうるメディアの形態は以下の通りである:
+// - テキスト
+// - 画像 (将来的に対応)
+// 将来的に拡張される可能性はある。
 
-import package::types::string::String;
+import package::string::String;
 import package::convert::Into;
+import package::game::color::Color;
+import package::game::config::Config;
+import package::game::font::TextWeight;
+import package::game::window::Size;
+import package::game::base_engine::int_to_string;
+import package::game::base_engine::float_to_string;
 import package::game::Game;
 
 enum Content {
   Text(TextContent),
 }
 
+// 最も標準的な、テキストのcontent
+// The basic text `content`.
 struct TextContent {
   text: String,
+  speed: ContentSpeedLevel,
+  size: ContentSizeLevel,
+  weight: TextWeight,
+  color: ContentColor,
 }
 
-// `impl[T] T: Into[T] { .. }` が書けるようになったら要らなくなる
-// (blanket impl は入れていない)。
+impl TextContent {
+  // 装飾をいっさい付けないテキスト。すべて設定どおりに出る。
+  fn plain(text: String) -> Self {
+    Self {
+      text = text,
+      speed = ContentSpeedLevel::normal(),
+      size = ContentSizeLevel::normal(),
+      weight = TextWeight::normal(),
+      color = ContentColor::Configured,
+    }
+  }
+}
+
+// 文字(content)の速度
+struct ContentSpeed {
+  // 秒間何文字出るか
+  text_per_sec: Float,
+}
+
+struct ContentSpeedLevel {
+  // 設定された値(ContentSpeed)の何倍か
+  // A multiple of the value configured for `std::game::config::Config.user.content_speed`.
+  //
+  // mul > 0
+  mul: Float,
+}
+
+impl ContentSpeedLevel {
+  fn normal() -> Self {
+    Self { mul = 1.0 }
+  }
+}
+
+struct ContentSizeLevel {
+  // 設定された値の何倍か
+  // テキスト以外のcontentは行の高さが合うように調整される
+  // A multiple of the value configured for `std::game::config::Config.user.content_size`.
+  // Any other media kind content than text will be adjusted to fit the line height.
+  //
+  // mul > 0
+  mul: Float,
+}
+
+impl ContentSizeLevel {
+  fn normal() -> Self {
+    Self { mul = 1.0 }
+  }
+}
+
+enum ContentColor {
+  // 設定された値
+  // The value configured for `std::game::config::Config.dev.default_text_color`.
+  Configured,
+  
+  // 設定した値
+  Value(Color),
+}
+
+// impl[T] T: Into[T] { ... } が可能になったら廃止
 impl Content: Into[Content] {
   fn into(self) -> Content { self }
 }
 
 impl String: Into[Content] {
   fn into(self) -> Content {
-    Content::Text(TextContent { text = self })
+    Content::Text(TextContent::plain(self))
+  }
+}
+
+// 埋め込み式が数値を返すことは多い (`$(player.hp)` など) ので、
+// プリミティブにも当てておく。
+//
+// 孤児規則は「impl 対象か trait 自身のいずれかが自分の package のもの」なので、
+// `Into` を定義している std でだけこれが書ける。
+impl Int: Into[Content] {
+  fn into(self) -> Content {
+    Content::Text(TextContent::plain(int_to_string(self)))
+  }
+}
+
+impl Float: Into[Content] {
+  fn into(self) -> Content {
+    Content::Text(TextContent::plain(float_to_string(self)))
   }
 }
 
@@ -37,10 +124,73 @@ impl String: Into[Content] {
 [[lang="content_push"]]
 fn content_push[C: Into[Content], T, U](game: Game[T, U], content: C) {
   let c: Content = content.into();
-  game.window.message_window.push_content(c);
+  match c {
+    Content::Text(text) => {
+      game.window.message_window.push_text(
+        text.text,
+        resolved_speed(game.config, text.speed),
+        resolved_size(game.config, text.size),
+        text.weight,
+        resolved_color(game.config, text.color),
+      );
+    }
+  }
 }
 
 [[lang="content_flush_and_wait"]]
 fn content_flush_and_wait[T, U](game: Game[T, U]) {
+  game.window.message_window.flush();
+  // 将来的に各種イベントを受け取る機構が検討されている。
+  // 共通のイベントハンドラをエンジン側が呼び、種類ごとに振り分ける形などが考えられる。
+  // game.window.wait_event(Event::MouseClickLeft);
   game.window.wait();
+  // **クリアするのはここである。** エンジンは自分の判断で消さない。
+  // 「待つが消さない」API を将来足すときに、
+  // 変更がコンパイラと std に閉じるようにするための切り分けである。
+  game.window.message_window.clear();
 }
+
+// ---- 設定の解決 ----
+//
+// `Content` が持つのは「設定の何倍か」という相対値である。
+// syscall には絶対値しか渡さないので、ここで設定と突き合わせて潰す。
+// エンジンが設定を持たないのはこのためである。
+
+fn resolved_speed(config: Config, level: ContentSpeedLevel) -> Float {
+  config.user.content_speed.text_per_sec * level.mul
+}
+
+fn resolved_size(config: Config, level: ContentSizeLevel) -> Size {
+  config.user.content_size.mul(level.mul)
+}
+
+fn resolved_color(config: Config, color: ContentColor) -> Color {
+  match color {
+    ContentColor::Configured => config.dev.default_text_color,
+    ContentColor::Value(c) => c,
+  }
+}
+
+// ---- user APIs ----
+// scene の埋め込み式記法において、
+// 平易な表現を可能にする。
+// 
+// These APIs provide us to simple and easy-to-use expression
+// in scene embeded expression form.
+// 
+// ## Example:
+// 
+// ```biwa
+// scene foo(g: MyGame) -> MyGame {{
+//     Hello! 私の名前は$blue(bold(italic("琵琶")))です。>>
+// }}
+// ```
+// 
+// fn red[C: Into[Content]](content: C) -> Content {
+//   match content {
+//     Content::Text(text) => {
+//       text.color = ContentColor::Value(Color::red());
+//       Content::Text(text)
+//     }
+//   }
+// }
