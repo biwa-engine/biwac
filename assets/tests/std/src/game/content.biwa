@@ -194,3 +194,138 @@ fn resolved_color(config: Config, color: ContentColor) -> Color {
 //     }
 //   }
 // }
+
+// ---- user APIs (装飾) ----
+//
+// scene の埋め込み式で使うための API である。
+//
+// ```biwa
+// scene foo(g: MyGame) -> MyGame {{
+//     Hello! 私の名前は$blue(bold("琵琶"))です。>>
+// }}
+// ```
+//
+// どれも `Into[Content]` を取って `Content` を返す。
+// この形なので入れ子にできる (`blue(bold(..))`)。
+//
+// NOTE: `italic` や影付けはまだ無い。syscall がその情報を運んでいない
+// (`docs/content-api.md` の「装飾をどう運ぶか」を参照)。
+
+// --- 色 ---
+
+// 色を指定する。
+fn colored[C: Into[Content]](content: C, color: Color) -> Content {
+  set_color(content.into(), ContentColor::Value(color))
+}
+
+fn red[C: Into[Content]](content: C) -> Content {
+  colored(content, Color::red())
+}
+
+fn green[C: Into[Content]](content: C) -> Content {
+  colored(content, Color::green())
+}
+
+fn blue[C: Into[Content]](content: C) -> Content {
+  colored(content, Color::blue())
+}
+
+fn white[C: Into[Content]](content: C) -> Content {
+  colored(content, Color::white())
+}
+
+fn black[C: Into[Content]](content: C) -> Content {
+  colored(content, Color::black())
+}
+
+// --- 太さ ---
+
+// 太さを指定する。
+fn weighted[C: Into[Content]](content: C, weight: TextWeight) -> Content {
+  set_weight(content.into(), weight)
+}
+
+fn bold[C: Into[Content]](content: C) -> Content {
+  weighted(content, TextWeight::bold())
+}
+
+fn light[C: Into[Content]](content: C) -> Content {
+  weighted(content, TextWeight::light())
+}
+
+// --- 大きさ ---
+//
+// 設定された大きさの何倍かで指定する。絶対値にしないのは、
+// プレイヤーが文字サイズを変えたときに追従させるためである。
+//
+// 入れ子にすると掛け合わさる (`big(big(x))` は 4 倍)。
+
+fn sized[C: Into[Content]](content: C, mul: Float) -> Content {
+  scale_size(content.into(), mul)
+}
+
+fn big[C: Into[Content]](content: C) -> Content {
+  sized(content, 2.0)
+}
+
+fn small[C: Into[Content]](content: C) -> Content {
+  sized(content, 0.5)
+}
+
+// --- 速度 ---
+//
+// 大きさと同じく、設定された速度の何倍かで指定する。
+// 入れ子にすると掛け合わさる。
+
+fn paced[C: Into[Content]](content: C, mul: Float) -> Content {
+  scale_speed(content.into(), mul)
+}
+
+fn fast[C: Into[Content]](content: C) -> Content {
+  paced(content, 2.0)
+}
+
+fn slow[C: Into[Content]](content: C) -> Content {
+  paced(content, 0.5)
+}
+
+// ---- 装飾の実体 ----
+//
+// ジェネリクスを剥がしてから 1 箇所で書き換える。
+// メディアの種類が増えたら、それを気にするのはこの 4 つだけになる。
+
+fn set_color(content: Content, color: ContentColor) -> Content {
+  match content {
+    Content::Text(text) => {
+      text.color = color;
+      Content::Text(text)
+    }
+  }
+}
+
+fn set_weight(content: Content, weight: TextWeight) -> Content {
+  match content {
+    Content::Text(text) => {
+      text.weight = weight;
+      Content::Text(text)
+    }
+  }
+}
+
+fn scale_size(content: Content, mul: Float) -> Content {
+  match content {
+    Content::Text(text) => {
+      text.size = ContentSizeLevel { mul = text.size.mul * mul };
+      Content::Text(text)
+    }
+  }
+}
+
+fn scale_speed(content: Content, mul: Float) -> Content {
+  match content {
+    Content::Text(text) => {
+      text.speed = ContentSpeedLevel { mul = text.speed.mul * mul };
+      Content::Text(text)
+    }
+  }
+}

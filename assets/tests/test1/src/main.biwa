@@ -8,6 +8,12 @@ import collections::Vec;
 import greeter::Describe;
 import std::game::Game;
 import std::game::config::Config;
+// 装飾 API。埋め込み式で使うので、使う側が import する。
+import std::game::content::red;
+import std::game::content::blue;
+import std::game::content::bold;
+import std::game::content::big;
+import std::game::content::slow;
 
 type PairIntT[T] = Pair[Int, T];
 
@@ -202,6 +208,9 @@ scene main(g: MyGame) -> MyGame {{
   バックスラッシュで書いた記号はそのまま出る: 100\$
   // `Into[Content]` があるので String 以外も置ける。
   整数も $native_add(40, 2) 小数も $float_demo() 置ける。
+  // 装飾は入れ子にできる。内側から外側へ順に掛かる。
+  $red("赤い字") と $bold(blue("青い太字")) と $big(slow("大きくゆっくり"))。
+  $bold(big(red(native_add(1, 2)))) のように数値にも掛かる。
   #let x = native_add(1, 2)
   #if x > 2 {
     Nice!
