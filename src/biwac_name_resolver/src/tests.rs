@@ -82,7 +82,7 @@ fn test1() {
         );
     });
 
-    let _hir = NameResolver::new(&metadata, external_packages, pkg_name, pkg)
+    let _hir = NameResolver::new(&metadata, external_packages, pkg_name, &mut pkg)
         .unwrap()
         .try_resolve(&mut interner)
         .map_err(|errors| {

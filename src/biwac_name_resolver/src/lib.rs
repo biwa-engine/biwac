@@ -67,8 +67,8 @@ pub struct ResolveOutput {
     pub lang_items: biwac_lang_item::LangItemTable,
 }
 
-pub struct NameResolver {
-    pkg: Pkg,
+pub struct NameResolver<'p> {
+    pkg: &'p mut Pkg,
     pkg_name: InternedIdent,
     pkg_package_name: PackageName,
     no_std: bool,
@@ -78,12 +78,12 @@ pub struct NameResolver {
     external_packages: Vec<ExternalPackage>,
 }
 
-impl NameResolver {
+impl<'p> NameResolver<'p> {
     pub fn new(
         metadata: &biwac_base::MetadataHolder,
         external_packages: Vec<ExternalPackage>,
         pkg_name: InternedIdent,
-        pkg: Pkg,
+        pkg: &'p mut Pkg,
     ) -> Result<Self, ResolveError> {
         let pkg_package_name = metadata.metadata.name.clone();
         Ok(Self {
@@ -143,7 +143,7 @@ impl NameResolver {
         // lowering to HIR
         let hir = lowering::lower(
             self.pkg_package_name,
-            self.pkg,
+            &self.pkg,
             pkg_names,
             &def_collector.impl_collector,
             trait_scopes,

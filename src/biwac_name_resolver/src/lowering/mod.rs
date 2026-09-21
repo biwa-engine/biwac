@@ -19,7 +19,7 @@ use crate::{ResolveError, resolving::def_collector::ImplCollector};
 
 pub(crate) fn lower(
     pkg_name: PackageName,
-    pkg: Pkg,
+    pkg: &Pkg,
     pkg_names: HashMap<PackageId, InternedIdent>,
     impl_collector: &ImplCollector,
     trait_scopes: HashMap<ModId, Vec<TraitDefId>>,

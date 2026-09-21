@@ -592,7 +592,7 @@ fn load_analyze_and_codegen_single_package(
             metadata,
             external_packages,
             package_name_interned,
-            pkg,
+            &mut pkg,
         )
         .unwrap()
         .try_resolve(interner)
