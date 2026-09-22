@@ -3,8 +3,16 @@ use std::{
     path::Path,
 };
 
-use biwac_base::PackageId;
+use biwac_base::{PackageId, PackageVersion};
 use biwac_span::PackageHashId;
+
+/// BFS のキューに積む 1 件。ルートパッケージの直接依存も、
+/// 依存の依存も、どちらも「名前 + 許容バージョン範囲」を持つので同じ形で扱う。
+struct QueueEntry {
+    name: String,
+    min_version: PackageVersion,
+    max_version: Option<PackageVersion>,
+}
 
 /// 依存パッケージのビルドグラフ。
 ///
@@ -26,33 +34,69 @@ impl DepGraph {
     /// **推移的依存も含めてすべてここに平らに並んでいる**前提である
     /// (依存パッケージ自身の deps/ は辿らない)。
     /// deps が空の場合は空グラフを返す。
-    pub fn discover(root_deps: &[&str], packages_dir: &Path) -> Result<Self, ()> {
+    ///
+    /// `packages_dir/<name>/` が存在しない依存は、Biwa Package Hub から取得を試みる
+    /// (`biwac_dependency_fetcher`)。取得した後は既に居るときと同じ経路 (biwa-package.json を読み、
+    /// その依存をさらにキューへ積む) に合流する。
+    pub fn discover(
+        root_deps: &[biwac_base::DependedPackage],
+        packages_dir: &Path,
+    ) -> Result<Self, ()> {
         let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
         let mut pkg_ids: HashMap<String, PackageId> = HashMap::new();
         // PackageId は 32bit に畳んだハッシュなので原理的には衝突しうる。
         // 黙って別パッケージと同一視されると極めて追いにくいので、逆引きで検査する。
         let mut id_owner: HashMap<u32, String> = HashMap::new();
 
-        let mut queue: VecDeque<String> = root_deps.iter().map(|s| s.to_string()).collect();
+        let mut queue: VecDeque<QueueEntry> = root_deps
+            .iter()
+            .map(|d| QueueEntry {
+                name: d.name.value().to_string(),
+                min_version: d.min_version,
+                max_version: d.max_version,
+            })
+            .collect();
         let mut visited: HashSet<String> = HashSet::new();
 
-        while let Some(dep_name) = queue.pop_front() {
+        // hub への接続は最初に取得が必要になったときだけ張る。
+        // ローカルに全依存が揃っている (よくある) 場合に、hub 未設定でも
+        // ビルドできるようにするため。
+        let mut fetcher: Option<
+            Result<biwac_dependency_fetcher::Fetcher, biwac_dependency_fetcher::FetchError>,
+        > = None;
+
+        while let Some(QueueEntry {
+            name: dep_name,
+            min_version,
+            max_version,
+        }) = queue.pop_front()
+        {
             if visited.contains(&dep_name) {
                 continue;
             }
             visited.insert(dep_name.clone());
 
             let dep_root = packages_dir.join(&dep_name);
-            // 依存の取得はまだコンパイラの仕事になっていないので、
-            // 「無い」ことは形式エラーではなく「まだ持ってきていない」ことを意味する。
-            // そう分かるメッセージにする。
             if !dep_root.is_dir() {
-                eprintln!(
-                    "Error: dependency `{}` is not fetched: `{}` does not exist",
-                    dep_name,
-                    dep_root.display()
-                );
-                return Err(());
+                let f = fetcher.get_or_insert_with(biwac_dependency_fetcher::Fetcher::new);
+                match f {
+                    Ok(f) => {
+                        if let Err(e) =
+                            f.fetch(&dep_name, &min_version, max_version.as_ref(), &dep_root)
+                        {
+                            eprintln!("Error: failed to fetch dependency `{dep_name}`: {e}");
+                            return Err(());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Error: dependency `{dep_name}` is not fetched (`{}` does not exist), \
+                             and it could not be fetched from the hub: {e}",
+                            dep_root.display()
+                        );
+                        return Err(());
+                    }
+                }
             }
             let sub_meta =
                 biwac_metadata_loader::try_load_package_metadata(dep_root).map_err(|e| {
@@ -82,9 +126,14 @@ impl DepGraph {
                 .map(|d| d.name.value().to_string())
                 .collect();
 
-            for sub_dep in &sub_deps {
-                if !visited.contains(sub_dep) {
-                    queue.push_back(sub_dep.clone());
+            for sub_dep in &sub_meta.metadata.dependencies {
+                let sub_name = sub_dep.name.value().to_string();
+                if !visited.contains(&sub_name) {
+                    queue.push_back(QueueEntry {
+                        name: sub_name,
+                        min_version: sub_dep.min_version,
+                        max_version: sub_dep.max_version,
+                    });
                 }
             }
             adjacency.insert(dep_name, sub_deps);

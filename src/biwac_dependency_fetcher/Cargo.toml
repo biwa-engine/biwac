@@ -1,0 +1,8 @@
+[package]
+name = "biwac_dependency_fetcher"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+biwac_base = { path = "../biwac_base" }
+biwa_hub_client = { path = "../../../tools/hub/client" }

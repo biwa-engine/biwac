@@ -13,6 +13,7 @@ members = [
   "src/biwac_hir",
   "src/biwac_lang_item",
   "src/biwac_scene",
+  "src/biwac_dependency_fetcher",
   "src/biwac_dependency_metadata",
   "src/biwac_fingerprint",
   "src/biwac_trait_solver",

@@ -94,29 +94,15 @@ pub fn compile(pkg_root_path: PathBuf, options: BuildOptions) -> Result<(), ()> 
     // (deps/greeter を建てるときも、その依存 std / color はここから引く)
     let packages_dir = biwac_base::dependencies_dir(&pkg_root_path);
 
-    let root_dep_names: Vec<String> = metadata
-        .metadata
-        .dependencies
-        .iter()
-        .map(|d| d.name.value().to_string())
-        .collect();
-
-    // 取得は未実装なので、無ければその旨を伝えて止まる。
-    if !root_dep_names.is_empty() && !packages_dir.is_dir() {
-        eprintln!(
-            "Error: dependencies are not fetched: `{}` does not exist",
-            packages_dir.display()
-        );
-        biwac_base::print_error_finish_message(1);
-        return Err(());
-    }
+    // packages_dir 自体は無くてもよい。依存が 1 つ以上あれば、
+    // 取得 (`biwac_dependency_fetcher`) が必要になった時点で作られる。
 
     // Discover full transitive dependency graph.
     // 依存が無くても空グラフとして扱い、以降の分岐を減らす。
-    let root_dep_refs: Vec<&str> = root_dep_names.iter().map(|s| s.as_str()).collect();
-    let dep_graph = DepGraph::discover(&root_dep_refs, &packages_dir).map_err(|_| {
-        biwac_base::print_error_finish_message(1);
-    })?;
+    let dep_graph =
+        DepGraph::discover(&metadata.metadata.dependencies, &packages_dir).map_err(|_| {
+            biwac_base::print_error_finish_message(1);
+        })?;
 
     // Build in topological order (leaves = no deps first).
     // Items within the same batch are independent and can be parallelized (future tokio).

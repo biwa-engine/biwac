@@ -42,7 +42,7 @@ pub struct PackageMetadata {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageName(String);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageVersion {
     major: usize,
     minor: usize,
@@ -98,7 +98,9 @@ impl FromStr for PackageName {
     type Err = PackageNameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let re = regex::Regex::new("[a-z][0-9a-z_]*").unwrap();
+        // 前後を `^`/`$` で固定しないと部分一致になり、
+        // 例えば `"Invalid-Name!"` も (中の `"nvalid"` にマッチして) 通ってしまう。
+        let re = regex::Regex::new("^[a-z][0-9a-z_]*$").unwrap();
         if re.is_match(s) {
             Ok(Self(s.into()))
         } else {
@@ -110,6 +112,12 @@ impl FromStr for PackageName {
 impl PackageName {
     pub fn value(&self) -> &str {
         &self.0
+    }
+}
+
+impl Display for PackageName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -169,6 +177,14 @@ impl FromStr for PackageVersion {
 }
 
 impl PackageVersion {
+    pub fn new(major: usize, minor: usize, patch: usize) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
+
     pub fn major(&self) -> usize {
         self.major
     }
@@ -179,6 +195,17 @@ impl PackageVersion {
 
     pub fn patch(&self) -> usize {
         self.patch
+    }
+
+    /// `min..max` (max は inclusive、無指定なら上限無し) の範囲に収まるか。
+    pub fn in_range(&self, min: &PackageVersion, max: Option<&PackageVersion>) -> bool {
+        self >= min && max.is_none_or(|max| self <= max)
+    }
+}
+
+impl Display for PackageVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 

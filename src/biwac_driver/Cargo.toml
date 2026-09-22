@@ -21,6 +21,7 @@ biwac_mir = { path = "../biwac_mir"}
 biwac_mir_build = { path = "../biwac_mir_build"}
 biwac_mir_transform = { path = "../biwac_mir_transform"}
 biwac_generator = { path = "../biwac_generator"}
+biwac_dependency_fetcher = { path = "../biwac_dependency_fetcher"}
 colored.workspace = true
 
 [features]
