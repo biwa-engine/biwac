@@ -5,7 +5,7 @@ use colored::Colorize;
 
 use crate::{IdentInterner, MetadataHolder, ModId, SourceHolder};
 
-pub trait BiwacError {
+pub trait BiwacError: std::fmt::Debug {
     fn print_error_message(&self, ctx: &ErrorContext);
 }
 

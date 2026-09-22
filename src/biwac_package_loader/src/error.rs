@@ -1,20 +1,18 @@
 use biwac_base::{BiwacError, ModPath};
-use biwac_lexer::TokenizeError;
-use biwac_parser::ParseError;
 
 use colored::Colorize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PkgLoadError<'src> {
     RootModuleDuplicated,
     RootModuleNotFound,
-    LexError {
-        modpath: ModPath,
-        err: Box<TokenizeError>,
-    },
+    /// 字句解析・構文解析いずれかの失敗。`SourceParser::parse` はどちらの
+    /// 段で失敗したかを区別せず `Box<dyn BiwacError>` に包んで返すので、
+    /// ここでも 1 種類にまとめている (`print_error_message` に委譲するだけで
+    /// 種別を見る場所はどこにも無い)。
     ParseError {
         modpath: ModPath,
-        err: Box<ParseError<'src>>,
+        err: Box<dyn BiwacError + 'src>,
     },
 }
 
@@ -44,7 +42,6 @@ One of `{}.{}` or `{}.{}` needed in a package."#,
                     biwac_base::BIWA_EXTENSION,
                 )
             }
-            Self::LexError { err, .. } => err.print_error_message(ctx),
             Self::ParseError { err, .. } => {
                 err.print_error_message(ctx);
             }

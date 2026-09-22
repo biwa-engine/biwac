@@ -63,7 +63,7 @@ fn test1() {
         })
         .collect();
 
-    let mut pkg = biwac_package_loader::Pkg::try_load(
+    let mut pkg = biwac_package_loader::Pkg::try_load::<biwac_package_loader::BiwacSourceParser>(
         &metadata,
         &mut interner,
         &mut srcs,

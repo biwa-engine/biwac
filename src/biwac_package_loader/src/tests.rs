@@ -4,7 +4,7 @@ use biwac_base::{IdentInterner, SourceHolder};
 
 use biwac_base::PackageKind;
 
-use crate::Pkg;
+use crate::{BiwacSourceParser, Pkg};
 
 #[test]
 fn test1() {
@@ -18,7 +18,7 @@ fn test1() {
     let metadata =
         biwac_metadata_loader::try_load_package_metadata(pkg_root_path.to_path_buf()).unwrap();
 
-    let pkg = Pkg::try_load(
+    let pkg = Pkg::try_load::<BiwacSourceParser>(
         &metadata,
         &mut interner,
         &mut srcs,

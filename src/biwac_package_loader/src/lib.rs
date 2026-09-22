@@ -1,4 +1,5 @@
 mod error;
+mod source_parser;
 
 #[cfg(test)]
 mod tests;
@@ -11,6 +12,7 @@ use std::{
 };
 
 pub use error::PkgLoadError;
+pub use source_parser::{BiwacSourceParser, SourceParser};
 
 use biwac_ast::ModAst;
 use biwac_base::{
@@ -85,7 +87,11 @@ impl Pkg {
 
 impl Pkg {
     // pkg_root_path はdirであることが保証されている必要がある
-    pub fn try_load<'a>(
+    //
+    // `P` は 1 ファイルぶんのソースを `ModAst` にする処理 ([`SourceParser`])。
+    // 呼び出し元から明示してもらう必要がある (`Pkg::try_load::<BiwacSourceParser>(..)`) —
+    // 引数のどこにも `P` が現れないため型推論だけでは決まらない。
+    pub fn try_load<'a, P: SourceParser>(
         metadata: &'a MetadataHolder,
         interner: &'a mut IdentInterner,
         srcs: &'a mut SourceHolder, // 空の SourceHolder を受け取る
@@ -174,7 +180,7 @@ impl Pkg {
 
         read_module_files(srcs, &module_tree);
 
-        let root_module = load_module(interner, srcs, module_tree);
+        let root_module = load_module::<P>(interner, srcs, module_tree);
 
         match root_module {
             Ok(root_module) => Ok(Self {
@@ -213,7 +219,7 @@ fn read_module_files(srcs: &mut SourceHolder, module_tree: &ModuleTree) {
     );
 }
 
-fn load_module<'a>(
+fn load_module<'a, P: SourceParser>(
     interner: &mut IdentInterner,
     srcs: &'a SourceHolder,
     module_tree: ModuleTree,
@@ -223,7 +229,7 @@ fn load_module<'a>(
     // load children modules
     let mut children = HashMap::new();
     for (interned_mod_name, module_tree) in module_tree.children {
-        match load_module(interner, srcs, module_tree) {
+        match load_module::<P>(interner, srcs, module_tree) {
             Ok(module) => {
                 children.insert(interned_mod_name, module);
             }
@@ -233,34 +239,17 @@ fn load_module<'a>(
         }
     }
 
-    let tokens = match biwac_lexer::lex(
-        interner,
-        module_tree.mod_id,
-        &srcs.mods.get(&module_tree.mod_id).unwrap().src,
-    ) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            errs.push(PkgLoadError::LexError {
-                modpath: module_tree.mod_path.clone(),
-                err: Box::new(e),
-            });
-            return Err(errs);
-        }
-    };
-
-    let ast = match biwac_parser::Parser::new(
+    let ast = match P::parse(
         module_tree.mod_id,
         module_tree.mod_path.clone(),
-        tokens,
+        &srcs.mods.get(&module_tree.mod_id).unwrap().src,
         interner,
-    )
-    .try_parse()
-    {
+    ) {
         Ok(ast) => ast,
         Err(e) => {
             errs.push(PkgLoadError::ParseError {
                 modpath: module_tree.mod_path.clone(),
-                err: Box::new(e),
+                err: e,
             });
             return Err(errs);
         }

@@ -563,8 +563,13 @@ fn load_analyze_and_codegen_single_package(
     let mut srcs = SourceHolder::default();
     let package_name_interned = interner.get_or_insert(metadata.metadata.name.value());
 
-    let mut pkg = biwac_package_loader::Pkg::try_load(metadata, interner, &mut srcs, pkg_root_path)
-        .map_err(|e| e.print_error_messages())?;
+    let mut pkg = biwac_package_loader::Pkg::try_load::<biwac_package_loader::BiwacSourceParser>(
+        metadata,
+        interner,
+        &mut srcs,
+        pkg_root_path,
+    )
+    .map_err(|e| e.print_error_messages())?;
 
     // Attribute check: AST から HIR への lowering の前に、
     // 既知の属性か / キー・値型 / 付与対象を検証する。
@@ -992,6 +997,7 @@ fn check_attributes(
 
 /// 収集済みのエラーをまとめて表示する。
 /// TypeScript ターゲットが扱えない、実装が単相化まで決まらない呼び出し。
+#[derive(Debug)]
 struct TraitBoundOnTypeScript {
     span: biwac_span::Span,
 }
